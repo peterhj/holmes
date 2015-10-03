@@ -1,0 +1,23 @@
+[package]
+name = "holmes"
+version = "0.2.0"
+authors = ["Peter Jin <peterhaijin@gmail.com>"]
+
+[lib]
+name = "holmes"
+path = "src/lib.rs"
+
+[[bin]]
+name = "gtpctl"
+path = "tools/gtpctl.rs"
+
+[[bin]]
+name = "bench-ttboard"
+path = "tools/bench-ttboard.rs"
+
+[dependencies]
+bit-vec = "*"
+bufstream = "*"
+byteorder = "*"
+rand = "*"
+time = "*"
