@@ -5,7 +5,7 @@ use self::Entity::{
   ErrorEntity,
 };
 
-use board::{Player, Coord, Action, Move};
+use gtp_board::{Player, Coord, Vertex, Move};
 
 use bufstream::{BufStream};
 use byteorder::{ReadBytesExt};
@@ -122,9 +122,9 @@ pub enum Entity {
   IntEntity(u32),
   FloatEntity(f32),
   BooleanEntity(bool),
-  VertexEntity(Action),
+  VertexEntity(Vertex),
   ColorEntity(Player),
-  MoveEntity(Player, Action),
+  MoveEntity(Player, Vertex),
   MultilineListEntity(Vec<Entity>),
   ErrorEntity(Vec<u8>),
 }
@@ -154,7 +154,7 @@ impl Entity {
     let arg: Vec<u8> = arg.to_ascii_lowercase();
     //println!("DEBUG: gtp: parse vertex? {}", arg.to_string());
     if &arg == b"pass" {
-      VertexEntity(Action::Pass)
+      VertexEntity(Vertex::Pass)
     } else {
       let letter = arg[0];
       let valid_letter =
@@ -178,7 +178,7 @@ impl Entity {
         }
       };
       let y = valid_number - 1;
-      VertexEntity(Action::Play(Coord::new(x, y)))
+      VertexEntity(Vertex::Play(Coord::new(x, y)))
     }
   }
 
@@ -838,7 +838,7 @@ impl GtpController {
         let res = parse_response_string(&res_str);
         match Entity::parse_vertex_or_resign(&res.lines[0][0]) {
           VertexEntity(action) => Move::new(player, action),
-          StringEntity(_) => Move::new(player, Action::Resign),
+          StringEntity(_) => Move::new(player, Vertex::Resign),
           _ => unreachable!(),
         }
       },
@@ -847,11 +847,11 @@ impl GtpController {
   }
 
   fn update_client(&mut self, current_move: Move, client_to_ctl_rx: &Receiver<GtpMessage>, ctl_to_client_tx: &Sender<GtpMessage>) -> Result<(), ()> {
-    match current_move.action {
-      Action::Pass | Action::Play(_) => {
+    match current_move.vertex {
+      Vertex::Pass | Vertex::Play(_) => {
         let cmd_str = create_command_string(self.id.increment(), &[
           StringEntity(b"play".to_vec()),
-          MoveEntity(current_move.player, current_move.action),
+          MoveEntity(current_move.player, current_move.vertex),
         ]);
         ctl_to_client_tx.send(GtpMessage::Command(cmd_str))
           .unwrap();
@@ -867,7 +867,7 @@ impl GtpController {
           _ => (),
         }
       },
-      Action::Resign => (), // FIXME
+      Vertex::Resign => (), // FIXME
     }
     Ok(())
   }
@@ -959,10 +959,10 @@ impl GtpController {
           },
         }
         if black_state.previous_move.is_some() && white_state.previous_move.is_some() {
-          match black_state.previous_move.unwrap().action {
-            Action::Pass => {
-              match white_state.previous_move.unwrap().action {
-                Action::Pass => {
+          match black_state.previous_move.unwrap().vertex {
+            Vertex::Pass => {
+              match white_state.previous_move.unwrap().vertex {
+                Vertex::Pass => {
                   self.shutdown_client(&black_to_ctl_rx, &ctl_to_black_tx);
                   self.shutdown_client(&white_to_ctl_rx, &ctl_to_white_tx);
                   // FIXME(20150104): We get a "receiving on a closed channel"

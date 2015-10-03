@@ -1,7 +1,5 @@
 use std::iter::{repeat};
 
-pub const BOARD_SIZE: usize = 361;
-
 const TOMBSTONE: Pos = -1;
 
 pub trait IntoIndex {
@@ -35,14 +33,15 @@ impl Stone {
   }
 }
 
-#[derive(Clone, Copy)]
-pub enum Move {
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum Action {
+  Resign,
   Pass,
-  Place{stone: Stone, pos: Pos},
+  Place{pos: Pos},
 }
 
 #[derive(Clone, Copy)]
-pub enum MoveStatus {
+pub enum ActionStatus {
   Legal           = 0,
   IllegalOccupied = 0x01,
   IllegalSuicide  = 0x02,
@@ -50,21 +49,21 @@ pub enum MoveStatus {
 }
 
 #[derive(Clone, Copy)]
-pub struct MoveStatusSet {
+pub struct ActionStatusSet {
   mask: u8,
 }
 
-impl MoveStatusSet {
-  pub fn new() -> MoveStatusSet {
-    MoveStatusSet{mask: 0}
+impl ActionStatusSet {
+  pub fn new() -> ActionStatusSet {
+    ActionStatusSet{mask: 0}
   }
 
-  pub fn add(mut self, status: MoveStatus) -> MoveStatusSet {
+  pub fn add(mut self, status: ActionStatus) -> ActionStatusSet {
     self.mask |= status as u8;
     self
   }
 
-  pub fn contains(&self, status: MoveStatus) -> bool {
+  pub fn contains(&self, status: ActionStatus) -> bool {
     (self.mask | status as u8) != 0
   }
 }
@@ -115,23 +114,7 @@ impl FastBoardWork {
   }
 }
 
-fn for_each_adjacent<F>(pos: Pos, mut f: F) where F: FnMut(Pos) {
-  let (x, y) = (pos % 19, pos / 19);
-  if x >= 1 {
-    f(pos - 1);
-  }
-  if y >= 1 {
-    f(pos - 19);
-  }
-  if x < 18 {
-    f(pos + 1);
-  }
-  if y < 18 {
-    f(pos + 19);
-  }
-}
-
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct FastBoard {
   stones:   Vec<Stone>,
   ch_roots: Vec<Pos>,
@@ -141,13 +124,32 @@ pub struct FastBoard {
 }
 
 impl FastBoard {
+  pub const BOARD_DIM:  i16   = 19;
+  pub const BOARD_SIZE: usize = 361;
+
+  pub fn for_each_adjacent<F>(pos: Pos, mut f: F) where F: FnMut(Pos) {
+    let (x, y) = (pos % Self::BOARD_DIM, pos / Self::BOARD_DIM);
+    if x >= 1 {
+      f(pos - 1);
+    }
+    if y >= 1 {
+      f(pos - Self::BOARD_DIM);
+    }
+    if x < Self::BOARD_DIM - 1 {
+      f(pos + 1);
+    }
+    if y < Self::BOARD_DIM - 1 {
+      f(pos + Self::BOARD_DIM);
+    }
+  }
+
   pub fn new() -> FastBoard {
     FastBoard{
-      stones:   Vec::with_capacity(BOARD_SIZE), //repeat(Stone::Empty).take(BOARD_SIZE).collect(),
-      ch_roots: Vec::with_capacity(BOARD_SIZE), //repeat(TOMBSTONE).take(BOARD_SIZE).collect(),
-      ch_links: Vec::with_capacity(BOARD_SIZE), //repeat(TOMBSTONE).take(BOARD_SIZE).collect(),
-      ch_sizes: Vec::with_capacity(BOARD_SIZE), //repeat(0).take(BOARD_SIZE).collect(),
-      chains:   Vec::with_capacity(BOARD_SIZE), //repeat(None).take(BOARD_SIZE).collect(),
+      stones:   Vec::with_capacity(Self::BOARD_SIZE),
+      ch_roots: Vec::with_capacity(Self::BOARD_SIZE),
+      ch_links: Vec::with_capacity(Self::BOARD_SIZE),
+      ch_sizes: Vec::with_capacity(Self::BOARD_SIZE),
+      chains:   Vec::with_capacity(Self::BOARD_SIZE),
     }
   }
 
@@ -157,23 +159,25 @@ impl FastBoard {
     self.ch_links.clear();
     self.ch_sizes.clear();
     self.chains.clear();
-    self.stones.extend(repeat(Stone::Empty).take(BOARD_SIZE));
-    self.ch_roots.extend(repeat(TOMBSTONE).take(BOARD_SIZE));
-    self.ch_links.extend(repeat(TOMBSTONE).take(BOARD_SIZE));
-    self.ch_sizes.extend(repeat(0).take(BOARD_SIZE));
-    self.chains.extend(repeat(None).take(BOARD_SIZE));
+    self.stones.extend(repeat(Stone::Empty).take(Self::BOARD_SIZE));
+    self.ch_roots.extend(repeat(TOMBSTONE).take(Self::BOARD_SIZE));
+    self.ch_links.extend(repeat(TOMBSTONE).take(Self::BOARD_SIZE));
+    self.ch_sizes.extend(repeat(0).take(Self::BOARD_SIZE));
+    self.chains.extend(repeat(None).take(Self::BOARD_SIZE));
   }
 
-  pub fn play(&mut self, mov: Move, work: &mut FastBoardWork) {
+  pub fn play(&mut self, stone: Stone, action: Action, work: &mut FastBoardWork) {
     work.reset();
-    match mov {
-      Move::Pass => {}
-      Move::Place{stone, pos} => {
+    match action {
+      Action::Resign => {}
+      Action::Pass => {}
+      Action::Place{pos} => {
         // TODO(20151003)
         self.place_stone(stone, pos);
         self.update_chains(stone, pos, work);
       }
     }
+    // TODO
   }
 
   fn place_stone(&mut self, stone: Stone, pos: Pos) {
@@ -238,7 +242,7 @@ impl FastBoard {
 
   fn update_chains(&mut self, stone: Stone, pos: Pos, work: &mut FastBoardWork) {
     let opp_stone = stone.opponent();
-    for_each_adjacent(pos, |adj_pos| {
+    Self::for_each_adjacent(pos, |adj_pos| {
       let adj_root = self.traverse_chain(adj_pos);
       if adj_root != TOMBSTONE {
         self.get_chain_mut(adj_root).remove_pseudoliberty(pos);
@@ -259,7 +263,7 @@ impl FastBoard {
     self.ch_links[root.idx()] = root;
     self.ch_sizes[root.idx()] = 1;
     self.chains[root.idx()] = Some(Box::new(Chain::new()));
-    for_each_adjacent(root, |adj_pos| {
+    Self::for_each_adjacent(root, |adj_pos| {
       if let Stone::Empty = self.stones[adj_pos.idx()] {
         self.get_chain_mut(root).add_pseudoliberty(adj_pos);
       }
@@ -273,7 +277,7 @@ impl FastBoard {
     self.ch_links[pos.idx()] = prev_tail;
     self.ch_links[root.idx()] = pos;
     self.ch_sizes[root.idx()] += 1;
-    for_each_adjacent(pos, |adj_pos| {
+    Self::for_each_adjacent(pos, |adj_pos| {
       if let Stone::Empty = self.stones[adj_pos.idx()] {
         self.get_chain_mut(root).add_pseudoliberty(adj_pos);
       }

@@ -3,7 +3,7 @@ extern crate rand;
 
 //use holmes::board::{Piece, Coord, MoveResult};
 //use holmes::board_impls::{KoRule, TtBoard};
-use holmes::fastboard::{Move, Stone, FastBoard, FastBoardWork};
+use holmes::fastboard::{Stone, Action, FastBoard, FastBoardWork};
 
 use rand::{Rng, thread_rng};
 
@@ -24,7 +24,7 @@ fn main() {
       if i >= 200 {
         break;
       }
-      board.play(Move::Place{stone: stone, pos: c}, &mut work);
+      board.play(stone, Action::Place{pos: c}, &mut work);
       stone = stone.opponent();
     }
     /*if idx == 0 {

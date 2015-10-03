@@ -1,8 +1,8 @@
-use self::MoveResult::{LegalMove, StupidMove, IllegalMove};
+/*use self::MoveResult::{LegalMove, StupidMove, IllegalMove};
 use self::StupidMoveReason::{SelfAtari};
-use self::IllegalMoveReason::{OccupiedVertex, Suicide};
+use self::IllegalMoveReason::{OccupiedVertex, Suicide};*/
 
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
+/*#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub enum Piece {
   Empty      = 0x0,
   BlackStone = 0x1,
@@ -17,7 +17,7 @@ impl Piece {
       Piece::Empty => Piece::Empty, // FIXME: should this arm be set at all?
     }
   }
-}
+}*/
 
 #[derive(Clone, Copy, Debug)]
 pub enum Player {
@@ -40,12 +40,12 @@ impl Player {
     }
   }
 
-  pub fn to_piece(&self) -> Piece {
+  /*pub fn to_piece(&self) -> Piece {
     match *self {
       Player::Black => Piece::BlackStone,
       Player::White => Piece::WhiteStone,
     }
-  }
+  }*/
 }
 
 impl ToString for Player {
@@ -85,23 +85,23 @@ impl Coord {
     Coord{x: x, y: y}
   }
 
-  pub fn from_idx(idx: u16) -> Coord {
+  /*pub fn from_idx(idx: u16) -> Coord {
     Coord{
       x: (idx as u8 % 19),
       y: (idx as u8 / 19),
     }
-  }
+  }*/
 
-  #[inline]
+  /*#[inline]
   pub fn is_border(&self) -> bool {
     self.x == 0 || self.x == 19u8 - 1 ||
     self.y == 0 || self.y == 19u8 - 1
-  }
+  }*/
 
-  #[inline]
+  /*#[inline]
   pub fn to_idx(&self) -> u16 {
     self.x as u16 + self.y as u16 * 19
-  }
+  }*/
 
   pub fn to_bytestring(&self) -> Vec<u8> {
     let mut s = Vec::new();
@@ -120,18 +120,18 @@ impl ToString for Coord {
 }
 
 #[derive(Clone, Copy)]
-pub enum Action {
+pub enum Vertex {
   Resign,
   Pass,
   Play(Coord),
 }
 
-impl Action {
+impl Vertex {
   pub fn to_bytestring(&self) -> Vec<u8> {
     match *self {
-      Action::Resign => b"resign".to_vec(),
-      Action::Pass => b"pass".to_vec(),
-      Action::Play(coord) => coord.to_bytestring(),
+      Vertex::Resign => b"resign".to_vec(),
+      Vertex::Pass => b"pass".to_vec(),
+      Vertex::Play(coord) => coord.to_bytestring(),
     }
   }
 }
@@ -139,19 +139,19 @@ impl Action {
 #[derive(Clone, Copy)]
 pub struct Move {
   pub player: Player,
-  pub action: Action,
+  pub vertex: Vertex,
 }
 
 impl Move {
-  pub fn new(player: Player, action: Action) -> Move {
+  pub fn new(player: Player, vertex: Vertex) -> Move {
     Move{
       player: player,
-      action: action,
+      vertex: vertex,
     }
   }
 }
 
-#[derive(Clone, Copy, Debug)]
+/*#[derive(Clone, Copy, Debug)]
 pub enum MoveResult {
   LegalMove,
   StupidMove(StupidMoveReason),
@@ -170,4 +170,4 @@ pub enum IllegalMoveReason {
   Suicide,
   Ko,
   Superko,
-}
+}*/
