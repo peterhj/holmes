@@ -161,7 +161,9 @@ impl Chain {
 pub struct FastBoardWork {
   // Temporary buffers used during play() and stored here to avoid extra heap
   // allocations.
-  merge_adj_heads: Vec<Pos>,
+  merge_adj_heads:  Vec<Pos>,
+
+  check_pos:        BitVec,
 
   // TODO(20151004): Support for `undo`.
   //
@@ -229,6 +231,7 @@ impl FastBoardWork {
   pub fn new() -> FastBoardWork {
     FastBoardWork{
       merge_adj_heads:      Vec::with_capacity(4),
+      check_pos:            BitVec::from_elem(FastBoard::BOARD_SIZE, false),
       undo_place_pos:       TOMBSTONE,
       undo_place_last_pos:  None,
       undo_place_st_first:  false,
@@ -259,11 +262,13 @@ impl FastBoardWork {
 #[derive(Clone)]
 pub struct FastBoardAux {
   // Extra data structures (some may be moved back to FastBoard).
-  st_first: BitVec,         // first play at position.
-  st_empty: BitVec,         // position is empty.
-  st_adj:   Vec<BitVec>,    // adjacent stones of a certain color (4 bits/pos).
-  st_legal: BitSet,         // legal positions.
-  zob_hash: u64,            // Zobrist hash.
+  st_first:     BitVec,         // first play at position.
+  st_empty:     BitVec,         // position is empty.
+  st_adj:       Vec<BitVec>,    // adjacent stones of a certain color (4 bits/pos).
+  st_legal:     BitSet,         // legal positions.
+  last_adj_chs: Vec<Pos>,       // last move adjacent chains.
+  last_kills:   Vec<Pos>,       // last move killed chains.
+  //zob_hash: u64,            // Zobrist hash.
 }
 
 impl FastBoardAux {
@@ -276,7 +281,9 @@ impl FastBoardAux {
         BitVec::from_elem(FastBoard::BOARD_SIZE * 4, false),
       ],
       st_legal: BitSet::with_capacity(FastBoard::BOARD_SIZE),
-      zob_hash: 0,
+      last_adj_chs: Vec::with_capacity(4),
+      last_kills:   Vec::with_capacity(4),
+      //zob_hash: 0,
     }
   }
 
@@ -286,7 +293,11 @@ impl FastBoardAux {
     self.st_adj[0].clear();
     self.st_adj[1].clear();
     self.st_legal.extend((0 .. FastBoard::BOARD_SIZE));
-    self.zob_hash = 0;
+    //self.zob_hash = 0;
+  }
+
+  pub fn update_turn(&mut self, board: &FastBoard, work: &mut FastBoardWork) {
+    self.update_legal_positions(board, work);
   }
 
   fn check_move_simple(&self, stone: Stone, action: Action, board: &FastBoard) -> Option<ActionStatus> {
@@ -294,6 +305,8 @@ impl FastBoardAux {
       Action::Resign  => { return Some(ActionStatus::Legal); }
       Action::Pass    => { return Some(ActionStatus::Legal); }
       Action::Place{pos} => {
+        // Local checks: these touch only the candidate position and its
+        // 4-adjacent positions.
         let i = pos.idx();
         // Position is occupied.
         if !self.st_empty[i] {
@@ -320,8 +333,9 @@ impl FastBoardAux {
             return Some(ActionStatus::IllegalKo);
           }
         }
-        // Simple case: first play on the position, move does not reduce any
-        // chain's liberties to zero. Doesn't require simulating the move.
+
+        // Condition for quick global check: first play on the position, move
+        // does not reduce any chain's liberties to zero. No simulation needed.
         if first_play {
           let mut is_chain_suicide = false;
           let mut is_captor = false;
@@ -343,24 +357,25 @@ impl FastBoardAux {
             return Some(ActionStatus::Legal);
           }
         }
+
         // Otherwise, we have to simulate the move to check legality.
         None
       }
     }
   }
 
-  pub fn check_move(&self, stone: Stone, action: Action, board: &FastBoard) -> ActionStatus {
-    // FIXME
+  pub fn check_move(&self, stone: Stone, action: Action, board: &FastBoard, work: &mut FastBoardWork) -> ActionStatus {
     match self.check_move_simple(stone, action, board) {
       Some(status)  => status,
+      // FIXME(20151004): simulate move to check legality.
       None          => ActionStatus::IllegalUnknown,
     }
   }
 
-  pub fn mark_legal_positions(&self, stone: Stone, board: &FastBoard) -> BitSet {
+  pub fn mark_legal_positions(&self, stone: Stone, board: &FastBoard, work: &mut FastBoardWork) -> BitSet {
     let mut mask = BitSet::with_capacity(FastBoard::BOARD_SIZE);
     for p in (0 .. FastBoard::BOARD_SIZE) {
-      match self.check_move(stone, Action::Place{pos: p as Pos}, board) {
+      match self.check_move(stone, Action::Place{pos: p as Pos}, board, work) {
         ActionStatus::Legal => { mask.insert(p); }
         _ => {}
       }
@@ -368,9 +383,53 @@ impl FastBoardAux {
     mask
   }
 
-  pub fn get_legal_positions(&self, stone: Stone, board: &FastBoard) -> &BitSet {
-    // TODO
-    unimplemented!();
+  pub fn get_legal_positions(&self) -> &BitSet {
+    &self.st_legal
+  }
+
+  pub fn update_legal_positions(&mut self, board: &FastBoard, work: &mut FastBoardWork) {
+    // TODO(20151004): Shortcuts are possible depending on the last play:
+    // - last pos touched no prior chains:
+    //   only update adjacent moves
+    // - last pos touched chains but did not kill any:
+    //   update adjacent moves and liberties of touched chains
+    // - last pos killed a chain:
+    //   easy way out is to redo the whole board; otherwise need to propagate
+    //   affected chains and update affected liberties
+    if let Some(last_pos) = board.last_pos {
+      let stone = board.last_turn.unwrap();
+      if self.last_kills.len() > 0 {
+        for p in (0 .. FastBoard::BOARD_SIZE) {
+          match self.check_move(stone, Action::Place{pos: p as Pos}, board, work) {
+            ActionStatus::Legal => { self.st_legal.insert(p); }
+            _                   => { self.st_legal.remove(&p); }
+          }
+        }
+      } else {
+        work.check_pos.clear();
+        for &h in self.last_adj_chs.iter() {
+          let head = board.traverse_chain_slow(h);
+          let chain = board.get_chain(head);
+          for &lib in chain.ps_libs.iter() {
+            if !work.check_pos.get(lib.idx()).unwrap() {
+              work.check_pos.set(lib.idx(), true);
+              match self.check_move(stone, Action::Place{pos: lib}, board, work) {
+                ActionStatus::Legal => { self.st_legal.insert(lib.idx()); }
+                _                   => { self.st_legal.remove(&lib.idx()); }
+              }
+            }
+          }
+        }
+        FastBoard::for_each_adjacent(last_pos, |adj_pos| {
+          if !work.check_pos.get(adj_pos.idx()).unwrap() {
+            match self.check_move(stone, Action::Place{pos: adj_pos}, board, work) {
+              ActionStatus::Legal => { self.st_legal.insert(adj_pos.idx()); }
+              _                   => { self.st_legal.remove(&adj_pos.idx()); }
+            }
+          }
+        });
+      }
+    }
   }
 }
 
@@ -384,7 +443,8 @@ pub struct FastBoard {
   ko_pos:   Option<Pos>,
 
   // Previous board structure.
-  last_pos: Option<Pos>,
+  last_pos:   Option<Pos>,
+  last_turn:  Option<Stone>,
 
   // Chain data structures. Namely, this implements a linked quick-union for
   // finding and iterating over connected components, as well as a list of
@@ -437,7 +497,8 @@ impl FastBoard {
       turn:     Stone::Black,
       stones:   Vec::with_capacity(Self::BOARD_SIZE),
       ko_pos:   None,
-      last_pos: None,
+      last_pos:   None,
+      last_turn:  None,
       chains:   Vec::with_capacity(Self::BOARD_SIZE),
       ch_roots: Vec::with_capacity(Self::BOARD_SIZE),
       ch_links: Vec::with_capacity(Self::BOARD_SIZE),
@@ -459,6 +520,7 @@ impl FastBoard {
     self.ko_pos = None;
 
     self.last_pos = None;
+    self.last_turn = None;
 
     self.chains.clear();
     self.chains.extend(repeat(None).take(Self::BOARD_SIZE));
@@ -484,9 +546,7 @@ impl FastBoard {
       Action::Pass => {}
       Action::Place{pos} => {
         // TODO(20151003)
-        //println!("DEBUG: place stone");
         self.place_stone(stone, pos, aux);
-        //println!("DEBUG: update chains");
         self.update_chains(stone, pos, work, aux);
       }
     }
@@ -524,6 +584,7 @@ impl FastBoard {
     let i = pos.idx();
     self.stones[i] = stone;
     self.last_pos = Some(pos);
+    self.last_turn = Some(stone);
     self.ch_roots[i] = TOMBSTONE;
     if let &mut Some(ref mut aux) = aux {
       aux.st_first.set(i, false);
@@ -552,6 +613,7 @@ impl FastBoard {
     self.stones[i] = stone;
     work.undo_place_last_pos = self.last_pos;
     self.last_pos = Some(pos);
+    // FIXME
     self.ch_roots[i] = TOMBSTONE;
     if let &mut Some(ref mut aux) = aux {
       work.undo_place_st_first = aux.st_first.get(i).unwrap();
@@ -672,14 +734,24 @@ impl FastBoard {
     } else {
       println!("DEBUG: update chains: {:?} {}", stone, pos);
     }*/
+    if let &mut Some(ref mut aux) = aux {
+      aux.last_adj_chs.clear();
+      aux.last_kills.clear();
+    }
     let opp_stone = stone.opponent();
     Self::for_each_adjacent(pos, |adj_pos| {
       if self.stones[adj_pos.idx()] != Stone::Empty {
         let adj_head = self.traverse_chain(adj_pos);
         assert!(adj_head != TOMBSTONE);
+        if let &mut Some(ref mut aux) = aux {
+          aux.last_adj_chs.push(adj_head);
+        }
         self.get_chain_mut(adj_head).remove_pseudoliberty(pos);
         if self.stones[adj_head.idx()] == opp_stone {
           if self.get_chain(adj_head).count_pseudoliberties() == 0 {
+            if let &mut Some(ref mut aux) = aux {
+              aux.last_kills.push(adj_head);
+            }
             self.kill_chain(adj_head, aux);
           }
         } else {
@@ -841,8 +913,12 @@ impl FastBoard {
       Self::for_each_adjacent(next, |adj_pos| {
         if self.stones[adj_pos.idx()] == opp_stone {
           let adj_head = self.traverse_chain_slow(adj_pos);
-          work.undo_kill_pslib_lims.push((adj_head, self.get_chain(adj_head).count_pseudoliberties()));
-          self.get_chain_mut(adj_pos).add_pseudoliberty(next);
+          // XXX: Need to check for tombstone here. The killed chain is adjacent
+          // to the freshly placed stone, which is currently not in a chain.
+          if adj_head != TOMBSTONE {
+            work.undo_kill_pslib_lims.push((adj_head, self.get_chain(adj_head).count_pseudoliberties()));
+            self.get_chain_mut(adj_pos).add_pseudoliberty(next);
+          }
         }
       });
       //self.ch_roots[next.idx()] = TOMBSTONE;

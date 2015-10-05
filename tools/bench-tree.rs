@@ -12,7 +12,7 @@ fn main() {
   let mut work = FastBoardWork::new();
   let mut policy = BenchmarkTreePolicy::new();
   let mut tree = QValueTree::<BenchmarkTreePolicy>::new();
-  for _ in (0 .. 50usize) {
+  for _ in (0 .. 600usize) {
     tree.reset(&init_state, &init_aux_state, 0, 0.0);
     for _ in (0 .. 361usize) {
       tree.execute_path(1, &policy, &mut work);

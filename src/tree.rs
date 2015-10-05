@@ -32,7 +32,6 @@ pub struct QValueNode<D, E> where D: Default, E: Clone + Copy + Default {
   pub state:        FastBoard,
   pub aux_state:    Option<FastBoardAux>,
   pub depth:        i32,
-  pub legal_pos:    BitSet,
   pub uninst_pos:   BitSet,
   //pub inst_actions: OpenCopyHashMap<usize, Action>,
   //pub inst_childs:  OpenCopyHashMap<Action, QValueEdge<E>>,
@@ -43,14 +42,14 @@ pub struct QValueNode<D, E> where D: Default, E: Clone + Copy + Default {
 
 impl<D, E> QValueNode<D, E> where D: Default, E: Clone + Copy + Default {
   pub fn new(prev_id: Option<usize>, id: usize, state: FastBoard, aux_state: FastBoardAux, depth: i32) -> QValueNode<D, E> {
-    let legal_pos = aux_state.mark_legal_positions(state.current_turn(), &state);
+    //let legal_pos = aux_state.mark_legal_positions(state.current_turn(), &state);
+    let legal_pos = aux_state.get_legal_positions().clone();
     QValueNode{
       id:           id,
       prev_id:      prev_id,
       state:        state,
       aux_state:    Some(aux_state),
       depth:        depth,
-      legal_pos:    legal_pos.clone(),
       uninst_pos:   legal_pos,
       //inst_actions: OpenCopyHashMap::with_capacity(1),
       //inst_childs:  OpenCopyHashMap::with_capacity(1),
@@ -62,8 +61,8 @@ impl<D, E> QValueNode<D, E> where D: Default, E: Clone + Copy + Default {
 }
 
 pub enum TreePathResult {
-  Terminal,
-  Leaf,
+  Terminal{id: usize},
+  Leaf{id: usize},
 }
 
 pub struct QValueTree<P> where P: TreePolicy {
@@ -80,7 +79,7 @@ impl<P> QValueTree<P> where P: TreePolicy {
     self.expand(None, init_state.clone(), init_aux_state.clone(), init_depth, init_q);
   }
 
-  pub fn expand(&mut self, prev: Option<(usize, Action)>, next_state: FastBoard, next_aux_state: Option<FastBoardAux>, init_depth: i32, init_q: f32) {
+  pub fn expand(&mut self, prev: Option<(usize, Action)>, next_state: FastBoard, next_aux_state: Option<FastBoardAux>, init_depth: i32, init_q: f32) -> usize {
     let id = self.nodes.len();
     let (prev_id, next_depth) = if let Some((prev_id, action)) = prev {
       let prev_node = &mut self.nodes[prev_id];
@@ -94,6 +93,7 @@ impl<P> QValueTree<P> where P: TreePolicy {
       (None, init_depth)
     };
     self.nodes.push(QValueNode::new(prev_id, id, next_state, next_aux_state.unwrap(), next_depth));
+    id
   }
 
   pub fn execute_path(&mut self, max_depth: i32, tree_policy: &P, work: &mut FastBoardWork) -> TreePathResult {
@@ -102,21 +102,22 @@ impl<P> QValueTree<P> where P: TreePolicy {
       let action = tree_policy.execute(&self.nodes[id]);
       match action {
         Action::Resign | Action::Pass => {
-          // TODO
-          return TreePathResult::Terminal;
+          // TODO(20151004)
+          return TreePathResult::Terminal{id: id};
         }
         Action::Place{pos} => {
           if self.nodes[id].depth >= max_depth {
-            return TreePathResult::Leaf;
+            return TreePathResult::Leaf{id: id};
           }
           if let Some(next_id) = self.nodes[id].inst_childs.get(&action).map(|e| e.next_id) {
             id = next_id;
           } else {
-            let mut state = self.nodes[id].state.clone();
-            let mut aux_state = self.nodes[id].aux_state.clone();
-            state.play_turn(Action::Place{pos: pos}, work, &mut aux_state);
-            self.expand(Some((id, action)), state, aux_state, 0, 0.0);
-            return TreePathResult::Leaf;
+            let mut next_state = self.nodes[id].state.clone();
+            let mut next_aux_state = self.nodes[id].aux_state.clone();
+            next_state.play_turn(Action::Place{pos: pos}, work, &mut next_aux_state);
+            next_aux_state.as_mut().unwrap().update_turn(&next_state, work);
+            let next_id = self.expand(Some((id, action)), next_state, next_aux_state, 0, 0.0);
+            return TreePathResult::Leaf{id: next_id};
           }
         }
       }
