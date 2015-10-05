@@ -522,11 +522,10 @@ impl FastBoard {
 
   fn place_stone(&mut self, stone: Stone, pos: Pos, aux: &mut Option<FastBoardAux>) {
     let i = pos.idx();
-    //println!("DEBUG: place stone: {} {}", i, self.stones.len());
     self.stones[i] = stone;
     self.last_pos = Some(pos);
+    self.ch_roots[i] = TOMBSTONE;
     if let &mut Some(ref mut aux) = aux {
-      //println!("DEBUG: aux: set flags {} {}", stone.offset(), aux.st_adj.len());
       aux.st_first.set(i, false);
       aux.st_empty.set(i, false);
       Self::for_each_adjacent_labeled(pos, |adj_pos, adj_direction| {
@@ -553,6 +552,7 @@ impl FastBoard {
     self.stones[i] = stone;
     work.undo_place_last_pos = self.last_pos;
     self.last_pos = Some(pos);
+    self.ch_roots[i] = TOMBSTONE;
     if let &mut Some(ref mut aux) = aux {
       work.undo_place_st_first = aux.st_first.get(i).unwrap();
       aux.st_first.set(i, false);
@@ -577,17 +577,20 @@ impl FastBoard {
   }
 
   fn get_chain(&self, head: Pos) -> &Chain {
-    &**self.chains[head.idx()].as_ref().unwrap()
+    &**self.chains[head.idx()].as_ref()
+      .unwrap()
       //.expect(&format!("get_chain expected a chain: {}", head))
   }
 
   fn get_chain_mut(&mut self, head: Pos) -> &mut Chain {
-    &mut **self.chains[head.idx()].as_mut().unwrap()
+    &mut **self.chains[head.idx()].as_mut()
+      .unwrap()
       //.expect(&format!("get_chain_mut expected a chain: {}", head))
   }
 
   fn take_chain(&mut self, head: Pos) -> Box<Chain> {
-    self.chains[head.idx()].take().unwrap()
+    self.chains[head.idx()].take()
+      .unwrap()
       //.expect(&format!("take_chain expected a chain: {}", head))
   }
 
@@ -663,10 +666,17 @@ impl FastBoard {
   }
 
   fn update_chains(&mut self, stone: Stone, pos: Pos, work: &mut FastBoardWork, aux: &mut Option<FastBoardAux>) {
+    //println!("DEBUG: update chains...");
+    /*if pos == 335 {
+      println!("DEBUG: update chains: {:?} {} (***)", stone, pos);
+    } else {
+      println!("DEBUG: update chains: {:?} {}", stone, pos);
+    }*/
     let opp_stone = stone.opponent();
     Self::for_each_adjacent(pos, |adj_pos| {
       if self.stones[adj_pos.idx()] != Stone::Empty {
         let adj_head = self.traverse_chain(adj_pos);
+        assert!(adj_head != TOMBSTONE);
         self.get_chain_mut(adj_head).remove_pseudoliberty(pos);
         if self.stones[adj_head.idx()] == opp_stone {
           if self.get_chain(adj_head).count_pseudoliberties() == 0 {
@@ -681,6 +691,9 @@ impl FastBoard {
   }
 
   fn create_chain(&mut self, head: Pos) {
+    /*if head == 335 {
+      println!("DEBUG: create {}", head);
+    }*/
     self.ch_roots[head.idx()] = head;
     self.ch_links[head.idx()] = head;
     self.ch_sizes[head.idx()] = 1;
@@ -693,6 +706,9 @@ impl FastBoard {
   }
 
   fn add_to_chain(&mut self, head: Pos, pos: Pos) {
+    /*if head == 335 || pos == 335 {
+      println!("DEBUG: add {} to {}", pos, head);
+    }*/
     self.ch_roots[pos.idx()] = head;
     //assert_eq!(root, self.traverse_chain(pos));
     let prev_tail = self.ch_links[head.idx()];
@@ -724,14 +740,19 @@ impl FastBoard {
     let mut num_captured = 0;
     let mut prev;
     let mut next = head;
-    let opp_stone = self.stones[head.idx()].opponent();
+    let stone = self.stones[head.idx()].opponent();
     loop {
       prev = next;
       next = self.ch_links[prev.idx()];
       self.capture_stone(next, aux);
       Self::for_each_adjacent(next, |adj_pos| {
-        if self.stones[adj_pos.idx()] == opp_stone {
-          self.get_chain_mut(adj_pos).add_pseudoliberty(next);
+        if self.stones[adj_pos.idx()] == stone {
+          let adj_head = self.traverse_chain(adj_pos);
+          // XXX: Need to check for tombstone here. The killed chain is adjacent
+          // to the freshly placed stone, which is currently not in a chain.
+          if adj_head != TOMBSTONE {
+            self.get_chain_mut(adj_head).add_pseudoliberty(next);
+          }
         }
       });
       self.ch_roots[next.idx()] = TOMBSTONE;

@@ -8,7 +8,8 @@ use rand::{Rng, SeedableRng, thread_rng};
 
 fn main() {
   let n = 35000;
-  let seed = [thread_rng().next_u64(), thread_rng().next_u64()];
+  //let seed = [thread_rng().next_u64(), thread_rng().next_u64()];
+  let seed = [1234, 5678];
   let mut rng: XorShift128PlusRng = SeedableRng::from_seed(seed);
   let mut valid_coords = Vec::with_capacity(361);
   for i in (0 .. 361i16) {
