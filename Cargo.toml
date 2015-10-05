@@ -12,10 +12,15 @@ name = "gtpctl"
 path = "tools/gtpctl.rs"
 
 [[bin]]
-name = "bench-ttboard"
-path = "tools/bench-ttboard.rs"
+name = "bench-board"
+path = "tools/bench-board.rs"
+
+[[bin]]
+name = "bench-tree"
+path = "tools/bench-tree.rs"
 
 [dependencies]
+bit-set = "*"
 bit-vec = "*"
 bufstream = "*"
 byteorder = "*"

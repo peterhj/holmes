@@ -1,4 +1,4 @@
-use fastboard::{Action, FastBoard};
+use fastboard::{Pos, Action, FastBoard};
 use tree::{QValueNode, QValueEdge, QValueTree};
 
 pub trait TreePolicy {
@@ -9,7 +9,7 @@ pub trait TreePolicy {
     unimplemented!();
   }
 
-  fn update_tree_node(&self, tree: &mut QValueTree<Self>, update_id: usize, leaf_action: Action, next_id: Option<usize>, result: i32) {
+  fn update_tree_node(&self, tree: &mut QValueTree<Self>, update_id: usize, next_id: Option<usize>, leaf_action: Action, result: i32) where Self: Sized {
     unimplemented!();
   }
 
@@ -17,7 +17,36 @@ pub trait TreePolicy {
     unimplemented!();
   }
 
-  //fn execute(&self, node: &QValueNode) -> 
+  fn execute(&self, node: &QValueNode<Self::NodeData, Self::EdgeData>) -> Action {
+    unimplemented!();
+  }
+}
+
+pub struct BenchmarkTreePolicy;
+
+impl BenchmarkTreePolicy {
+  pub fn new() -> BenchmarkTreePolicy {
+    BenchmarkTreePolicy
+  }
+}
+
+impl TreePolicy for BenchmarkTreePolicy {
+  type NodeData = ();
+  type EdgeData = ();
+
+  fn update_tree_node(&self, tree: &mut QValueTree<Self>, update_id: usize, next_id: Option<usize>, leaf_action: Action, result: i32) where Self: Sized {
+  }
+
+  fn update_q_value(&self, s: &Self::NodeData, sa: &Self::EdgeData, old_q_value: f32) -> f32 {
+    0.0
+  }
+
+  fn execute(&self, node: &QValueNode<(), ()>) -> Action {
+    for p in node.uninst_pos.iter() {
+      return Action::Place{pos: p as Pos};
+    }
+    Action::Pass
+  }
 }
 
 #[derive(Clone, Copy, Default)]
@@ -31,6 +60,7 @@ pub struct Ucb1EdgeData {
   pub n_wins:   i32,
 }
 
+#[derive(Clone, Copy)]
 pub struct Ucb1TreePolicy {
   pub c:      f32,
   pub bias:   f32,
@@ -41,14 +71,15 @@ impl TreePolicy for Ucb1TreePolicy {
   type NodeData = Ucb1NodeData;
   type EdgeData = Ucb1EdgeData;
 
-  fn update_tree_node(&self, tree: &mut QValueTree<Self>, update_id: usize, leaf_action: Action, next_id: Option<usize>, result: i32) {
+  fn update_tree_node(&self, tree: &mut QValueTree<Self>, update_id: usize, next_id: Option<usize>, leaf_action: Action, result: i32) where Self: Sized {
     let mut update_node = &mut tree.nodes[update_id];
     // Update node stats (n_plays).
     update_node.data.n_plays += 1;
     // Update edge stats (n_plays, n_wins, q_value).
     if let Some(next_id) = next_id {
-      let old_q_value = update_node.childs.get(&next_id).unwrap().q_value;
-      let mut update_edge = update_node.childs.get_mut(&next_id).unwrap();
+      let next_action = update_node.inst_actions.get(&next_id).unwrap();
+      let old_q_value = update_node.inst_childs.get(&next_action).unwrap().q_value;
+      let mut update_edge = update_node.inst_childs.get_mut(&next_action).unwrap();
       update_edge.data.n_plays += 1;
       if result == 1 {
         update_edge.data.n_wins += 1;
@@ -76,6 +107,7 @@ impl TreePolicy for Ucb1TreePolicy {
   }
 }
 
+#[derive(Clone, Copy)]
 pub struct UctRaveTreePolicy {
   pub c:      f32,
   pub bias:   f32,
@@ -87,7 +119,7 @@ impl TreePolicy for UctRaveTreePolicy {
   type NodeData = Ucb1NodeData;
   type EdgeData = Ucb1EdgeData;
 
-  fn update_tree_node(&self, tree: &mut QValueTree<Self>, update_id: usize, leaf_action: Action, next_id: Option<usize>, result: i32) {
+  fn update_tree_node(&self, tree: &mut QValueTree<Self>, update_id: usize, next_id: Option<usize>, leaf_action: Action, result: i32) where Self: Sized {
     // TODO(20151003): This particular version is the reason for the strange
     // method signature. RAVE, if I understand it correctly, can create edges
     // (corresponding to the leaf action) when updating the tree.
@@ -101,11 +133,12 @@ pub trait PlayoutPolicy {
   }
 }
 
-pub struct FastPlayoutPolicy {
+#[derive(Clone)]
+pub struct QuasiUniformPlayoutPolicy {
   state:  FastBoard,
 }
 
-impl PlayoutPolicy for FastPlayoutPolicy {
+impl PlayoutPolicy for QuasiUniformPlayoutPolicy {
   fn execute_playout(&mut self, init_state: &FastBoard, init_depth: i32) -> i32 {
     self.state.clone_from(init_state);
     // TODO

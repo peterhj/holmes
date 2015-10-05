@@ -1,6 +1,10 @@
 use contains::hash::{MemHasher, XxhMemHasher};
 
 use bit_vec::{BitVec};
+//use rand::{Rng, thread_rng};
+
+use std::cmp::{max};
+use std::iter::{repeat};
 
 fn ceil_power2(x: u64) -> u64 {
   let mut v = x;
@@ -42,7 +46,7 @@ where K: Clone + Copy + Eq + PartialEq,
   }
 
   pub fn with_capacity(min_cap: usize) -> OpenCopyHashMap<K, V, H> {
-    let cap = ceil_power2(min_cap as u64) as usize;
+    let cap = ceil_power2(max(4, min_cap) as u64) as usize;
     assert!(cap >= min_cap);
     let mut keys = Vec::with_capacity(cap);
     let mut values = Vec::with_capacity(cap);
@@ -51,7 +55,7 @@ where K: Clone + Copy + Eq + PartialEq,
       values.set_len(cap);
     }
     OpenCopyHashMap{
-      hasher:   MemHasher::new(),
+      hasher:   MemHasher::new(0), //thread_rng().next_u64()),
       cap:      cap,
       len:      0,
       occupied: BitVec::from_elem(cap, false),
@@ -69,10 +73,11 @@ where K: Clone + Copy + Eq + PartialEq,
   }
 
   fn expand(&mut self) {
-    let new_cap = self.cap * 2;
-    assert!(new_cap > self.cap);
+    let old_cap = self.cap;
+    let new_cap = old_cap * 2;
+    assert!(new_cap > old_cap);
     // TODO(20151003): move elements.
-    self.cap = new_cap;
+    self.occupied.extend(repeat(false).take(old_cap));
     let keys_cap = self.keys.capacity();
     if new_cap >= keys_cap {
       self.keys.reserve(new_cap - keys_cap);
@@ -83,6 +88,7 @@ where K: Clone + Copy + Eq + PartialEq,
       self.values.reserve(new_cap - values_cap);
       unsafe { self.values.set_len(new_cap) };
     }
+    self.cap = new_cap;
   }
 
   pub fn len(&self) -> usize {
@@ -91,7 +97,7 @@ where K: Clone + Copy + Eq + PartialEq,
 
   pub fn clear(&mut self) {
     self.len = 0;
-    self.occupied.clear(); // = BitVec::from_elem(self.cap, false);
+    self.occupied.clear();
   }
 
   pub fn contains_key(&self, key: &K) -> bool {
@@ -143,7 +149,7 @@ where K: Clone + Copy + Eq + PartialEq,
   }
 
   pub fn insert(&mut self, key: K, value: V) -> Option<V> {
-    if self.len >= self.cap {
+    if 4 * self.len >= self.cap {
       self.expand();
     }
     let p0 = self.init_probe(&key);
@@ -206,7 +212,7 @@ where V: Clone + Copy + Eq + PartialEq, H: MemHasher {
       values.set_len(cap);
     }
     OpenCopyHashSet{
-      hasher:   MemHasher::new(),
+      hasher:   MemHasher::new(0), //thread_rng().next_u64()),
       cap:      cap,
       len:      0,
       occupied: BitVec::from_elem(cap, false),

@@ -1,19 +1,20 @@
 extern crate holmes;
 extern crate rand;
 
-//use holmes::board::{Piece, Coord, MoveResult};
-//use holmes::board_impls::{KoRule, TtBoard};
 use holmes::fastboard::{Stone, Action, FastBoard, FastBoardWork};
+use holmes::random::{XorShift128PlusRng};
 
-use rand::{Rng, thread_rng};
+use rand::{Rng, SeedableRng, thread_rng};
 
 fn main() {
-  let n = 24000;
-  let mut rng = thread_rng();
+  let n = 35000;
+  let seed = [thread_rng().next_u64(), thread_rng().next_u64()];
+  let mut rng: XorShift128PlusRng = SeedableRng::from_seed(seed);
   let mut valid_coords = Vec::with_capacity(361);
   for i in (0 .. 361i16) {
     valid_coords.push(i);
   }
+  rng.shuffle(&mut valid_coords);
   let mut work = FastBoardWork::new();
   let mut board = FastBoard::new();
   for idx in (0 .. n) {
@@ -24,7 +25,7 @@ fn main() {
       if i >= 200 {
         break;
       }
-      board.play(stone, Action::Place{pos: c}, &mut work);
+      board.play(stone, Action::Place{pos: c}, &mut work, &mut None);
       stone = stone.opponent();
     }
     /*if idx == 0 {
