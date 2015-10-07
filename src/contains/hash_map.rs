@@ -1,23 +1,11 @@
 use contains::hash::{MemHasher, XxhMemHasher};
+use util::{ceil_power2};
 
 use bit_vec::{BitVec};
 //use rand::{Rng, thread_rng};
 
 use std::cmp::{max};
 use std::iter::{repeat};
-
-fn ceil_power2(x: u64) -> u64 {
-  let mut v = x;
-  v -= 1;
-  v |= v >> 1;
-  v |= v >> 2;
-  v |= v >> 4;
-  v |= v >> 8;
-  v |= v >> 16;
-  v |= v >> 32;
-  v += 1;
-  v
-}
 
 // FIXME(20150202): forcing K, V to be Copy because we are not dropping values
 // properly.

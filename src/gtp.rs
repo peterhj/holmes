@@ -381,6 +381,9 @@ impl<C: GtpClient> GtpEngine<C> {
       b"boardsize"              => self.client.reply_boardsize(args),
       b"clear_board"            => self.client.reply_clear_board(),
       b"komi"                   => self.client.reply_komi(args),
+      b"fixed_handicap"         => self.client.reply_fixed_handicap(args),
+      b"place_free_handicap"    => self.client.reply_place_free_handicap(args),
+      b"set_free_handicap"      => self.client.reply_set_free_handicap(args),
       b"play"                   => self.client.reply_play(args),
       b"genmove"                => self.client.reply_genmove(args),
       b"undo"                   => self.client.reply_undo(),
@@ -388,6 +391,8 @@ impl<C: GtpClient> GtpEngine<C> {
       b"time_left"              => self.client.reply_time_left(args),
       b"final_score"            => self.client.reply_final_score(),
       b"final_status_list"      => self.client.reply_final_status_list(args),
+      b"kgs-game_over"          => self.client.reply_kgs_game_over(args),
+      b"kgs-rules"              => self.client.reply_kgs_rules(args),
       b"kgs-time_settings"      => self.client.reply_kgs_time_settings(args),
       b"kgs-genmove_cleanup"    => self.client.reply_kgs_genmove_cleanup(),
       b"loadsgf"                => self.client.reply_loadsgf(),
@@ -421,6 +426,7 @@ impl<C: GtpClient> GtpEngine<C> {
 pub trait GtpClient {
   fn get_address(&self) -> (String, u16);
   fn get_extensions(&self);
+  fn should_shutdown(&self) -> bool;
 
   // Administrative commands.
   fn reply_protocol_version(&mut self) -> Vec<Entity>;
@@ -436,9 +442,9 @@ pub trait GtpClient {
   fn reply_komi(&mut self, args: &[Vec<u8>]) -> Vec<Entity>;
 
   // Tournament setup commands.
-  fn reply_fixed_handicap(&mut self) -> Vec<Entity>;
-  fn reply_place_free_handicap(&mut self) -> Vec<Entity>;
-  fn reply_set_free_handicap(&mut self) -> Vec<Entity>;
+  fn reply_fixed_handicap(&mut self, args: &[Vec<u8>]) -> Vec<Entity>;
+  fn reply_place_free_handicap(&mut self, args: &[Vec<u8>]) -> Vec<Entity>;
+  fn reply_set_free_handicap(&mut self, args: &[Vec<u8>]) -> Vec<Entity>;
 
   // Core play commands.
   fn reply_play(&mut self, args: &[Vec<u8>]) -> Vec<Entity>;
@@ -452,8 +458,12 @@ pub trait GtpClient {
   fn reply_final_status_list(&mut self, args: &[Vec<u8>]) -> Vec<Entity>;
 
   // KGS extensions.
-  fn reply_kgs_time_settings(&mut self, args: &[Vec<u8>]) -> Vec<Entity>;
-  fn reply_kgs_genmove_cleanup(&mut self) -> Vec<Entity>;
+  //fn send_kgs_chat(&mut self, Vec<Entity>)                                { unimplemented!(); }
+  //fn reply_kgs_chat(&mut self, args: &[Vec<u8>]) -> Vec<Entity>           { unimplemented!(); }
+  fn reply_kgs_game_over(&mut self, args: &[Vec<u8>]) -> Vec<Entity>      { unimplemented!(); }
+  fn reply_kgs_rules(&mut self, args: &[Vec<u8>]) -> Vec<Entity>          { unimplemented!(); }
+  fn reply_kgs_time_settings(&mut self, args: &[Vec<u8>]) -> Vec<Entity>  { unimplemented!(); }
+  fn reply_kgs_genmove_cleanup(&mut self) -> Vec<Entity>                  { unimplemented!(); }
 
   // Regression commands.
   fn reply_loadsgf(&mut self) -> Vec<Entity>;

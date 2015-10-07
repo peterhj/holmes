@@ -1,58 +1,48 @@
-//use contains::hash_map::{OpenCopyHashMap};
 use fastboard::{IntoIndex, Action, FastBoard, FastBoardAux, FastBoardWork};
-use policy::{TreePolicy, PlayoutPolicy};
+use policy::{TreePolicy, RolloutPolicy};
 
 use bit_set::{BitSet};
-use bit_vec::{BitVec};
 use std::collections::{HashMap};
-//use std::mem::{size_of};
 
 #[derive(Clone, Copy)]
-pub struct QValueEdge<E> where E: Clone + Copy + Default {
+pub struct SearchEdge<E> where E: Clone + Copy + Default {
   pub next_id:  usize,
   pub action:   Action,
-  pub q_value:  f32,
   pub data:     E,
 }
 
-impl<E> QValueEdge<E> where E: Clone + Copy + Default {
-  pub fn new(next_id: usize, action: Action, init_q: f32) -> QValueEdge<E> {
-    QValueEdge{
+impl<E> SearchEdge<E> where E: Clone + Copy + Default {
+  pub fn new(next_id: usize, action: Action, init_q: f32) -> SearchEdge<E> {
+    SearchEdge{
       next_id:  next_id,
       action:   action,
-      q_value:  init_q,
       data:     Default::default(),
     }
   }
 }
 
-pub struct QValueNode<D, E> where D: Default, E: Clone + Copy + Default {
+pub struct SearchNode<D, E> where D: Default, E: Clone + Copy + Default {
   pub id:           usize,
   pub prev_id:      Option<usize>,
   pub state:        FastBoard,
   pub aux_state:    Option<FastBoardAux>,
   pub depth:        i32,
   pub uninst_pos:   BitSet,
-  //pub inst_actions: OpenCopyHashMap<usize, Action>,
-  //pub inst_childs:  OpenCopyHashMap<Action, QValueEdge<E>>,
   pub inst_actions: HashMap<usize, Action>,
-  pub inst_childs:  HashMap<Action, QValueEdge<E>>,
+  pub inst_childs:  HashMap<Action, SearchEdge<E>>,
   pub data:         D,
 }
 
-impl<D, E> QValueNode<D, E> where D: Default, E: Clone + Copy + Default {
-  pub fn new(prev_id: Option<usize>, id: usize, state: FastBoard, aux_state: FastBoardAux, depth: i32) -> QValueNode<D, E> {
-    //let legal_pos = aux_state.mark_legal_positions(state.current_turn(), &state);
-    let legal_pos = aux_state.get_legal_positions().clone();
-    QValueNode{
+impl<D, E> SearchNode<D, E> where D: Default, E: Clone + Copy + Default {
+  pub fn new(prev_id: Option<usize>, id: usize, state: FastBoard, aux_state: FastBoardAux, depth: i32) -> SearchNode<D, E> {
+    let legal_pos = aux_state.get_legal_positions(state.current_turn()).clone();
+    SearchNode{
       id:           id,
       prev_id:      prev_id,
       state:        state,
       aux_state:    Some(aux_state),
       depth:        depth,
       uninst_pos:   legal_pos,
-      //inst_actions: OpenCopyHashMap::with_capacity(1),
-      //inst_childs:  OpenCopyHashMap::with_capacity(1),
       inst_actions: HashMap::with_capacity(1),
       inst_childs:  HashMap::with_capacity(1),
       data:         Default::default(),
@@ -65,13 +55,14 @@ pub enum TreePathResult {
   Leaf{id: usize},
 }
 
-pub struct QValueTree<P> where P: TreePolicy {
-  pub nodes:    Vec<QValueNode<P::NodeData, P::EdgeData>>,
+pub struct SearchTree<P> where P: TreePolicy {
+  pub nodes:    Vec<SearchNode<P::NodeData, P::EdgeData>>,
+  // TODO(20151005): need a transposition table for compressing the tree.
 }
 
-impl<P> QValueTree<P> where P: TreePolicy {
-  pub fn new() -> QValueTree<P> {
-    QValueTree{nodes: Vec::new()}
+impl<P> SearchTree<P> where P: TreePolicy {
+  pub fn new() -> SearchTree<P> {
+    SearchTree{nodes: Vec::new()}
   }
 
   pub fn reset(&mut self, init_state: &FastBoard, init_aux_state: &Option<FastBoardAux>, init_depth: i32, init_q: f32) {
@@ -87,12 +78,12 @@ impl<P> QValueTree<P> where P: TreePolicy {
         prev_node.uninst_pos.remove(&pos.idx());
       }
       prev_node.inst_actions.insert(id, action);
-      prev_node.inst_childs.insert(action, QValueEdge::new(id, action, init_q));
+      prev_node.inst_childs.insert(action, SearchEdge::new(id, action, init_q));
       (Some(prev_id), prev_node.depth + 1)
     } else {
       (None, init_depth)
     };
-    self.nodes.push(QValueNode::new(prev_id, id, next_state, next_aux_state.unwrap(), next_depth));
+    self.nodes.push(SearchNode::new(prev_id, id, next_state, next_aux_state.unwrap(), next_depth));
     id
   }
 
@@ -124,11 +115,12 @@ impl<P> QValueTree<P> where P: TreePolicy {
     }
   }
 
-  pub fn simulate(&mut self, action: Action, id: usize, tree_policy: &P, playout_policy: &mut PlayoutPolicy) {
+  pub fn simulate(&mut self, action: Action, id: usize, tree_policy: &mut P, rollout_policy: &mut RolloutPolicy) {
     let result = {
       let node = &self.nodes[id];
-      playout_policy.execute_playout(&node.state, node.depth)
+      rollout_policy.execute_rollout(&node.state, node.depth)
     };
+    tree_policy.update(result);
     let mut next_id = None;
     let mut update_id = id;
     loop {

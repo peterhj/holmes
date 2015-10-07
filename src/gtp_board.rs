@@ -1,23 +1,4 @@
-/*use self::MoveResult::{LegalMove, StupidMove, IllegalMove};
-use self::StupidMoveReason::{SelfAtari};
-use self::IllegalMoveReason::{OccupiedVertex, Suicide};*/
-
-/*#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
-pub enum Piece {
-  Empty      = 0x0,
-  BlackStone = 0x1,
-  WhiteStone = 0x2,
-}
-
-impl Piece {
-  pub fn opponent(&self) -> Piece {
-    match *self {
-      Piece::BlackStone => Piece::WhiteStone,
-      Piece::WhiteStone => Piece::BlackStone,
-      Piece::Empty => Piece::Empty, // FIXME: should this arm be set at all?
-    }
-  }
-}*/
+use std::str::{from_utf8};
 
 #[derive(Clone, Copy, Debug)]
 pub enum Player {
@@ -39,13 +20,6 @@ impl Player {
       Player::White => b"white".to_vec(),
     }
   }
-
-  /*pub fn to_piece(&self) -> Piece {
-    match *self {
-      Player::Black => Piece::BlackStone,
-      Player::White => Piece::WhiteStone,
-    }
-  }*/
 }
 
 impl ToString for Player {
@@ -58,13 +32,13 @@ impl ToString for Player {
 }
 
 pub fn dump_xcoord(x: u8) -> Vec<u8> {
-  let x_label = [if x < 8 {
+  let x_label = vec![if x < 8 {
     'A' as u8 + x
   } else if x >= 8 {
     'J' as u8 + x - 8
   } else {
     unreachable!();
-  }].to_vec();
+  }];
   x_label
 }
 
@@ -85,23 +59,17 @@ impl Coord {
     Coord{x: x, y: y}
   }
 
-  /*pub fn from_idx(idx: u16) -> Coord {
-    Coord{
-      x: (idx as u8 % 19),
-      y: (idx as u8 / 19),
-    }
-  }*/
-
-  /*#[inline]
-  pub fn is_border(&self) -> bool {
-    self.x == 0 || self.x == 19u8 - 1 ||
-    self.y == 0 || self.y == 19u8 - 1
-  }*/
-
-  /*#[inline]
-  pub fn to_idx(&self) -> u16 {
-    self.x as u16 + self.y as u16 * 19
-  }*/
+  pub fn from_code(code: &[u8]) -> Coord {
+    let raw_x = code[0];
+    let x = match raw_x {
+      b'A' ... b'H' => raw_x - b'A',
+      b'J' ... b'T' => raw_x - b'A' - 1,
+      _ => unreachable!(),
+    };
+    let raw_y: Option<u8> = from_utf8(&code[1 ..]).unwrap().parse().ok();
+    let y = raw_y.unwrap() - 1;
+    Coord{x: x, y: y}
+  }
 
   pub fn to_bytestring(&self) -> Vec<u8> {
     let mut s = Vec::new();
@@ -151,23 +119,44 @@ impl Move {
   }
 }
 
-/*#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
+pub enum RuleSystem {
+  Japanese,
+  Chinese,
+  Aga,
+  NewZealand,
+}
+
+#[derive(Clone, Copy)]
+pub enum TimeSystem {
+  // GTP v2 natively only supports Canadian byo-yomi.
+  // KGS GTP extensions support no time limit, an absolute time limit,
+  // byo-yomi, and Canadian byo-yomi.
+  NoTimeLimit,
+  Absolute{
+    main_time_s:      u32,
+  },
+  ByoYomi{
+    main_time_s:      u32,
+    byo_yomi_time_s:  u32,
+    periods:          u32,
+  },
+  Canadian{
+    main_time_s:      u32,
+    byo_yomi_time_s:  u32,
+    stones:           u32,
+  },
+}
+
+#[derive(Clone, Copy)]
 pub enum MoveResult {
-  LegalMove,
-  StupidMove(StupidMoveReason),
-  IllegalMove(IllegalMoveReason),
+  Okay,
+  SyntaxError,
+  IllegalMove,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub enum StupidMoveReason {
-  SelfAtari,
+#[derive(Clone, Copy)]
+pub enum UndoResult {
+  Okay,
+  CannotUndo,
 }
-
-#[derive(Clone, Copy, Debug)]
-pub enum IllegalMoveReason {
-  Unknown,
-  OccupiedVertex,
-  Suicide,
-  Ko,
-  Superko,
-}*/
