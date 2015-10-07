@@ -1,4 +1,4 @@
-use fastboard::{IntoIndex, Action, FastBoard, FastBoardAux, FastBoardWork};
+use fastboard::{PosExt, Action, FastBoard, FastBoardAux, FastBoardWork};
 use policy::{TreePolicy, RolloutPolicy};
 
 use bit_set::{BitSet};

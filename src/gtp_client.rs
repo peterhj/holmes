@@ -1,33 +1,34 @@
 use agent::{PreGame, AgentBuilder, Agent};
-use fastboard::{IntoIndex, Pos, Stone};
+use fastboard::{PosExt, Pos, Stone};
 use gtp::{GtpClient, Entity};
 use gtp::Entity::*;
-use gtp_board::{Coord, Vertex, RuleSystem, TimeSystem, MoveResult, UndoResult, dump_xcoord, dump_ycoord};
+use gtp_board::{Player, Coord, Vertex, RuleSystem, TimeSystem, MoveResult, UndoResult, dump_xcoord, dump_ycoord};
 
 use std::str::{from_utf8};
-
-// XXX: See <http://www.lysator.liu.se/~gunnar/gtp/gtp2-spec-draft2/gtp2-spec.html#sec:fixed-handicap-placement>.
-static FIXED_HANDICAP_19X19_POSITIONS: [&'static [&'static [u8]]; 10] = [
-  &[],
-  &[],
-  &[b"D4", b"Q16"],
-  &[b"D4", b"Q16", b"D16"],
-  &[b"D4", b"Q16", b"D16", b"Q4"],
-  &[b"D4", b"Q16", b"D16", b"Q4", b"K10"],
-  &[b"D4", b"Q16", b"D16", b"Q4", b"D10", b"Q10"],
-  &[b"D4", b"Q16", b"D16", b"Q4", b"D10", b"Q10", b"K10"],
-  &[b"D4", b"Q16", b"D16", b"Q4", b"D10", b"Q10", b"K4", b"K16"],
-  &[b"D4", b"Q16", b"D16", b"Q4", b"D10", b"Q10", b"K4", b"K16", b"K10"],
-];
 
 pub struct Client {
   host:             String,
   port:             u16,
+  //player:           Option<Player>,
   should_shutdown:  bool,
 
   pre_game:         PreGame,
   agent_builder:    AgentBuilder,
   agent:            Agent,
+}
+
+impl Client {
+  pub fn new(host: String, port: u16, player: Option<Player>) -> Client {
+    Client{
+      host: host,
+      port: port,
+      //player: player,
+      should_shutdown: false,
+      pre_game: Default::default(),
+      agent_builder: Default::default(),
+      agent: Agent::new(),
+    }
+  }
 }
 
 impl GtpClient for Client {
@@ -132,6 +133,9 @@ impl GtpClient for Client {
   }
 
   fn reply_clear_board(&mut self) -> Vec<Entity> {
+    // XXX(20151006): not sure about the order in which boardsize, clear, etc.
+    // are called.
+    //self.agent_builder.reset();
     self.agent.invalidate();
     vec![]
   }
@@ -159,13 +163,10 @@ impl GtpClient for Client {
       return vec![ErrorEntity(b"board not empty".to_vec())];
     }
     let mut vertexes = vec![];
-    for &poses in &FIXED_HANDICAP_19X19_POSITIONS {
-      for &code in poses {
-        let coord = Coord::from_code(code);
-        let pos = Pos::from_coord(coord);
-        self.agent_builder.place_handicap(pos);
-        vertexes.push(VertexEntity(Vertex::Play(coord)));
-      }
+    for &pos in self.pre_game.fixed_handicap_positions(num_stones).iter() {
+      let coord = pos.to_coord();
+      self.agent_builder.place_handicap(pos);
+      vertexes.push(VertexEntity(Vertex::Play(coord)));
     }
     vertexes
   }
@@ -181,9 +182,8 @@ impl GtpClient for Client {
     if self.agent.is_valid() {
       return vec![ErrorEntity(b"board not empty".to_vec())];
     }
-    let handicap_poses = self.pre_game.prefer_handicap_positions(num_stones);
     let mut vertexes = vec![];
-    for &pos in handicap_poses.iter() {
+    for &pos in self.pre_game.prefer_handicap_positions(num_stones).iter() {
       let coord = pos.to_coord();
       self.agent_builder.place_handicap(pos);
       vertexes.push(VertexEntity(Vertex::Play(coord)));
@@ -234,6 +234,7 @@ impl GtpClient for Client {
     };
     if !self.agent.is_valid() {
       self.agent_builder.own_color(Stone::from_player(player));
+      self.agent_builder.remaining_defaults();
       self.agent = self.agent_builder.build();
     }
     let vertex = self.agent.gen_move_external(player);

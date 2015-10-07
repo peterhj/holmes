@@ -8,6 +8,7 @@ extern crate rand;
 extern crate time;
 
 pub mod agent;
+pub mod book;
 pub mod contains;
 pub mod fastboard;
 pub mod gtp;

@@ -12,12 +12,20 @@ name = "gtpctl"
 path = "tools/gtpctl.rs"
 
 [[bin]]
+name = "test-book"
+path = "tools/test-book.rs"
+
+[[bin]]
 name = "bench-board"
 path = "tools/bench-board.rs"
 
 [[bin]]
 name = "bench-tree"
 path = "tools/bench-tree.rs"
+
+[[bin]]
+name = "holmes-gtp"
+path = "tools/holmes-gtp.rs"
 
 [dependencies]
 bit-set = "*"

@@ -7,31 +7,57 @@ use std::iter::{repeat};
 
 const TOMBSTONE: Pos = -1;
 
-pub trait IntoIndex {
+pub trait PosExt {
   fn from_coord(coord: Coord) -> Self where Self: Sized;
-  fn to_coord(&self) -> Coord;
-  fn idx(&self) -> usize;
+  fn to_coord(self) -> Coord;
+  fn idx(self) -> usize;
+  fn rot(self, r: u8) -> Pos;
+  fn flip(self, f: u8) -> Pos;
 }
 
 pub type Pos = i16;
 
-impl IntoIndex for Pos {
+impl PosExt for Pos {
   fn from_coord(coord: Coord) -> Pos {
     assert!(coord.x < 19);
     assert!(coord.y < 19);
     coord.x as Pos + (coord.y as Pos) * 19
   }
 
-  fn to_coord(&self) -> Coord {
-    let coord = Coord{x: (*self % 19) as u8, y: (*self / 19) as u8};
+  fn to_coord(self) -> Coord {
+    let coord = Coord{x: (self % 19) as u8, y: (self / 19) as u8};
     assert!(coord.x < 19);
     assert!(coord.y < 19);
     coord
   }
 
   #[inline]
-  fn idx(&self) -> usize {
-    *self as usize
+  fn idx(self) -> usize {
+    self as usize
+  }
+
+  #[inline]
+  fn rot(self, r: u8) -> Pos {
+    let (x, y) = (self % 19, self / 19);
+    match r {
+      0 => self,
+      1 => y        + (19-1-x) * 19,
+      2 => (19-1-x) + (19-1-y) * 19,
+      3 => (19-1-y) + x * 19,
+      _ => unreachable!(),
+    }
+  }
+
+  #[inline]
+  fn flip(self, f: u8) -> Pos {
+    let (x, y) = (self % 19, self / 19);
+    match f {
+      0 => self,
+      1 => (19-1-x) + y * 19,
+      2 => x        + (19-1-y) * 19,
+      3 => (19-1-x) + (19-1-y) * 19,
+      _ => unreachable!(),
+    }
   }
 }
 
@@ -595,6 +621,18 @@ impl FastBoard {
 
   pub fn get_stone(&self, pos: Pos) -> Stone {
     self.stones[pos.idx()]
+  }
+
+  pub fn get_digest(&self) -> BitSet {
+    let mut digest = BitSet::with_capacity(Self::BOARD_SIZE * 2);
+    for (p, &stone) in self.stones.iter().enumerate() {
+      match stone {
+        Stone::Black => { digest.insert(p * 2); }
+        Stone::White => { digest.insert(p * 2 + 1); }
+        _ => {}
+      }
+    }
+    digest
   }
 
   pub fn reset(&mut self) {
