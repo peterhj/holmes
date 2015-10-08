@@ -13,7 +13,7 @@ struct XorShift128PlusState {
 extern "C" {
   fn xorshift128plus_avx2_stream32(state: *mut XorShift128PlusState, xs: *mut u32, len: size_t);
   fn xorshift128plus_avx2_uniform32(state: *mut XorShift128PlusState, xs: *mut f32, len: size_t);
-  fn xorshift128plus_avx2_box_muller_beta32(state: *mut XorShift128PlusState, mean: *const f32, std: *const f32, xs: *mut f32, len: size_t);
+  fn xorshift128plus_avx2_box_muller_beta32(state: *mut XorShift128PlusState, succ_ratio: *const f32, num_trials: *const f32, xs: *mut f32, len: size_t);
 }
 
 pub struct XorShift128PlusStreamRng {

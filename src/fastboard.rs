@@ -283,7 +283,7 @@ pub struct FastBoardWork {
   //   .ch_sizes and leave them in an invalidated state.
   // - In non-`undo`-safe kill, the chain liberties are dropped.
   //   In `undo`-safe kill, keep the chain liberties.
-  undo_place_pos:       Pos,
+  /*undo_place_pos:       Pos,
   undo_place_last_pos:  Option<Pos>,
   undo_place_st_first:  bool,
   undo_cap_stones:      Vec<(Pos, Stone)>,
@@ -293,7 +293,7 @@ pub struct FastBoardWork {
   undo_merge_extend:    usize,
   undo_kill_pslib_lims: Vec<(Pos, usize)>,
   undo_kill_chains:     Vec<Option<Box<ChainLibs>>>,
-  undo_kill_ko_pos:     Option<Pos>,
+  undo_kill_ko_pos:     Option<Pos>,*/
 }
 
 impl FastBoardWork {
@@ -301,7 +301,7 @@ impl FastBoardWork {
     FastBoardWork{
       merge_adj_heads:      Vec::with_capacity(4),
       check_pos:            BitVec::from_elem(FastBoard::BOARD_SIZE, false),
-      undo_place_pos:       TOMBSTONE,
+      /*undo_place_pos:       TOMBSTONE,
       undo_place_last_pos:  None,
       undo_place_st_first:  false,
       undo_cap_stones:      Vec::with_capacity(4),
@@ -311,7 +311,7 @@ impl FastBoardWork {
       undo_merge_extend:    0,
       undo_kill_pslib_lims: Vec::with_capacity(4),
       undo_kill_chains:     Vec::with_capacity(4),
-      undo_kill_ko_pos:     None,
+      undo_kill_ko_pos:     None,*/
     }
   }
 
@@ -344,7 +344,6 @@ pub struct FastBoardAux {
   // FastBoardAux operation is:
   // 1. state.play_turn(..., aux_state)
   // 2. aux_state.update_turn(state, ...)
-  // FIXME(20151006): usage of last_* fields may be buggy.
   last_adj_chs: Vec<Pos>,       // last move adjacent chains.
   last_kills:   Vec<Pos>,       // last move killed chains.
 
@@ -387,13 +386,13 @@ impl FastBoardAux {
     //self.hash = 0;
   }
 
-  pub fn update_turn(&mut self, board: &FastBoard, work: &mut FastBoardWork) {
+  /*fn update_turn(&mut self, board: &FastBoard, work: &mut FastBoardWork) {
     let turn = board.current_turn();
     self.update(turn, board, work);
-  }
+  }*/
 
-  pub fn update(&mut self, turn: Stone, board: &FastBoard, work: &mut FastBoardWork) {
-    self.update_legal_positions(turn, board, work);
+  fn update(&mut self, turn: Stone, board: &FastBoard, work: &mut FastBoardWork) {
+    self.update_legal_positions(board, work);
   }
 
   fn check_move_simple(&self, stone: Stone, action: Action, board: &FastBoard) -> Option<ActionStatus> {
@@ -473,20 +472,20 @@ impl FastBoardAux {
     }
   }
 
-  pub fn check_move(&self, stone: Stone, action: Action, board: &FastBoard, work: &mut FastBoardWork) -> ActionStatus {
-    match self.check_move_simple(stone, action, board) {
+  pub fn check_move(&self, turn: Stone, action: Action, board: &FastBoard, work: &mut FastBoardWork) -> ActionStatus {
+    match self.check_move_simple(turn, action, board) {
       Some(status)  => status,
       // FIXME(20151004): simulate move to check legality.
       None          => ActionStatus::IllegalUnknown,
     }
   }
 
-  pub fn is_legal_move_cached(&self, stone: Stone, action: Action) -> bool {
+  pub fn is_legal_move_cached(&self, turn: Stone, action: Action) -> bool {
     match action {
       Action::Resign  => { true }
       Action::Pass    => { true }
       Action::Place{pos} => {
-        self.st_legal[stone.offset()].contains(&pos.idx())
+        self.st_legal[turn.offset()].contains(&pos.idx())
       }
     }
   }
@@ -495,7 +494,7 @@ impl FastBoardAux {
     &self.st_legal[turn.offset()]
   }
 
-  pub fn update_legal_positions(&mut self, turn: Stone, board: &FastBoard, work: &mut FastBoardWork) {
+  pub fn update_legal_positions(&mut self, board: &FastBoard, work: &mut FastBoardWork) {
     // TODO(20151004): Shortcuts are possible depending on the last play:
     // - last pos touched no prior chains:
     //   only update adjacent moves
@@ -505,37 +504,43 @@ impl FastBoardAux {
     //   easy way out is to redo the whole board; otherwise need to propagate
     //   affected chains and update affected liberties
     if let Some(last_pos) = board.last_pos {
-      let turn_off = turn.offset();
-      if self.last_kills.len() > 0 {
-        for p in (0 .. FastBoard::BOARD_SIZE) {
-          match self.check_move(turn, Action::Place{pos: p as Pos}, board, work) {
-            ActionStatus::Legal => { self.st_legal[turn_off].insert(p); }
-            _                   => { self.st_legal[turn_off].remove(&p); }
-          }
+      for &turn in &[Stone::Black, Stone::White] {
+        let turn_off = turn.offset();
+        match self.check_move(turn, Action::Place{pos: last_pos}, board, work) {
+          ActionStatus::Legal => { self.st_legal[turn_off].insert(last_pos.idx()); }
+          _                   => { self.st_legal[turn_off].remove(&last_pos.idx()); }
         }
-      } else {
-        work.check_pos.clear();
-        for &h in self.last_adj_chs.iter() {
-          let head = board.traverse_chain_slow(h);
-          let chain = board.get_chain(head);
-          for &lib in chain.ps_libs.iter() {
-            if !work.check_pos.get(lib.idx()).unwrap() {
-              work.check_pos.set(lib.idx(), true);
-              match self.check_move(turn, Action::Place{pos: lib}, board, work) {
-                ActionStatus::Legal => { self.st_legal[turn_off].insert(lib.idx()); }
-                _                   => { self.st_legal[turn_off].remove(&lib.idx()); }
+        if self.last_kills.len() > 0 {
+          for p in (0 .. FastBoard::BOARD_SIZE) {
+            match self.check_move(turn, Action::Place{pos: p as Pos}, board, work) {
+              ActionStatus::Legal => { self.st_legal[turn_off].insert(p); }
+              _                   => { self.st_legal[turn_off].remove(&p); }
+            }
+          }
+        } else {
+          work.check_pos.clear();
+          for &h in self.last_adj_chs.iter() {
+            let head = board.traverse_chain_slow(h);
+            let chain = board.get_chain(head);
+            for &lib in chain.ps_libs.iter() {
+              if !work.check_pos.get(lib.idx()).unwrap() {
+                work.check_pos.set(lib.idx(), true);
+                match self.check_move(turn, Action::Place{pos: lib}, board, work) {
+                  ActionStatus::Legal => { self.st_legal[turn_off].insert(lib.idx()); }
+                  _                   => { self.st_legal[turn_off].remove(&lib.idx()); }
+                }
               }
             }
           }
-        }
-        FastBoard::for_each_adjacent(last_pos, |adj_pos| {
-          if !work.check_pos.get(adj_pos.idx()).unwrap() {
-            match self.check_move(turn, Action::Place{pos: adj_pos}, board, work) {
-              ActionStatus::Legal => { self.st_legal[turn_off].insert(adj_pos.idx()); }
-              _                   => { self.st_legal[turn_off].remove(&adj_pos.idx()); }
+          FastBoard::for_each_adjacent(last_pos, |adj_pos| {
+            if !work.check_pos.get(adj_pos.idx()).unwrap() {
+              match self.check_move(turn, Action::Place{pos: adj_pos}, board, work) {
+                ActionStatus::Legal => { self.st_legal[turn_off].insert(adj_pos.idx()); }
+                _                   => { self.st_legal[turn_off].remove(&adj_pos.idx()); }
+              }
             }
-          }
-        });
+          });
+        }
       }
     }
   }
@@ -543,25 +548,28 @@ impl FastBoardAux {
 
 #[derive(Clone, Debug)]
 pub struct FastBoard {
-  in_txn:   bool,             // is the board in a txn?
+  // FIXME(20151006): for clarity, should group fields into ones modified during
+  // .play() and ones modified during .update().
+
+  // Undo-safe txns.
+  in_txn:     bool,           // is the board in a txn?
 
   // Basic board structure.
-  turn:     Stone,            // whose turn it is.
-  stones:   Vec<Stone>,       // the stone configuration on the board.
-  ko_pos:   Option<Pos>,      // the ko point, if any.
+  turn:       Stone,          // whose turn it is to move.
+  stones:     Vec<Stone>,     // the stone configuration on the board.
+  ko_pos:     Option<Pos>,    // the ko point, if any.
 
-  // Previous board structure (clobbered during .play()).
-  // FIXME(20151006): usage of last_* fields may be buggy.
-  last_pos:   Option<Pos>,    // the previous played position.
-  last_turn:  Option<Stone>,  // the previous turn.
+  // Previous board structures.
+  last_turn:  Option<Stone>,  // the previously played turn.
+  last_pos:   Option<Pos>,    // the previously played position.
 
   // Chain data structures. Namely, this implements a linked quick-union for
   // finding and iterating over connected components, as well as a list of
   // chain liberties.
-  ch_roots: Vec<Pos>,
-  ch_links: Vec<Pos>,
-  ch_sizes: Vec<u16>,
-  ch_libs:  Vec<Option<Box<ChainLibs>>>,
+  ch_roots:   Vec<Pos>,
+  ch_links:   Vec<Pos>,
+  ch_sizes:   Vec<u16>,
+  ch_libs:    Vec<Option<Box<ChainLibs>>>,
 }
 
 impl FastBoard {
@@ -606,8 +614,8 @@ impl FastBoard {
       turn:     Stone::Black,
       stones:   Vec::with_capacity(Self::BOARD_SIZE),
       ko_pos:   None,
-      last_pos:   None,
       last_turn:  None,
+      last_pos:   None,
       ch_roots: Vec::with_capacity(Self::BOARD_SIZE),
       ch_links: Vec::with_capacity(Self::BOARD_SIZE),
       ch_sizes: Vec::with_capacity(Self::BOARD_SIZE),
@@ -657,9 +665,20 @@ impl FastBoard {
     self.ch_libs.extend(repeat(None).take(Self::BOARD_SIZE));
   }
 
-  pub fn play_turn(&mut self, action: Action, work: &mut FastBoardWork, aux: &mut Option<FastBoardAux>) {
+  /*pub fn play_turn(&mut self, action: Action, work: &mut FastBoardWork, aux: &mut Option<FastBoardAux>) {
     let turn = self.turn;
     self.play(turn, action, work, aux);
+  }*/
+
+  pub fn is_legal_move_fast(&self, stone: Stone, pos: Pos) -> bool {
+    // TODO(20151008): check suicide, eye, ko.
+    unimplemented!();
+  }
+
+  pub fn score_fast(&self, komi: f32) -> f32 {
+    // TODO(20151008): just count stones and eyes, then add komi;
+    // negative scores go to black, positive scores go to white.
+    unimplemented!();
   }
 
   pub fn play(&mut self, stone: Stone, action: Action, work: &mut FastBoardWork, aux: &mut Option<FastBoardAux>) {
@@ -707,40 +726,22 @@ impl FastBoard {
         }
       }
     }
-    self.turn = self.turn.opponent();
   }
 
-  pub fn begin_txn_play(&mut self, stone: Stone, action: Action, work: &mut FastBoardWork, aux: &mut Option<FastBoardAux>) {
-    assert!(!self.in_txn);
-    work.txn_reset();
-    match action {
-      Action::Resign => {}
-      Action::Pass => {}
-      Action::Place{pos} => {
-        // TODO(20151003)
-        self.txn_place_stone(stone, pos, work, aux);
-        self.txn_update_chains(stone, pos, work, aux);
-      }
+  pub fn update(&mut self, turn: Stone, action: Action, work: &mut FastBoardWork, aux: &mut Option<FastBoardAux>) {
+    self.turn = turn.opponent();
+    self.last_turn = Some(turn);
+    if let Action::Place{pos} = action {
+      self.last_pos = Some(pos);
     }
-    // TODO
-    self.in_txn = true;
-  }
-
-  pub fn commit_txn_play(&mut self) {
-    self.in_txn = false;
-    self.turn = self.turn.opponent();
-  }
-
-  pub fn undo_txn_play(&mut self) {
-    // TODO
-    self.in_txn = false;
+    if let &mut Some(ref mut aux) = aux {
+      aux.update(turn, self, work);
+    }
   }
 
   fn place_stone(&mut self, stone: Stone, pos: Pos, aux: &mut Option<FastBoardAux>) {
     let i = pos.idx();
     self.stones[i] = stone;
-    self.last_pos = Some(pos);
-    self.last_turn = Some(stone);
     self.ch_roots[i] = TOMBSTONE;
     if let &mut Some(ref mut aux) = aux {
       aux.st_first.set(i, false);
@@ -832,9 +833,6 @@ impl FastBoard {
     }
   }
 
-  /*fn update_chains(&mut self, stone: Stone, pos: Pos, work: &mut FastBoardWork, aux: &mut Option<FastBoardAux>) {
-  }*/
-
   fn create_chain(&mut self, head: Pos, aux: &mut Option<FastBoardAux>) {
     self.ch_roots[head.idx()] = head;
     self.ch_links[head.idx()] = head;
@@ -913,6 +911,32 @@ impl FastBoard {
       self.ko_pos = Some(prev);
     }
     num_captured
+  }
+
+  /*pub fn begin_txn_play(&mut self, stone: Stone, action: Action, work: &mut FastBoardWork, aux: &mut Option<FastBoardAux>) {
+    assert!(!self.in_txn);
+    work.txn_reset();
+    match action {
+      Action::Resign => {}
+      Action::Pass => {}
+      Action::Place{pos} => {
+        // TODO(20151003)
+        self.txn_place_stone(stone, pos, work, aux);
+        self.txn_update_chains(stone, pos, work, aux);
+      }
+    }
+    // TODO
+    self.in_txn = true;
+  }
+
+  pub fn commit_txn_play(&mut self) {
+    self.in_txn = false;
+    self.turn = self.turn.opponent();
+  }
+
+  pub fn undo_txn_play(&mut self) {
+    // TODO
+    self.in_txn = false;
   }
 
   fn txn_union_chains(&mut self, pos1: Pos, pos2: Pos, work: &mut FastBoardWork) -> Pos {
@@ -1060,5 +1084,5 @@ impl FastBoard {
       work.undo_kill_ko_pos = self.ko_pos;
       self.ko_pos = Some(prev);
     }
-  }
+  }*/
 }

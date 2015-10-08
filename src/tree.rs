@@ -105,8 +105,11 @@ impl<P> SearchTree<P> where P: TreePolicy {
           } else {
             let mut next_state = self.nodes[id].state.clone();
             let mut next_aux_state = self.nodes[id].aux_state.clone();
-            next_state.play_turn(Action::Place{pos: pos}, work, &mut next_aux_state);
-            next_aux_state.as_mut().unwrap().update_turn(&next_state, work);
+            // FIXME(20151006): beware semantics of current_turn(); should probably
+            // manually track turn.
+            let curr_turn = next_state.current_turn();
+            next_state.play(curr_turn, Action::Place{pos: pos}, work, &mut next_aux_state);
+            next_state.update(curr_turn, Action::Place{pos: pos}, work, &mut next_aux_state);
             let next_id = self.expand(Some((id, action)), next_state, next_aux_state, 0, 0.0);
             return TreePathResult::Leaf{id: next_id};
           }

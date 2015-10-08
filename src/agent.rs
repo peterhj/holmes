@@ -216,7 +216,7 @@ impl Agent {
         self.state_history.push((current_state.clone(), current_aux.clone()));
         self.action_history.push((turn, action));
         current_state.play(turn, action, work, current_aux);
-        current_aux.as_mut().unwrap().update(turn, current_state, work);
+        current_state.update(turn, action, work, current_aux);
         self.current_ply += 1;
         MoveResult::Okay
       }

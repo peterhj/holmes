@@ -155,6 +155,44 @@ impl TreePolicy for UctRaveTreePolicy {
   }
 }
 
+#[derive(Clone, Copy, Default)]
+pub struct ThompsonNodeData;
+
+#[derive(Clone, Copy, Default)]
+pub struct ThompsonEdgeData {
+  succ_ratio: f32,
+  num_trials: f32,
+}
+
+impl ThompsonEdgeData {
+  fn update(&mut self, r: f32) {
+    let n = self.num_trials + 1.0;
+    let mut mu = self.succ_ratio;
+    let delta = r - mu;
+    mu = mu + delta / n;
+    self.succ_ratio = mu;
+    self.num_trials = n;
+  }
+
+  pub fn update_succ(&mut self) {
+    self.update(1.0);
+  }
+
+  pub fn update_fail(&mut self) {
+    self.update(0.0);
+  }
+}
+
+#[derive(Clone, Copy)]
+pub struct ThompsonTreePolicyConfig {
+  pub max_plays: i32,
+}
+
+#[derive(Clone, Copy)]
+pub struct ThompsonTreePolicy {
+  config: ThompsonTreePolicyConfig,
+}
+
 pub trait RolloutPolicy {
   fn execute_rollout(&mut self, init_state: &FastBoard, init_depth: i32) -> i32 {
     unimplemented!();
