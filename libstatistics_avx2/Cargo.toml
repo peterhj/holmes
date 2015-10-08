@@ -1,0 +1,22 @@
+[package]
+name = "statistics_avx2"
+version = "0.1.0"
+authors = ["Peter Jin <peterhaijin@gmail.com>"]
+links = "statistics_avx2_impl"
+build = "build.rs"
+
+[lib]
+name = "statistics_avx2"
+path = "src/lib.rs"
+
+[[bin]]
+name = "bench"
+path = "tools/bench.rs"
+
+[build-dependencies]
+gcc = "*"
+
+[dependencies]
+libc = "*"
+rand = "*"
+time = "*"
