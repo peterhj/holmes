@@ -9,7 +9,28 @@ static const size_t LOG2_DEBRUIJN_OFFSETS[32] = {
   8, 12, 20, 28, 15, 17, 24, 7, 19, 27, 23, 6, 26, 5, 4, 31
 };
 
-size_t statistics_arg_amax(const float *xs, size_t len) {
+void statistics_array_fill(float c, float *xs, size_t len) {
+  __m256 x = _mm256_set1_ps(c);
+  float *xs_end = xs + len;
+  for ( ; xs + 32 <= xs_end; xs += 32) {
+    _mm256_storeu_ps(xs, x);
+    _mm256_storeu_ps(xs + 8, x);
+    _mm256_storeu_ps(xs + 16, x);
+    _mm256_storeu_ps(xs + 24, x);
+  }
+  for ( ; xs + 16 <= xs_end; xs += 16) {
+    _mm256_storeu_ps(xs, x);
+    _mm256_storeu_ps(xs + 8, x);
+  }
+  for ( ; xs + 8 <= xs_end; xs += 8) {
+    _mm256_storeu_ps(xs, x);
+  }
+  for ( ; xs < xs_end; xs += 1) {
+    *xs = c;
+  }
+}
+
+size_t statistics_array_argmax(const float *xs, size_t len) {
   __m256 x, m0, m1, m2, m3, m4, m, fmask;
   uint32_t bmask;
   float loc_max[8];

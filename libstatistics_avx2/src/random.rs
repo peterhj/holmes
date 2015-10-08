@@ -1,4 +1,5 @@
 use libc::{size_t};
+use rand::{Rng};
 use std::cmp::{min};
 use std::mem::{uninitialized};
 
@@ -12,12 +13,25 @@ struct XorShift128PlusState {
 extern "C" {
   fn xorshift128plus_avx2_stream32(state: *mut XorShift128PlusState, xs: *mut u32, len: size_t);
   fn xorshift128plus_avx2_uniform32(state: *mut XorShift128PlusState, xs: *mut f32, len: size_t);
-  fn xorshift128plus_avx2_box_muller32(state: *mut XorShift128PlusState, mean: f32, std: f32, xs: *mut f32, len: size_t);
   fn xorshift128plus_avx2_box_muller_beta32(state: *mut XorShift128PlusState, mean: *const f32, std: *const f32, xs: *mut f32, len: size_t);
 }
 
 pub struct XorShift128PlusStreamRng {
   state: XorShift128PlusState,
+}
+
+impl Rng for XorShift128PlusStreamRng {
+  fn next_u32(&mut self) -> u32 {
+    let mut xs: [u32; 1] = unsafe { uninitialized() };
+    self.sample_u32(&mut xs);
+    unsafe { *xs.as_ptr() }
+  }
+
+  fn next_u64(&mut self) -> u64 {
+    let mut xs: [u32; 2] = unsafe { uninitialized() };
+    self.sample_u32(&mut xs);
+    unsafe { *(xs.as_ptr() as *const u64) }
+  }
 }
 
 impl XorShift128PlusStreamRng {
@@ -28,6 +42,8 @@ impl XorShift128PlusStreamRng {
   pub fn new(seed: &[u64]) -> XorShift128PlusStreamRng {
     let mut rng = Self::new_unseeded();
     rng.seed(seed);
+    // XXX: This increases the initial state entropy (many zeros to half zeros).
+    // See Figure 4 in <http://arxiv.org/abs/1404.0390> for details.
     rng.burn(20);
     rng
   }
@@ -56,12 +72,6 @@ impl XorShift128PlusStreamRng {
     }
   }
 
-  pub fn next_u64(&mut self) -> u64 {
-    let mut xs: [u32; 2] = unsafe { uninitialized() };
-    self.sample_u32(&mut xs);
-    unsafe { *(xs.as_ptr() as *const u64) }
-  }
-
   pub fn sample_u32(&mut self, xs: &mut [u32]) {
     unsafe { xorshift128plus_avx2_stream32(&mut self.state as *mut _, xs.as_mut_ptr(), xs.len() as size_t) };
   }
@@ -70,15 +80,9 @@ impl XorShift128PlusStreamRng {
     unsafe { xorshift128plus_avx2_uniform32(&mut self.state as *mut _, xs.as_mut_ptr(), xs.len() as size_t) };
   }
 
-  /*pub fn sample_normal_f32(&mut self, mean: f32, std: f32, xs: &mut [f32]) {
-    self.sample_uniform_f32(xs);
-    unsafe { xorshift128plus_avx2_box_muller32(&mut self.state as *mut _, mean, std, xs.as_mut_ptr(), xs.len() as size_t) };
-  }*/
-
   pub fn sample_approx_beta_f32(&mut self, succ_ratio: &[f32], num_trials: &[f32], xs: &mut [f32]) {
     assert_eq!(succ_ratio.len(), xs.len());
     assert_eq!(num_trials.len(), xs.len());
-    self.sample_uniform_f32(xs);
     unsafe { xorshift128plus_avx2_box_muller_beta32(
         &mut self.state as *mut _,
         succ_ratio.as_ptr(),

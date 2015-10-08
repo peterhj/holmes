@@ -2,10 +2,11 @@ extern crate gcc;
 
 fn main() {
   gcc::Config::new()
-    .compiler("gcc-4.7")
+    .compiler("gcc-4.9")
     .opt_level(3)
     .flag("-std=gnu99")
     .flag("-march=native")
+    .flag("-mavx2")
     .flag("-Wall")
     .flag("-Werror")
     .include("src/c")
