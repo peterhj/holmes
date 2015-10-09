@@ -37,7 +37,9 @@ fn main() {
   unsafe { succ_ratio.set_len(n) };
 
   let start_t = get_time();
-  rng.sample_uniform_f32(&mut succ_ratio);
+  for _ in (0 .. m) {
+    rng.sample_uniform_f32(&mut succ_ratio);
+  }
   let elapsed_ms = (get_time() - start_t).num_milliseconds();
   println!("DEBUG: uniform");
   println!("DEBUG: elapsed: {} ms", elapsed_ms);

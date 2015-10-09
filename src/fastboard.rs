@@ -184,13 +184,13 @@ impl RuleSet {
 }
 
 #[derive(Clone, Debug)]
-pub struct ChainLibs {
+pub struct Chain {
   ps_libs: Vec<Pos>,
 }
 
-impl ChainLibs {
-  pub fn new() -> ChainLibs {
-    ChainLibs{ps_libs: Vec::with_capacity(4) }
+impl Chain {
+  pub fn new() -> Chain {
+    Chain{ps_libs: Vec::with_capacity(4) }
   }
 
   pub fn add_pseudoliberty(&mut self, lib: Pos) {
@@ -212,6 +212,8 @@ impl ChainLibs {
     self.ps_libs.len()
   }
 
+  // FIXME(20151009): these approximate liberties are almost certainly wrong;
+  // only a liberty if fully surrounded by same color.
   pub fn approx_count_liberties(&self) -> usize {
     let mut prev_lib = None;
     for &lib in self.ps_libs.iter() {
@@ -292,10 +294,10 @@ pub struct FastBoardWork {
   undo_cap_stones:      Vec<(Pos, Stone)>,
   undo_merge_glue:      Vec<Pos>,
   undo_merge_size:      u16,
-  undo_merge_chains:    Vec<Option<Box<ChainLibs>>>,
+  undo_merge_chains:    Vec<Option<Box<Chain>>>,
   undo_merge_extend:    usize,
   undo_kill_pslib_lims: Vec<(Pos, usize)>,
-  undo_kill_chains:     Vec<Option<Box<ChainLibs>>>,
+  undo_kill_chains:     Vec<Option<Box<Chain>>>,
   undo_kill_ko_pos:     Option<Pos>,*/
 }
 
@@ -331,6 +333,22 @@ impl FastBoardWork {
   }
 }
 
+struct EdgeOrderTree;
+
+impl EdgeOrderTree {
+  pub fn link(&mut self, u: Pos, v: Pos) {
+  }
+
+  pub fn cut(&mut self, u: Pos, e: usize) {
+  }
+
+  pub fn split(&mut self, v: Pos, e: usize) {
+  }
+
+  pub fn merge(&mut self, u: Pos, w: Pos) {
+  }
+}
+
 #[derive(Clone)]
 pub struct FastBoardAux {
   // Stone state data structures (some may be moved back to FastBoard).
@@ -340,7 +358,15 @@ pub struct FastBoardAux {
   st_reach:     Vec<BitVec>,    // whether stones of a certain color reach empty.
   //st_adj:       Vec<BitVec>,    // adjacent stones of a certain color (4 bits/pos).
 
+  // Empty regions are tracked using a dynamic connectivity data structure.
+  // Possible data structures:
+  // - Eulerian tour tree: see lecture notes Williams 2015.
+  // - Edge-ordered dynamic tree: see Eppstein et al. 1990; based on ST-trees
+  //   from Sleator and Tarjan 1982.
+  //regions:      EdgeOrderTree,
+
   // Chain state data structures.
+  // TODO(20151009): currently unused.
   ch_heads:     HashSet<Pos>,
 
   // Data about the last play. The intended sequence of FastBoard and
@@ -404,11 +430,17 @@ impl FastBoardAux {
       Action::Resign  => { return Some(ActionStatus::Legal); }
       Action::Pass    => { return Some(ActionStatus::Legal); }
       Action::Place{pos} => {
+        if verbose {
+          println!("DEBUG: check move: {:?} {}", stone, pos.to_coord().to_string());
+        }
         // Local checks: these touch only the candidate position and its
         // 4-adjacent positions.
         let i = pos.idx();
         // Position is occupied.
         if !self.st_empty[i] {
+          if verbose {
+            println!("DEBUG: illegal move: occupied");
+          }
           return Some(ActionStatus::IllegalOccupied);
         }
         // Position is not an eye.
@@ -433,16 +465,19 @@ impl FastBoardAux {
             eye_adj_libs = min(eye_adj_libs, adj_chain.approx_count_liberties());
           });
           if eye_adj_libs >= 2 {
+            if verbose {
+              println!("DEBUG: illegal move: single-point eye");
+            }
             return Some(ActionStatus::IllegalSuicide);
           }
         }
         // Ko rule.
-        let first_play = self.st_first[i];
+        // FIXME(20151009): fix ko point stuff.
+        /*let first_play = self.st_first[i];
         if first_play {
           return Some(ActionStatus::Legal);
         }
-        // FIXME(20151009): fix ko point stuff.
-        /*if let Some(ko_pos) = board.ko_pos {
+        if let Some(ko_pos) = board.ko_pos {
           if ko_pos == pos {
             return Some(ActionStatus::IllegalKo);
           }
@@ -454,35 +489,40 @@ impl FastBoardAux {
         // Condition for quick global check: first play on the position, move
         // does not reduce any chain's liberties to zero. No simulation needed.
         //if first_play {
-          let mut is_chain_suicide = false;
-          let mut is_captor = false;
-          FastBoard::for_each_adjacent(pos, |adj_pos| {
-            // XXX: Check both player's and opponent's adjacent chains.
-            if board.stones[adj_pos.idx()] != Stone::Empty {
-              let adj_head = board.traverse_chain_slow(adj_pos);
-              assert!(adj_head != TOMBSTONE);
-              if board.get_chain(adj_head).approx_count_liberties() <= 1 {
-                if board.stones[adj_pos.idx()] == stone {
-                  is_chain_suicide = true;
-                } else if board.stones[adj_pos.idx()] == opp_stone {
-                  is_captor = true;
-                }
+        let mut is_chain_suicide = false;
+        let mut is_captor = false;
+        FastBoard::for_each_adjacent(pos, |adj_pos| {
+          // XXX: Check both player's and opponent's adjacent chains.
+          if board.stones[adj_pos.idx()] != Stone::Empty {
+            let adj_head = board.traverse_chain_slow(adj_pos);
+            assert!(adj_head != TOMBSTONE);
+            if board.get_chain(adj_head).approx_count_liberties() <= 1 {
+              if board.stones[adj_pos.idx()] == stone {
+                is_chain_suicide = true;
+              } else if board.stones[adj_pos.idx()] == opp_stone {
+                is_captor = true;
               }
             }
-          });
+          }
+        });
+        println!("DEBUG: move is chain suicide? {} is captor? {}",
+            is_chain_suicide, is_captor);
           /*if !is_captor {
             if is_chain_suicide {
               return Some(ActionStatus::IllegalSuicide);
             }
             return Some(ActionStatus::Legal);
           }*/
-          if is_captor {
-            return Some(ActionStatus::Legal);
-          } else if is_chain_suicide {
-            return Some(ActionStatus::IllegalSuicide);
-          } else {
-            return Some(ActionStatus::Legal);
+        if is_captor {
+          return Some(ActionStatus::Legal);
+        } else if is_chain_suicide {
+          if verbose {
+            println!("DEBUG: illegal move: chain suicide");
           }
+          return Some(ActionStatus::IllegalSuicide);
+        } else {
+          return Some(ActionStatus::Legal);
+        }
         //}
 
         // Otherwise, we have to simulate the move to check legality.
@@ -495,7 +535,12 @@ impl FastBoardAux {
     match self.check_move_simple(turn, action, board, verbose) {
       Some(status)  => status,
       // FIXME(20151004): simulate move to check legality.
-      None          => ActionStatus::IllegalUnknown,
+      None          => {
+        if verbose {
+          println!("DEBUG: illegal move: unknown, must simulate");
+        }
+        ActionStatus::IllegalUnknown
+      }
     }
   }
 
@@ -592,7 +637,7 @@ pub struct FastBoard {
   ch_roots:   Vec<Pos>,
   ch_links:   Vec<Pos>,
   ch_sizes:   Vec<u16>,
-  ch_libs:    Vec<Option<Box<ChainLibs>>>,
+  ch_libs:    Vec<Option<Box<Chain>>>,
 }
 
 impl FastBoard {
@@ -694,16 +739,25 @@ impl FastBoard {
     self.ch_libs.extend(repeat(None).take(Self::BOARD_SIZE));
   }
 
-  pub fn is_legal_move_fast(&self, stone: Stone, pos: Pos) -> bool {
-    // TODO(20151008): check suicide, eye, ko.
-    // Local checks: these touch only the candidate position and its
-    // 4-adjacent positions.
-    let i = pos.idx();
+  #[inline]
+  pub fn is_occupied(&self, pos: Pos) -> bool {
     // Position is not occupied.
-    if self.stones[i] != Stone::Empty {
-      return false;
+    if self.stones[pos.idx()] != Stone::Empty {
+      false
+    } else {
+      true
     }
-    // FIXME(20151009): fix this psuedo-eye logic.
+  }
+
+  #[inline]
+  pub fn is_single_eye(&self, stone: Stone, pos: Pos) -> bool {
+    // FIXME(20151009): fix this pseudo-single-point-eye logic:
+    // <http://computer-go.org/pipermail/computer-go/2013-February/005735.html>
+    // - empty point
+    // - orthogonal neighbors are of same color
+    // - diagonal neighbors contain no more than one opposite color, unless
+    //   it is a border in which case no oppo stones allowed
+
     // Position is not an eye.
     // Approximate definition of an eye:
     // 1. surrounded on all 4 sides by the opponent's chain;
@@ -728,8 +782,19 @@ impl FastBoard {
         return false;
       }
     }
+    true
+  }
+
+  pub fn is_legal_move_fast(&self, stone: Stone, pos: Pos) -> bool {
+    // TODO(20151008): check suicide, eye, ko.
+    //let i = pos.idx();
+    if self.is_occupied(pos) {
+      return false;
+    }
+    if self.is_single_eye(stone, pos) {
+      return false;
+    }
     // FIXME(20151009): ko rule.
-    // Ko rule.
     true
   }
 
@@ -860,19 +925,19 @@ impl FastBoard {
   /*fn update_chains(&mut self, stone: Stone, pos: Pos, work: &mut FastBoardWork, aux: &mut Option<FastBoardAux>) {
   }*/
 
-  fn get_chain(&self, head: Pos) -> &ChainLibs {
+  fn get_chain(&self, head: Pos) -> &Chain {
     &**self.ch_libs[head.idx()].as_ref()
       .unwrap()
       //.expect(&format!("get_chain expected a chain: {}", head))
   }
 
-  fn get_chain_mut(&mut self, head: Pos) -> &mut ChainLibs {
+  fn get_chain_mut(&mut self, head: Pos) -> &mut Chain {
     &mut **self.ch_libs[head.idx()].as_mut()
       .unwrap()
       //.expect(&format!("get_chain_mut expected a chain: {}", head))
   }
 
-  fn take_chain(&mut self, head: Pos) -> Box<ChainLibs> {
+  fn take_chain(&mut self, head: Pos) -> Box<Chain> {
     self.ch_libs[head.idx()].take()
       .unwrap()
       //.expect(&format!("take_chain expected a chain: {}", head))
@@ -933,7 +998,7 @@ impl FastBoard {
     self.ch_roots[head.idx()] = head;
     self.ch_links[head.idx()] = head;
     self.ch_sizes[head.idx()] = 1;
-    self.ch_libs[head.idx()] = Some(Box::new(ChainLibs::new()));
+    self.ch_libs[head.idx()] = Some(Box::new(Chain::new()));
     if let &mut Some(ref mut aux) = aux {
       aux.ch_heads.insert(head);
     }
@@ -1114,7 +1179,7 @@ impl FastBoard {
     self.ch_roots[head.idx()] = head;
     self.ch_links[head.idx()] = head;
     self.ch_sizes[head.idx()] = 1;
-    self.ch_libs[head.idx()] = Some(Box::new(ChainLibs::new()));
+    self.ch_libs[head.idx()] = Some(Box::new(Chain::new()));
     Self::for_each_adjacent(head, |adj_pos| {
       if let Stone::Empty = self.stones[adj_pos.idx()] {
         self.get_chain_mut(head).add_pseudoliberty(adj_pos);
