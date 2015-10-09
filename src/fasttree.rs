@@ -90,6 +90,8 @@ pub struct FastSearchTree {
   leaf_out:   Option<Stone>,
   roll_moves: Vec<Pos>,
   work:       FastBoardWork,
+  tmp_board:  FastBoard,
+  tmp_aux:    FastBoardAux,
 }
 
 impl FastSearchTree {
@@ -105,6 +107,8 @@ impl FastSearchTree {
       leaf_out:   None,
       roll_moves: Vec::new(),
       work:       FastBoardWork::new(),
+      tmp_board:  FastBoard::new(),
+      tmp_aux:    FastBoardAux::new(),
     }
   }
 
@@ -151,11 +155,14 @@ impl FastSearchTree {
           } else {
             let next_id = self.alloc_id();
             let mut next_state = self.nodes[&id].state.clone();
-            let mut next_aux_state = Some(self.nodes[&id].aux_state.clone());
+            let mut next_aux_state = self.nodes[&id].aux_state.clone();
             let turn = next_state.current_turn();
-            next_state.play(turn, action, &mut self.work, &mut next_aux_state, false);
-            next_state.update(turn, action, &mut self.work, &mut next_aux_state, false);
-            let next_node = FastSearchNode::new(next_id, next_state, next_aux_state.unwrap());
+            {
+              let &mut FastSearchTree{ref mut work, ref mut tmp_board, ref mut tmp_aux, ..} = self;
+              next_state.play(turn, action, work, &mut Some(&mut next_aux_state), false);
+              next_aux_state.update(turn, &next_state, work, tmp_board, tmp_aux);
+            }
+            let next_node = FastSearchNode::new(next_id, next_state, next_aux_state);
             self.nodes.insert(next_id, next_node);
             self.nodes.get_mut(&id).unwrap().inst_next.insert(pos.idx());
             self.nodes.get_mut(&id).unwrap().next.insert(pos, next_id);

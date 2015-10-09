@@ -1,3 +1,13 @@
+pub trait Verbosity {
+  fn debug() -> bool;
+}
+
+pub struct Verbose;
+
+impl Verbosity for Verbose {
+  fn debug() -> bool { true }
+}
+
 pub fn ceil_power2(x: u64) -> u64 {
   let mut v = x;
   v -= 1;

@@ -1,12 +1,12 @@
 use fastboard::{PosExt, Pos, Action, Stone, FastBoard, FastBoardAux, FastBoardWork};
 use fasttree::{FastSearchNode};
 use random::{XorShift128PlusRng, random_sample_without_replace};
-use tree::{SearchNode, SearchEdge, SearchTree};
+//use tree::{SearchNode, SearchEdge, SearchTree};
 
 use rand::{Rng, SeedableRng};
 use statistics_avx2::array::{array_argmax};
 
-pub trait TreePolicy {
+/*pub trait TreePolicy {
   type NodeData: Default;
   type EdgeData: Clone + Copy + Default;
 
@@ -184,7 +184,7 @@ impl TreePolicy for UctRaveTreePolicy {
     // TODO
     unimplemented!();
   }
-}
+}*/
 
 pub trait SearchPolicy {
   fn reset(&mut self) {
@@ -252,10 +252,6 @@ pub struct ThompsonSearchPolicy {
 }
 
 pub trait RolloutPolicy {
-  fn execute_rollout(&mut self, init_state: &FastBoard, init_aux_state: &FastBoardAux) -> Stone {
-    unimplemented!();
-  }
-
   fn execute(&mut self, init_state: &FastBoard, init_aux_state: &FastBoardAux) -> Stone {
     unimplemented!();
   }
@@ -274,7 +270,7 @@ impl QuasiUniformRolloutPolicy {
   pub fn new() -> QuasiUniformRolloutPolicy {
     QuasiUniformRolloutPolicy{
       // FIXME(20151008)
-      rng:        XorShift128PlusRng::from_seed([1234, 5678]),
+      rng:        XorShift128PlusRng::from_seed([1234_5678_1234_5678, 5678_1234_5678_1234]),
       state:      FastBoard::new(),
       work:       FastBoardWork::new(),
       moves:      Vec::with_capacity(FastBoard::BOARD_SIZE),
@@ -284,7 +280,7 @@ impl QuasiUniformRolloutPolicy {
 }
 
 impl RolloutPolicy for QuasiUniformRolloutPolicy {
-  fn execute_rollout(&mut self, init_state: &FastBoard, init_aux_state: &FastBoardAux) -> Stone {
+  fn execute(&mut self, init_state: &FastBoard, init_aux_state: &FastBoardAux) -> Stone {
     let leaf_turn = init_state.current_turn();
     self.state.clone_from(init_state);
     // TODO(20151008): initialize moves list.
@@ -302,7 +298,6 @@ impl RolloutPolicy for QuasiUniformRolloutPolicy {
           if self.state.is_legal_move_fast(ply_turn, pos) {
             let action = Action::Place{pos: pos};
             self.state.play(ply_turn, action, &mut self.work, &mut None, false);
-            //self.state.update(ply_turn, action, &mut self.work, &mut None);
             self.moves.extend(self.state.last_captures());
             break;
           } else if self.moves.len() == 0 {
@@ -319,13 +314,4 @@ impl RolloutPolicy for QuasiUniformRolloutPolicy {
       Stone::Black
     }
   }
-
-  fn execute(&mut self, init_state: &FastBoard, init_aux_state: &FastBoardAux) -> Stone {
-    self.execute_rollout(init_state, init_aux_state)
-  }
-}
-
-pub struct UniformRolloutPolicy;
-
-impl RolloutPolicy for UniformRolloutPolicy {
 }

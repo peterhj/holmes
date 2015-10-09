@@ -7,7 +7,7 @@ use policy::{
   RolloutPolicy, QuasiUniformRolloutPolicy,
 };
 use random::{random_shuffle};
-use tree::{SearchTree, TreePathResult};
+//use tree::{SearchTree, TreePathResult};
 
 use rand::{Rng, thread_rng};
 use std::path::{PathBuf};
@@ -139,12 +139,14 @@ pub struct Agent {
   valid:          bool,
   config:         AgentConfig,
   opening_book:   OpeningBook,
-  state_history:  Vec<(FastBoard, Option<FastBoardAux>)>,
+  state_history:  Vec<(FastBoard, FastBoardAux)>,
   action_history: Vec<(Stone, Action)>,
   current_state:  FastBoard,
-  current_aux:    Option<FastBoardAux>,
+  current_aux:    FastBoardAux,
   current_ply:    usize,
   work:           FastBoardWork,
+  tmp_board:      FastBoard,
+  tmp_aux:        FastBoardAux,
 }
 
 impl Agent {
@@ -156,9 +158,11 @@ impl Agent {
       state_history:  Vec::new(),
       action_history: Vec::new(),
       current_state:  FastBoard::new(),
-      current_aux:    Some(FastBoardAux::new()),
+      current_aux:    FastBoardAux::new(),
       current_ply:    0,
       work:           FastBoardWork::new(),
+      tmp_board:      FastBoard::new(),
+      tmp_aux:        FastBoardAux::new(),
     }
   }
 
@@ -175,7 +179,7 @@ impl Agent {
     self.state_history.clear();
     self.action_history.clear();
     self.current_state.reset();
-    self.current_aux.as_mut().unwrap().reset();
+    self.current_aux.reset();
     self.current_ply = 0;
     self.work.reset();
   }
@@ -191,7 +195,7 @@ impl Agent {
   pub fn begin_search(&self) -> SearchProblem<UctSearchPolicy, QuasiUniformRolloutPolicy> {
     let mut tree = FastSearchTree::new();
     //tree.reset(&self.current_state, &self.current_aux, self.current_ply as i32, 0.0);
-    tree.root(&self.current_state, self.current_aux.as_ref().unwrap());
+    tree.root(&self.current_state, &self.current_aux);
     SearchProblem{
       stop_time:      get_time() + Duration::seconds(10), // FIXME(20151006)
       tree:           tree,
@@ -208,20 +212,26 @@ impl Agent {
   pub fn play_external(&mut self, player: Player, vertex: Vertex) -> MoveResult {
     let turn = Stone::from_player(player);
     let action = Action::from_vertex(vertex);
-    self.play(turn, action)
+    self.play(turn, action, false)
   }
 
-  pub fn play(&mut self, turn: Stone, action: Action) -> MoveResult {
+  pub fn play(&mut self, turn: Stone, action: Action, check_legal: bool) -> MoveResult {
     assert_eq!(self.current_state.current_turn(), turn);
     let &mut Agent{
       ref mut current_state, ref mut current_aux,
-      ref mut work, ..} = self;
-    match current_aux.as_ref().unwrap().check_move(turn, action, current_state, work, true) {
+      ref mut work, ref mut tmp_board, ref mut tmp_aux, ..} = self;
+    let result = if check_legal {
+      tmp_aux.clone_from(current_aux);
+      current_aux.check_move(turn, action, current_state, work, tmp_board, tmp_aux, true)
+    } else {
+      ActionStatus::Legal
+    };
+    match result {
       ActionStatus::Legal => {
         self.state_history.push((current_state.clone(), current_aux.clone()));
         self.action_history.push((turn, action));
-        current_state.play(turn, action, work, current_aux, true);
-        current_state.update(turn, action, work, current_aux, true);
+        current_state.play(turn, action, work, &mut Some(current_aux), true);
+        current_aux.update(turn, &current_state, work, tmp_board, tmp_aux);
         self.current_ply += 1;
         MoveResult::Okay
       }
@@ -255,7 +265,7 @@ impl Agent {
       let mut action = Action::Pass;
       for &pos in book_plays.iter() {
         action = Action::Place{pos: pos};
-        if let MoveResult::Okay = self.play(turn, action) {
+        if let MoveResult::Okay = self.play(turn, action, true) {
           break;
         } else {
           action = Action::Pass;
@@ -265,7 +275,7 @@ impl Agent {
     } else {
       let mut search_problem = self.begin_search();
       let action = search_problem.join();
-      if let MoveResult::Okay = self.play(turn, action) {
+      if let MoveResult::Okay = self.play(turn, action, true) {
         //println!("DEBUG: played {:?}, captures? {:?}", action, self.current_state.last_captures());
         action.to_vertex()
       } else {

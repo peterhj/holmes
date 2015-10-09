@@ -416,16 +416,11 @@ impl FastBoardAux {
     //self.hash = 0;
   }
 
-  /*fn update_turn(&mut self, board: &FastBoard, work: &mut FastBoardWork) {
-    let turn = board.current_turn();
-    self.update(turn, board, work);
-  }*/
-
-  fn update(&mut self, turn: Stone, board: &FastBoard, work: &mut FastBoardWork) {
-    self.update_legal_positions(board, work);
+  pub fn update(&mut self, turn: Stone, board: &FastBoard, work: &mut FastBoardWork, tmp_board: &mut FastBoard, tmp_aux: &mut FastBoardAux) {
+    self.update_legal_positions(board, work, tmp_board, tmp_aux);
   }
 
-  fn check_move_simple(&self, stone: Stone, action: Action, board: &FastBoard, verbose: bool) -> Option<ActionStatus> {
+  fn check_move_simple(&self, stone: Stone, action: Action, board: &FastBoard, work: &mut FastBoardWork, tmp_board: &mut FastBoard, tmp_aux: &mut FastBoardAux, verbose: bool) -> Option<ActionStatus> {
     match action {
       Action::Resign  => { return Some(ActionStatus::Legal); }
       Action::Pass    => { return Some(ActionStatus::Legal); }
@@ -485,8 +480,17 @@ impl FastBoardAux {
 
         // TODO(20151009): leaving this as the terminal legal move check.
         // What else needs to be checked?
+        tmp_board.clone_from(board);
+        tmp_aux.clone_from(self);
+        //tmp_board.play(stone, action, work, &mut Some(&mut self.clone()), false);
+        tmp_board.play(stone, action, work, &mut Some(tmp_aux), false);
+        if tmp_board.get_last_suicide_captures().len() == 0 {
+          Some(ActionStatus::Legal)
+        } else {
+          Some(ActionStatus::IllegalSuicide)
+        }
 
-        // Condition for quick global check: first play on the position, move
+        /*// Condition for quick global check: first play on the position, move
         // does not reduce any chain's liberties to zero. No simulation needed.
         //if first_play {
         let mut is_chain_suicide = false;
@@ -526,13 +530,13 @@ impl FastBoardAux {
         //}
 
         // Otherwise, we have to simulate the move to check legality.
-        None
+        None*/
       }
     }
   }
 
-  pub fn check_move(&self, turn: Stone, action: Action, board: &FastBoard, work: &mut FastBoardWork, verbose: bool) -> ActionStatus {
-    match self.check_move_simple(turn, action, board, verbose) {
+  pub fn check_move(&self, turn: Stone, action: Action, board: &FastBoard, work: &mut FastBoardWork, tmp_board: &mut FastBoard, tmp_aux: &mut FastBoardAux, verbose: bool) -> ActionStatus {
+    match self.check_move_simple(turn, action, board, work, tmp_board, tmp_aux, verbose) {
       Some(status)  => status,
       // FIXME(20151004): simulate move to check legality.
       None          => {
@@ -558,7 +562,7 @@ impl FastBoardAux {
     &self.st_legal[turn.offset()]
   }
 
-  pub fn update_legal_positions(&mut self, board: &FastBoard, work: &mut FastBoardWork) {
+  pub fn update_legal_positions(&mut self, board: &FastBoard, work: &mut FastBoardWork, tmp_board: &mut FastBoard, tmp_aux: &mut FastBoardAux) {
     // TODO(20151004): Shortcuts are possible depending on the last play:
     // - last pos touched no prior chains:
     //   only update adjacent moves
@@ -572,7 +576,7 @@ impl FastBoardAux {
         let turn_off = turn.offset();
         if self.last_cap_chs.len() > 0 {
           for p in (0 .. FastBoard::BOARD_SIZE) {
-            match self.check_move(turn, Action::Place{pos: p as Pos}, board, work, false) {
+            match self.check_move(turn, Action::Place{pos: p as Pos}, board, work, tmp_board, tmp_aux, false) {
               ActionStatus::Legal => { self.st_legal[turn_off].insert(p); }
               _                   => { self.st_legal[turn_off].remove(&p); }
             }
@@ -586,7 +590,7 @@ impl FastBoardAux {
             for &lib in chain.ps_libs.iter() {
               if !work.check_pos.get(lib.idx()).unwrap() {
                 work.check_pos.set(lib.idx(), true);
-                match self.check_move(turn, Action::Place{pos: lib}, board, work, false) {
+                match self.check_move(turn, Action::Place{pos: lib}, board, work, tmp_board, tmp_aux, false) {
                   ActionStatus::Legal => { self.st_legal[turn_off].insert(lib.idx()); }
                   _                   => { self.st_legal[turn_off].remove(&lib.idx()); }
                 }
@@ -595,13 +599,13 @@ impl FastBoardAux {
           }
           FastBoard::for_each_adjacent(last_pos, |adj_pos| {
             if !work.check_pos.get(adj_pos.idx()).unwrap() {
-              match self.check_move(turn, Action::Place{pos: adj_pos}, board, work, false) {
+              match self.check_move(turn, Action::Place{pos: adj_pos}, board, work, tmp_board, tmp_aux, false) {
                 ActionStatus::Legal => { self.st_legal[turn_off].insert(adj_pos.idx()); }
                 _                   => { self.st_legal[turn_off].remove(&adj_pos.idx()); }
               }
             }
           });
-          match self.check_move(turn, Action::Place{pos: last_pos}, board, work, false) {
+          match self.check_move(turn, Action::Place{pos: last_pos}, board, work, tmp_board, tmp_aux, false) {
             ActionStatus::Legal => { self.st_legal[turn_off].insert(last_pos.idx()); }
             _                   => { self.st_legal[turn_off].remove(&last_pos.idx()); }
           }
@@ -630,6 +634,7 @@ pub struct FastBoard {
   last_turn:  Option<Stone>,  // the previously played turn.
   last_pos:   Option<Pos>,    // the previously played position.
   last_caps:  Vec<Pos>,       // previously captured positions.
+  last_scaps: Vec<Pos>,       // previous suicide-captures.
 
   // Chain data structures. Namely, this implements a linked quick-union for
   // finding and iterating over connected components, as well as a list of
@@ -637,7 +642,7 @@ pub struct FastBoard {
   ch_roots:   Vec<Pos>,
   ch_links:   Vec<Pos>,
   ch_sizes:   Vec<u16>,
-  ch_libs:    Vec<Option<Box<Chain>>>,
+  chains:     Vec<Option<Box<Chain>>>,
 }
 
 impl FastBoard {
@@ -685,10 +690,11 @@ impl FastBoard {
       last_turn:  None,
       last_pos:   None,
       last_caps:  Vec::with_capacity(4),
+      last_scaps: Vec::with_capacity(4),
       ch_roots:   Vec::with_capacity(Self::BOARD_SIZE),
       ch_links:   Vec::with_capacity(Self::BOARD_SIZE),
       ch_sizes:   Vec::with_capacity(Self::BOARD_SIZE),
-      ch_libs:    Vec::with_capacity(Self::BOARD_SIZE),
+      chains:    Vec::with_capacity(Self::BOARD_SIZE),
     }
   }
 
@@ -735,8 +741,12 @@ impl FastBoard {
     self.ch_links.extend(repeat(TOMBSTONE).take(Self::BOARD_SIZE));
     self.ch_sizes.clear();
     self.ch_sizes.extend(repeat(0).take(Self::BOARD_SIZE));
-    self.ch_libs.clear();
-    self.ch_libs.extend(repeat(None).take(Self::BOARD_SIZE));
+    self.chains.clear();
+    self.chains.extend(repeat(None).take(Self::BOARD_SIZE));
+  }
+
+  pub fn get_last_suicide_captures(&self) -> &[Pos] {
+    &self.last_scaps
   }
 
   #[inline]
@@ -829,21 +839,24 @@ impl FastBoard {
     w_score - b_score + komi
   }
 
-  pub fn play(&mut self, stone: Stone, action: Action, work: &mut FastBoardWork, aux: &mut Option<FastBoardAux>, verbose: bool) {
+  pub fn play(&mut self, stone: Stone, action: Action, work: &mut FastBoardWork, aux: &mut Option<&mut FastBoardAux>, verbose: bool) {
+    //let aux = &aux;
     // FIXME(20151008): ko point logic is seriously messed up.
     //println!("DEBUG: play: {:?} {:?}", stone, action);
     //assert!(!self.in_txn);
     work.reset();
     self.last_caps.clear();
-    if let &mut Some(ref mut aux) = aux {
+    aux.as_mut().map(|aux| {
+      self.last_scaps.clear();
       aux.last_adj_chs.clear();
       aux.last_cap_chs.clear();
-    }
+    });
     match action {
       Action::Resign | Action::Pass => {
         self.last_pos = None;
       }
       Action::Place{pos} => {
+        //self.place_stone(stone, pos, &aux.as_mut().map(|x| &mut **x));
         self.place_stone(stone, pos, aux);
         let opp_stone = stone.opponent();
         let mut num_captured = 0;
@@ -854,9 +867,10 @@ impl FastBoard {
             }
             let adj_head = self.traverse_chain(adj_pos);
             assert!(adj_head != TOMBSTONE);
-            if let &mut Some(ref mut aux) = aux {
+            //if let Some(aux) = aux {
+            aux.as_mut().map(|aux| {
               aux.last_adj_chs.push(adj_head);
-            }
+            });
             self.get_chain_mut(adj_head).remove_pseudoliberty(pos);
             if self.stones[adj_head.idx()] == opp_stone {
               if self.get_chain(adj_head).count_pseudoliberties() == 0 {
@@ -879,6 +893,16 @@ impl FastBoard {
           self.ko_pos = None;
         }
         self.merge_chains_and_append(&work.merge_adj_heads, pos, aux, verbose);
+        //if let Some(aux) = aux {
+        aux.as_mut().map(|aux| {
+          for &head in aux.ch_heads.iter() {
+            if self.stones[head.idx()] == stone &&
+                self.get_chain(head).count_pseudoliberties() == 0
+            {
+              self.last_scaps.push(head);
+            }
+          }
+        });
         if let Some(ko_pos) = self.ko_pos {
           // TODO(20151005): check if not actually a kos pos.
         }
@@ -889,56 +913,52 @@ impl FastBoard {
     self.turn = stone.opponent();
   }
 
-  pub fn update(&mut self, turn: Stone, action: Action, work: &mut FastBoardWork, aux: &mut Option<FastBoardAux>, verbose: bool) {
-    if let &mut Some(ref mut aux) = aux {
-      aux.update(turn, self, work);
-    }
-  }
-
-  fn place_stone(&mut self, stone: Stone, pos: Pos, aux: &mut Option<FastBoardAux>) {
+  fn place_stone(&mut self, stone: Stone, pos: Pos, aux: &mut Option<&mut FastBoardAux>) {
     let i = pos.idx();
     self.stones[i] = stone;
     self.ch_roots[i] = TOMBSTONE;
-    if let &mut Some(ref mut aux) = aux {
+    //if let Some(aux) = aux {
+    aux.as_mut().map(|aux| {
       aux.st_first.set(i, false);
       aux.st_empty.set(i, false);
       /*Self::for_each_adjacent_labeled(pos, |adj_pos, adj_direction| {
         aux.st_adj[stone.offset()].set(adj_pos.idx() * 4 + adj_direction ^ 0x02, true);
       });*/
-    }
+    });
   }
 
-  fn capture_stone(&mut self, pos: Pos, aux: &mut Option<FastBoardAux>) {
+  fn capture_stone(&mut self, pos: Pos, aux: &mut Option<&mut FastBoardAux>) {
     let i = pos.idx();
     let stone = self.stones[i];
     self.stones[i] = Stone::Empty;
     self.ch_roots[i] = TOMBSTONE;
     self.last_caps.push(pos);
-    if let &mut Some(ref mut aux) = aux {
+    //if let Some(aux) = aux {
+    aux.as_mut().map(|aux| {
       aux.st_empty.set(i, true);
       /*Self::for_each_adjacent_labeled(pos, |adj_pos, adj_direction| {
         aux.st_adj[stone.offset()].set(adj_pos.idx() * 4 + adj_direction ^ 0x02, false);
       });*/
-    }
+    });
   }
 
   /*fn update_chains(&mut self, stone: Stone, pos: Pos, work: &mut FastBoardWork, aux: &mut Option<FastBoardAux>) {
   }*/
 
   fn get_chain(&self, head: Pos) -> &Chain {
-    &**self.ch_libs[head.idx()].as_ref()
+    &**self.chains[head.idx()].as_ref()
       .unwrap()
       //.expect(&format!("get_chain expected a chain: {}", head))
   }
 
   fn get_chain_mut(&mut self, head: Pos) -> &mut Chain {
-    &mut **self.ch_libs[head.idx()].as_mut()
+    &mut **self.chains[head.idx()].as_mut()
       .unwrap()
       //.expect(&format!("get_chain_mut expected a chain: {}", head))
   }
 
   fn take_chain(&mut self, head: Pos) -> Box<Chain> {
-    self.ch_libs[head.idx()].take()
+    self.chains[head.idx()].take()
       .unwrap()
       //.expect(&format!("take_chain expected a chain: {}", head))
   }
@@ -964,7 +984,7 @@ impl FastBoard {
     pos
   }
 
-  fn union_chains(&mut self, pos1: Pos, pos2: Pos, aux: &mut Option<FastBoardAux>) -> Pos {
+  fn union_chains(&mut self, pos1: Pos, pos2: Pos, aux: &mut Option<&mut FastBoardAux>) -> Pos {
     let head1 = self.traverse_chain_slow(pos1);
     let head2 = self.traverse_chain_slow(pos2);
     if head1 == head2 {
@@ -983,25 +1003,27 @@ impl FastBoard {
       self.ch_sizes[new_head.idx()] += self.ch_sizes[old_head.idx()];
       self.ch_sizes[old_head.idx()] = 0;
       let old_chain = self.take_chain(old_head);
-      if let &mut Some(ref mut aux) = aux {
+      //if let Some(aux) = aux {
+      aux.as_mut().map(|aux| {
         aux.ch_heads.remove(&old_head);
-      }
+      });
       self.get_chain_mut(new_head).ps_libs.extend(&old_chain.ps_libs);
       new_head
     }
   }
 
-  fn create_chain(&mut self, head: Pos, aux: &mut Option<FastBoardAux>, verbose: bool) {
+  fn create_chain(&mut self, head: Pos, aux: &mut Option<&mut FastBoardAux>, verbose: bool) {
     if verbose {
       println!("DEBUG: creating a chain: {}", head.to_coord().to_string());
     }
     self.ch_roots[head.idx()] = head;
     self.ch_links[head.idx()] = head;
     self.ch_sizes[head.idx()] = 1;
-    self.ch_libs[head.idx()] = Some(Box::new(Chain::new()));
-    if let &mut Some(ref mut aux) = aux {
+    self.chains[head.idx()] = Some(Box::new(Chain::new()));
+    //if let Some(aux) = aux {
+    aux.as_mut().map(|aux| {
       aux.ch_heads.insert(head);
-    }
+    });
     Self::for_each_adjacent(head, |adj_pos| {
       if let Stone::Empty = self.stones[adj_pos.idx()] {
         self.get_chain_mut(head).add_pseudoliberty(adj_pos);
@@ -1025,9 +1047,19 @@ impl FastBoard {
         self.get_chain_mut(head).add_pseudoliberty(adj_pos);
       }
     });
+    if verbose {
+      let ps_lib_coords: Vec<_> =
+          self.get_chain(head).ps_libs.iter()
+            .map(|lib| lib.to_coord().to_string())
+            .collect();
+      println!("DEBUG: chain psuedoliberties: {:?}",
+          //pos.to_coord().to_string(), head.to_coord().to_string()
+          ps_lib_coords
+      );
+    }
   }
 
-  fn merge_chains_and_append(&mut self, heads: &[Pos], pos: Pos, aux: &mut Option<FastBoardAux>, verbose: bool) {
+  fn merge_chains_and_append(&mut self, heads: &[Pos], pos: Pos, aux: &mut Option<&mut FastBoardAux>, verbose: bool) {
     let mut prev_root = None;
     for i in (0 .. heads.len()) {
       match prev_root {
@@ -1041,7 +1073,7 @@ impl FastBoard {
     }
   }
 
-  fn kill_chain(&mut self, head: Pos, aux: &mut Option<FastBoardAux>) -> usize {
+  fn kill_chain(&mut self, head: Pos, aux: &mut Option<&mut FastBoardAux>) -> usize {
     let mut num_captured = 0;
     let mut prev;
     let mut next = head;
@@ -1069,10 +1101,11 @@ impl FastBoard {
     }
     self.ch_sizes[head.idx()] = 0;
     self.take_chain(head);
-    if let &mut Some(ref mut aux) = aux {
+    //if let Some(aux) = aux {
+    aux.as_mut().map(|aux| {
       aux.ch_heads.remove(&head);
       aux.last_cap_chs.push(head);
-    }
+    });
     if num_captured == 1 {
       self.ko_pos = Some(prev);
     }
@@ -1179,7 +1212,7 @@ impl FastBoard {
     self.ch_roots[head.idx()] = head;
     self.ch_links[head.idx()] = head;
     self.ch_sizes[head.idx()] = 1;
-    self.ch_libs[head.idx()] = Some(Box::new(Chain::new()));
+    self.chains[head.idx()] = Some(Box::new(Chain::new()));
     Self::for_each_adjacent(head, |adj_pos| {
       if let Stone::Empty = self.stones[adj_pos.idx()] {
         self.get_chain_mut(head).add_pseudoliberty(adj_pos);
