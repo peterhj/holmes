@@ -4,6 +4,7 @@ use random::{XorShift128PlusRng, random_sample_without_replace};
 use tree::{SearchNode, SearchEdge, SearchTree};
 
 use rand::{Rng, SeedableRng};
+use statistics_avx2::array::{array_argmax};
 
 pub trait TreePolicy {
   type NodeData: Default;
@@ -190,6 +191,10 @@ pub trait SearchPolicy {
     unimplemented!();
   }
 
+  fn backup(&self, n: f32, num_trials: &[f32], succ_ratio: &[f32], value: &mut [f32]) {
+    unimplemented!();
+  }
+
   fn execute_search(&self, node: &FastSearchNode) -> Action {
     unimplemented!();
   }
@@ -199,33 +204,42 @@ pub trait SearchPolicy {
   }
 }
 
-/*#[derive(Clone, Copy, Default)]
-pub struct ThompsonNodeData;
-
-#[derive(Clone, Copy, Default)]
-pub struct ThompsonEdgeData {
-  succ_ratio: f32,
-  num_trials: f32,
+#[derive(Clone, Copy)]
+pub struct UctSearchPolicy {
+  pub c:  f32,
 }
 
-impl ThompsonEdgeData {
-  fn update(&mut self, r: f32) {
-    let n = self.num_trials + 1.0;
-    let mut mu = self.succ_ratio;
-    let delta = r - mu;
-    mu = mu + delta / n;
-    self.succ_ratio = mu;
-    self.num_trials = n;
+impl SearchPolicy for UctSearchPolicy {
+  fn reset(&mut self) {
   }
 
-  pub fn update_succ(&mut self) {
-    self.update(1.0);
+  fn backup(&self, n: f32, num_trials: &[f32], succ_ratio: &[f32], value: &mut [f32]) {
+    for j in (0 .. value.len()) {
+      value[j] = succ_ratio[j] + self.c * (n.ln() / num_trials[j]).sqrt();
+    }
   }
 
-  pub fn update_fail(&mut self) {
-    self.update(0.0);
+  fn execute_search(&self, node: &FastSearchNode) -> Action {
+    if node.moves.len() > 0 {
+      let j = array_argmax(&node.value);
+      Action::Place{pos: node.moves[j]}
+    } else {
+      Action::Pass
+    }
   }
-}*/
+
+  fn execute_best(&self, node: &FastSearchNode) -> Action {
+    if node.moves.len() > 0 {
+      let j = array_argmax(&node.num_trials);
+      Action::Place{pos: node.moves[j]}
+    } else {
+      Action::Pass
+    }
+  }
+}
+
+#[derive(Clone, Copy)]
+pub struct RaveSearchPolicy;
 
 #[derive(Clone, Copy)]
 pub struct ThompsonSearchPolicyConfig {
@@ -239,6 +253,10 @@ pub struct ThompsonSearchPolicy {
 
 pub trait RolloutPolicy {
   fn execute_rollout(&mut self, init_state: &FastBoard, init_aux_state: &FastBoardAux) -> Stone {
+    unimplemented!();
+  }
+
+  fn execute(&mut self, init_state: &FastBoard, init_aux_state: &FastBoardAux) -> Stone {
     unimplemented!();
   }
 }
@@ -274,15 +292,17 @@ impl RolloutPolicy for QuasiUniformRolloutPolicy {
     self.moves.extend(init_aux_state.get_legal_positions(leaf_turn).iter()
       .map(|p| p as Pos));
     if self.moves.len() > 0 {
-      'rollout:
-      for _ in (0 .. self.max_plies) {
+      'rollout: for _ in (0 .. self.max_plies) {
         let ply_turn = self.state.current_turn();
         loop {
-          let pos = random_sample_without_replace(&mut self.moves, &mut self.rng).unwrap();
+          let pos = match random_sample_without_replace(&mut self.moves, &mut self.rng) {
+            Some(pos) => pos,
+            None => break 'rollout,
+          };
           if self.state.is_legal_move_fast(ply_turn, pos) {
             let action = Action::Place{pos: pos};
-            self.state.play(ply_turn, action, &mut self.work, &mut None);
-            self.state.update(ply_turn, action, &mut self.work, &mut None);
+            self.state.play(ply_turn, action, &mut self.work, &mut None, false);
+            //self.state.update(ply_turn, action, &mut self.work, &mut None);
             self.moves.extend(self.state.last_captures());
             break;
           } else if self.moves.len() == 0 {
@@ -298,6 +318,10 @@ impl RolloutPolicy for QuasiUniformRolloutPolicy {
     } else {
       Stone::Black
     }
+  }
+
+  fn execute(&mut self, init_state: &FastBoard, init_aux_state: &FastBoardAux) -> Stone {
+    self.execute_rollout(init_state, init_aux_state)
   }
 }
 

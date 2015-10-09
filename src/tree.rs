@@ -113,8 +113,8 @@ impl<P> SearchTree<P> where P: TreePolicy {
             // FIXME(20151006): beware semantics of current_turn(); should probably
             // manually track turn.
             let curr_turn = next_state.current_turn();
-            next_state.play(curr_turn, Action::Place{pos: pos}, work, &mut next_aux_state);
-            next_state.update(curr_turn, Action::Place{pos: pos}, work, &mut next_aux_state);
+            next_state.play(curr_turn, Action::Place{pos: pos}, work, &mut next_aux_state, false);
+            next_state.update(curr_turn, Action::Place{pos: pos}, work, &mut next_aux_state, false);
             let next_id = self.expand(Some((id, action)), next_state, next_aux_state, 0, 0.0);
             return TreePathResult::Leaf{leaf_action: action, leaf_id: next_id};
           }

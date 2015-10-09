@@ -79,10 +79,10 @@ impl Coord {
     s.extend(&y_label);
     s
   }
-}
+//}
 
-impl ToString for Coord {
-  fn to_string(&self) -> String {
+//impl ToString for Coord {
+  pub fn to_string(&self) -> String {
     String::from_utf8(self.to_bytestring()).ok().unwrap()
   }
 }

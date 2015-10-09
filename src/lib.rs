@@ -1,5 +1,7 @@
 #![feature(associated_consts)]
 
+extern crate statistics_avx2;
+
 extern crate bit_set;
 extern crate bit_vec;
 extern crate bufstream;

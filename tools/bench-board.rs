@@ -26,7 +26,7 @@ fn main() {
       if i >= 200 {
         break;
       }
-      board.play(stone, Action::Place{pos: c}, &mut work, &mut None);
+      board.play(stone, Action::Place{pos: c}, &mut work, &mut None, false);
       stone = stone.opponent();
     }
     /*if idx == 0 {

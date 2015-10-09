@@ -1,8 +1,9 @@
 use book::{OpeningBook};
 use fastboard::{PosExt, Pos, Stone, Action, ActionStatus, FastBoard, FastBoardAux, FastBoardWork};
+use fasttree::{FastSearchTree, SearchResult};
 use gtp_board::{Player, Coord, Vertex, RuleSystem, TimeSystem, MoveResult, UndoResult};
 use policy::{
-  TreePolicy, UctTreePolicy, UctTreePolicyConfig,
+  SearchPolicy, UctSearchPolicy,
   RolloutPolicy, QuasiUniformRolloutPolicy,
 };
 use random::{random_shuffle};
@@ -187,16 +188,18 @@ impl Agent {
     }
   }
 
-  pub fn begin_search(&self) -> SearchProblem<UctTreePolicy, QuasiUniformRolloutPolicy> {
-    let mut tree = SearchTree::new();
-    tree.reset(&self.current_state, &self.current_aux, self.current_ply as i32, 0.0);
+  pub fn begin_search(&self) -> SearchProblem<UctSearchPolicy, QuasiUniformRolloutPolicy> {
+    let mut tree = FastSearchTree::new();
+    //tree.reset(&self.current_state, &self.current_aux, self.current_ply as i32, 0.0);
+    tree.root(&self.current_state, self.current_aux.as_ref().unwrap());
     SearchProblem{
       stop_time:      get_time() + Duration::seconds(10), // FIXME(20151006)
       tree:           tree,
-      tree_policy:    UctTreePolicy::new(UctTreePolicyConfig{
+      /*tree_policy:    UctSearchPolicy::new(UctSearchPolicyConfig{
         c: 0.5, bias: 0.0, tuned: false,
         max_trials: 100000,
-      }),
+      }),*/
+      tree_policy:    UctSearchPolicy{c: 0.5},
       rollout_policy: QuasiUniformRolloutPolicy::new(),
       work:           FastBoardWork::new(),
     }
@@ -213,12 +216,12 @@ impl Agent {
     let &mut Agent{
       ref mut current_state, ref mut current_aux,
       ref mut work, ..} = self;
-    match current_aux.as_ref().unwrap().check_move(turn, action, current_state, work) {
+    match current_aux.as_ref().unwrap().check_move(turn, action, current_state, work, true) {
       ActionStatus::Legal => {
         self.state_history.push((current_state.clone(), current_aux.clone()));
         self.action_history.push((turn, action));
-        current_state.play(turn, action, work, current_aux);
-        current_state.update(turn, action, work, current_aux);
+        current_state.play(turn, action, work, current_aux, true);
+        current_state.update(turn, action, work, current_aux, true);
         self.current_ply += 1;
         MoveResult::Okay
       }
@@ -255,8 +258,7 @@ impl Agent {
         if let MoveResult::Okay = self.play(turn, action) {
           break;
         } else {
-          self.undo();
-          action = Action::Place{pos: pos};
+          action = Action::Pass;
         }
       }
       action.to_vertex()
@@ -264,25 +266,26 @@ impl Agent {
       let mut search_problem = self.begin_search();
       let action = search_problem.join();
       if let MoveResult::Okay = self.play(turn, action) {
+        //println!("DEBUG: played {:?}, captures? {:?}", action, self.current_state.last_captures());
         action.to_vertex()
       } else {
-        self.undo();
         Action::Pass.to_vertex()
       }
     }
   }
 }
 
-pub struct SearchProblem<TreeP, RolloutP> where TreeP: TreePolicy, RolloutP: RolloutPolicy {
+pub struct SearchProblem<SearchP, RolloutP> where SearchP: SearchPolicy, RolloutP: RolloutPolicy {
   stop_time:      Timespec,
   // FIXME(20151008): for now, this version of search starts over from scratch each time.
-  tree:           SearchTree<TreeP>,
-  tree_policy:    TreeP,
+  //tree:           SearchTree<SearchP>,
+  tree:           FastSearchTree,
+  tree_policy:    SearchP,
   rollout_policy: RolloutP,
   work:           FastBoardWork,
 }
 
-impl<TreeP, RolloutP> SearchProblem<TreeP, RolloutP> where TreeP: TreePolicy, RolloutP: RolloutPolicy {
+impl<SearchP, RolloutP> SearchProblem<SearchP, RolloutP> where SearchP: SearchPolicy, RolloutP: RolloutPolicy {
   pub fn join(&mut self) -> Action {
     let &mut SearchProblem{
       ref mut tree,
@@ -290,13 +293,14 @@ impl<TreeP, RolloutP> SearchProblem<TreeP, RolloutP> where TreeP: TreePolicy, Ro
       ref mut rollout_policy,
       ref mut work, ..} = self;
     for _ in (0 .. 10000) {
-      match tree.walk(20, tree_policy, work) {
-        TreePathResult::Terminal{..} => {}
-        TreePathResult::Leaf{leaf_action, leaf_id} => {
-          tree.simulate(leaf_action, leaf_id, tree_policy, rollout_policy);
+      match tree.walk(tree_policy) {
+        SearchResult::Terminal => {}
+        SearchResult::Leaf => {
+          tree.simulate(rollout_policy);
+          tree.backup(tree_policy);
         }
       }
     }
-    tree_policy.choose_best(&tree.nodes[0])
+    tree_policy.execute_best(tree.get_root())
   }
 }

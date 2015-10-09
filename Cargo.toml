@@ -35,3 +35,6 @@ byteorder = "*"
 getopts = "*"
 rand = "*"
 time = "*"
+
+[dependencies.statistics_avx2]
+path = "libstatistics_avx2"
