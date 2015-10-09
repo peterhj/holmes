@@ -1,3 +1,5 @@
+use util::{rot_left64};
+
 //use rand::{Rng, thread_rng};
 //use std::intrinsics::{get_tydesc};
 use std::mem::{size_of};
@@ -22,23 +24,6 @@ const XXH_PRIME_2: u64 = 14029467366897019727_u64;
 const XXH_PRIME_3: u64 =  1609587929392839161_u64;
 const XXH_PRIME_4: u64 =  9650029242287828579_u64;
 const XXH_PRIME_5: u64 =  2870177450012600261_u64;
-
-#[inline]
-fn rot_left64(x: u64, r: usize) -> u64 {
-  (x << r) | (x >> (64 - r))
-}
-
-#[inline]
-fn swizzle64(x: u64) -> u64 {
-  ((x << 56) & 0xff00000000000000_u64) |
-  ((x << 40) & 0x00ff000000000000_u64) |
-  ((x << 24) & 0x0000ff0000000000_u64) |
-  ((x << 8)  & 0x000000ff00000000_u64) |
-  ((x >> 8)  & 0x00000000ff000000_u64) |
-  ((x >> 24) & 0x0000000000ff0000_u64) |
-  ((x >> 40) & 0x000000000000ff00_u64) |
-  ((x >> 56) & 0x00000000000000ff_u64)
-}
 
 #[derive(Clone)]
 pub struct XxhMemHasher {

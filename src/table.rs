@@ -4,7 +4,7 @@ use util::{ceil_power2};
 use bit_vec::{BitVec};
 use rand::{Rng};
 use std::collections::{HashMap};
-use std::iter::{repeat};
+//use std::iter::{repeat};
 
 pub type TransTable = TranspositionTable;
 
@@ -25,7 +25,7 @@ impl TranspositionTable {
     for _ in (0 .. FastBoard::BOARD_SIZE * 3) {
       keys.push(rng.next_u64());
     }
-    let mut flags = BitVec::from_elem(capacity * 2, false);
+    let flags = BitVec::from_elem(capacity * 2, false);
     let mut unique = Vec::with_capacity(capacity);
     //unique.extend(repeat((0, 0)).take(capacity));
     unsafe { unique.set_len(capacity) };

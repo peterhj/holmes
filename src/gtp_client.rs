@@ -18,7 +18,7 @@ pub struct Client {
 }
 
 impl Client {
-  pub fn new(host: String, port: u16, player: Option<Player>) -> Client {
+  pub fn new(host: String, port: u16, _player: Option<Player>) -> Client {
     Client{
       host: host,
       port: port,
@@ -324,14 +324,14 @@ impl GtpClient for Client {
     }*/
   }
 
-  fn reply_final_status_list(&mut self, args: &[Vec<u8>]) -> Vec<Entity> {
+  fn reply_final_status_list(&mut self, _args: &[Vec<u8>]) -> Vec<Entity> {
     // TODO(20151006)
     vec![]
   }
 
   // KGS extensions.
 
-  fn reply_kgs_game_over(&mut self, args: &[Vec<u8>]) -> Vec<Entity> {
+  fn reply_kgs_game_over(&mut self, _args: &[Vec<u8>]) -> Vec<Entity> {
     self.should_shutdown = true;
     vec![]
   }
@@ -400,7 +400,7 @@ impl GtpClient for Client {
           stones:           stones,
         }
       }
-      x => return vec![ErrorEntity(b"unsupported time system".to_vec())],
+      _ => return vec![ErrorEntity(b"unsupported time system".to_vec())],
     };
     self.agent_builder.time_system(time_system);
     vec![]

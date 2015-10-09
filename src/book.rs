@@ -5,7 +5,7 @@ use table::{TransTable};
 use bit_set::{BitSet};
 use rand::{Rng};
 use std::fs::{File};
-use std::io::{Read, BufRead, BufReader};
+use std::io::{BufRead, BufReader};
 use std::path::{Path};
 
 #[derive(Clone, Debug)]
@@ -31,24 +31,23 @@ impl OpeningBook {
     // and one of the corresponding plays are selected.
     let file = File::open(path)
       .ok().expect("failed to open opening book file!");
-    let mut reader = BufReader::new(file);
+    let reader = BufReader::new(file);
     let mut line_count = 0;
-    for line in reader.lines() {
+    for _ in reader.lines() {
       line_count += 1;
     }
     let mut table = TransTable::new(line_count * 16, rng);
     let mut entries: Vec<BookEntry> = Vec::new();
     let file = File::open(path)
       .ok().expect("failed to open opening book file!");
-    let mut reader = BufReader::new(file);
+    let reader = BufReader::new(file);
     for line in reader.lines() {
       let line = line.unwrap();
       let toks: Vec<&str> = line.split_whitespace().collect();
       if toks.len() == 0 {
         continue;
       }
-      let mut board_dim: Option<usize> = None;
-      board_dim = toks[0].parse().ok();
+      let board_dim: Option<usize> = toks[0].parse().ok();
       match board_dim {
         Some(19) => {}
         _ => continue,
@@ -101,7 +100,7 @@ impl OpeningBook {
         }
       }
     }
-    let mut book = OpeningBook{
+    let book = OpeningBook{
       table:    table,
       entries:  entries,
     };

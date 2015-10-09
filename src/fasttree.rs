@@ -1,10 +1,10 @@
 use fastboard::{PosExt, Pos, Action, Stone, FastBoard, FastBoardAux, FastBoardWork};
 use policy::{SearchPolicy, RolloutPolicy};
 use random::{random_shuffle};
-use table::{TranspositionTable};
+//use table::{TranspositionTable};
 
 use bit_set::{BitSet};
-use rand::{Rng, thread_rng};
+use rand::{thread_rng};
 use std::collections::{HashMap};
 use std::iter::{repeat};
 
@@ -183,7 +183,7 @@ impl FastSearchTree {
   }
 
   pub fn backup(&mut self, search_policy: &SearchPolicy) {
-    let leaf_id = self.path_nodes.pop()
+    let _leaf_id = self.path_nodes.pop()
       .expect("FATAL: current search tree path missing leaf node, can't backup!");
     //let leaf_action = self.leaf_move
     //  .expect("FATAL: current search tree path missing leaf action, can't backup!");

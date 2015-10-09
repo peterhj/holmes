@@ -333,7 +333,7 @@ impl FastBoardWork {
   }
 }
 
-struct EdgeOrderTree;
+/*struct EdgeOrderTree;
 
 impl EdgeOrderTree {
   pub fn link(&mut self, u: Pos, v: Pos) {
@@ -347,7 +347,7 @@ impl EdgeOrderTree {
 
   pub fn merge(&mut self, u: Pos, w: Pos) {
   }
-}
+}*/
 
 #[derive(Clone)]
 pub struct FastBoardAux {
@@ -416,7 +416,7 @@ impl FastBoardAux {
     //self.hash = 0;
   }
 
-  pub fn update(&mut self, turn: Stone, board: &FastBoard, work: &mut FastBoardWork, tmp_board: &mut FastBoard, tmp_aux: &mut FastBoardAux) {
+  pub fn update(&mut self, _turn: Stone, board: &FastBoard, work: &mut FastBoardWork, tmp_board: &mut FastBoard, tmp_aux: &mut FastBoardAux) {
     self.update_legal_positions(board, work, tmp_board, tmp_aux);
   }
 
@@ -929,7 +929,7 @@ impl FastBoard {
 
   fn capture_stone(&mut self, pos: Pos, aux: &mut Option<&mut FastBoardAux>) {
     let i = pos.idx();
-    let stone = self.stones[i];
+    //let stone = self.stones[i];
     self.stones[i] = Stone::Empty;
     self.ch_roots[i] = TOMBSTONE;
     self.last_caps.push(pos);

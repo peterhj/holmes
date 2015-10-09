@@ -9,7 +9,7 @@ use policy::{
 use random::{random_shuffle};
 //use tree::{SearchTree, TreePathResult};
 
-use rand::{Rng, thread_rng};
+use rand::{thread_rng};
 use std::path::{PathBuf};
 use time::{Timespec, Duration, get_time};
 
@@ -49,12 +49,12 @@ impl PreGame {
 
 #[derive(Default)]
 pub struct AgentBuilder {
-  board_dim:    Option<i16>,
-  komi:         Option<f32>,
-  rule_system:  Option<RuleSystem>,
-  time_system:  Option<TimeSystem>,
-  handicap:     Vec<Pos>,
-  whoami:       Option<Stone>,
+  pub board_dim:    Option<i16>,
+  pub komi:         Option<f32>,
+  pub rule_system:  Option<RuleSystem>,
+  pub time_system:  Option<TimeSystem>,
+  pub handicap:     Vec<Pos>,
+  pub whoami:       Option<Stone>,
 }
 
 impl AgentBuilder {
@@ -116,11 +116,11 @@ impl AgentBuilder {
 }
 
 pub struct AgentConfig {
-  komi:         f32,
-  rule_system:  RuleSystem,
-  time_system:  TimeSystem,
-  handicap:     Vec<Pos>,
-  whoami:       Stone,
+  pub komi:         f32,
+  pub rule_system:  RuleSystem,
+  pub time_system:  TimeSystem,
+  pub handicap:     Vec<Pos>,
+  pub whoami:       Stone,
 }
 
 impl Default for AgentConfig {
@@ -205,7 +205,7 @@ impl Agent {
       }),*/
       tree_policy:    UctSearchPolicy{c: 0.5},
       rollout_policy: QuasiUniformRolloutPolicy::new(),
-      work:           FastBoardWork::new(),
+      //work:           FastBoardWork::new(),
     }
   }
 
@@ -292,7 +292,7 @@ pub struct SearchProblem<SearchP, RolloutP> where SearchP: SearchPolicy, Rollout
   tree:           FastSearchTree,
   tree_policy:    SearchP,
   rollout_policy: RolloutP,
-  work:           FastBoardWork,
+  //work:           FastBoardWork,
 }
 
 impl<SearchP, RolloutP> SearchProblem<SearchP, RolloutP> where SearchP: SearchPolicy, RolloutP: RolloutPolicy {
@@ -301,7 +301,7 @@ impl<SearchP, RolloutP> SearchProblem<SearchP, RolloutP> where SearchP: SearchPo
       ref mut tree,
       ref mut tree_policy,
       ref mut rollout_policy,
-      ref mut work, ..} = self;
+      ..} = self;
     for _ in (0 .. 10000) {
       match tree.walk(tree_policy) {
         SearchResult::Terminal => {}

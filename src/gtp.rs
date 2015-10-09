@@ -460,9 +460,9 @@ pub trait GtpClient {
   // KGS extensions.
   //fn send_kgs_chat(&mut self, Vec<Entity>)                                { unimplemented!(); }
   //fn reply_kgs_chat(&mut self, args: &[Vec<u8>]) -> Vec<Entity>           { unimplemented!(); }
-  fn reply_kgs_game_over(&mut self, args: &[Vec<u8>]) -> Vec<Entity>      { unimplemented!(); }
-  fn reply_kgs_rules(&mut self, args: &[Vec<u8>]) -> Vec<Entity>          { unimplemented!(); }
-  fn reply_kgs_time_settings(&mut self, args: &[Vec<u8>]) -> Vec<Entity>  { unimplemented!(); }
+  fn reply_kgs_game_over(&mut self, _args: &[Vec<u8>]) -> Vec<Entity>     { unimplemented!(); }
+  fn reply_kgs_rules(&mut self, _args: &[Vec<u8>]) -> Vec<Entity>         { unimplemented!(); }
+  fn reply_kgs_time_settings(&mut self, _args: &[Vec<u8>]) -> Vec<Entity> { unimplemented!(); }
   fn reply_kgs_genmove_cleanup(&mut self) -> Vec<Entity>                  { unimplemented!(); }
 
   // Regression commands.

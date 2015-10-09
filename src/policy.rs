@@ -1,9 +1,8 @@
 use fastboard::{PosExt, Pos, Action, Stone, FastBoard, FastBoardAux, FastBoardWork};
 use fasttree::{FastSearchNode};
 use random::{XorShift128PlusRng, random_sample_without_replace};
-//use tree::{SearchNode, SearchEdge, SearchTree};
 
-use rand::{Rng, SeedableRng};
+use rand::{SeedableRng};
 use statistics_avx2::array::{array_argmax};
 
 /*pub trait TreePolicy {
@@ -187,21 +186,10 @@ impl TreePolicy for UctRaveTreePolicy {
 }*/
 
 pub trait SearchPolicy {
-  fn reset(&mut self) {
-    unimplemented!();
-  }
-
-  fn backup(&self, n: f32, num_trials: &[f32], succ_ratio: &[f32], value: &mut [f32]) {
-    unimplemented!();
-  }
-
-  fn execute_search(&self, node: &FastSearchNode) -> Action {
-    unimplemented!();
-  }
-
-  fn execute_best(&self, node: &FastSearchNode) -> Action {
-    unimplemented!();
-  }
+  fn reset(&mut self);
+  fn backup(&self, n: f32, num_trials: &[f32], succ_ratio: &[f32], value: &mut [f32]);
+  fn execute_search(&self, node: &FastSearchNode) -> Action;
+  fn execute_best(&self, node: &FastSearchNode) -> Action;
 }
 
 #[derive(Clone, Copy)]
@@ -252,9 +240,7 @@ pub struct ThompsonSearchPolicy {
 }
 
 pub trait RolloutPolicy {
-  fn execute(&mut self, init_state: &FastBoard, init_aux_state: &FastBoardAux) -> Stone {
-    unimplemented!();
-  }
+  fn execute(&mut self, init_state: &FastBoard, init_aux_state: &FastBoardAux) -> Stone;
 }
 
 #[derive(Clone)]
