@@ -5,7 +5,8 @@ use policy::{
   TreePolicy, UctTreePolicy, UctTreePolicyConfig,
   RolloutPolicy, QuasiUniformRolloutPolicy,
 };
-use tree::{SearchTree};
+use random::{random_shuffle};
+use tree::{SearchTree, TreePathResult};
 
 use rand::{Rng, thread_rng};
 use std::path::{PathBuf};
@@ -194,9 +195,10 @@ impl Agent {
       tree:           tree,
       tree_policy:    UctTreePolicy::new(UctTreePolicyConfig{
         c: 0.5, bias: 0.0, tuned: false,
-        max_plays: 100000,
+        max_trials: 100000,
       }),
       rollout_policy: QuasiUniformRolloutPolicy::new(),
+      work:           FastBoardWork::new(),
     }
   }
 
@@ -245,33 +247,56 @@ impl Agent {
 
   pub fn gen_move(&mut self, turn: Stone) -> Vertex {
     let digest = self.current_state.get_digest();
-    let action = if let Some(book_plays) = self.opening_book.lookup(turn, &digest) {
-      let pos = book_plays[0];
-      Action::Place{pos: pos}
+    if let Some(mut book_plays) = self.opening_book.lookup(turn, &digest).map(|ps| ps.to_vec()) {
+      random_shuffle(&mut book_plays, &mut thread_rng());
+      let mut action = Action::Pass;
+      for &pos in book_plays.iter() {
+        action = Action::Place{pos: pos};
+        if let MoveResult::Okay = self.play(turn, action) {
+          break;
+        } else {
+          self.undo();
+          action = Action::Place{pos: pos};
+        }
+      }
+      action.to_vertex()
     } else {
       let mut search_problem = self.begin_search();
       let action = search_problem.join();
-      action
-    };
-    if let MoveResult::Okay = self.play(turn, action) {
-      action.to_vertex()
-    } else {
-      self.undo();
-      Action::Pass.to_vertex()
+      if let MoveResult::Okay = self.play(turn, action) {
+        action.to_vertex()
+      } else {
+        self.undo();
+        Action::Pass.to_vertex()
+      }
     }
   }
 }
 
 pub struct SearchProblem<TreeP, RolloutP> where TreeP: TreePolicy, RolloutP: RolloutPolicy {
   stop_time:      Timespec,
+  // FIXME(20151008): for now, this version of search starts over from scratch each time.
   tree:           SearchTree<TreeP>,
   tree_policy:    TreeP,
   rollout_policy: RolloutP,
+  work:           FastBoardWork,
 }
 
 impl<TreeP, RolloutP> SearchProblem<TreeP, RolloutP> where TreeP: TreePolicy, RolloutP: RolloutPolicy {
   pub fn join(&mut self) -> Action {
-    // TODO
-    unimplemented!();
+    let &mut SearchProblem{
+      ref mut tree,
+      ref mut tree_policy,
+      ref mut rollout_policy,
+      ref mut work, ..} = self;
+    for _ in (0 .. 10000) {
+      match tree.walk(20, tree_policy, work) {
+        TreePathResult::Terminal{..} => {}
+        TreePathResult::Leaf{leaf_action, leaf_id} => {
+          tree.simulate(leaf_action, leaf_id, tree_policy, rollout_policy);
+        }
+      }
+    }
+    tree_policy.choose_best(&tree.nodes[0])
   }
 }

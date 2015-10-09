@@ -15,7 +15,7 @@ fn main() {
   for _ in (0 .. 550usize) {
     tree.reset(&init_state, &init_aux_state, 0, 0.0);
     for _ in (0 .. 361usize) {
-      tree.execute_path(1, &policy, &mut work);
+      tree.walk(1, &policy, &mut work);
     }
   }
 }

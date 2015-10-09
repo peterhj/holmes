@@ -26,7 +26,6 @@ pub struct SearchNode<D, E> where D: Default, E: Clone + Copy + Default {
   pub prev_id:      Option<usize>,
   pub state:        FastBoard,
   pub aux_state:    Option<FastBoardAux>,
-  pub depth:        i32,
   pub uninst_pos:   BitSet,
   pub inst_actions: HashMap<usize, Action>,
   pub inst_childs:  HashMap<Action, SearchEdge<E>>,
@@ -34,6 +33,7 @@ pub struct SearchNode<D, E> where D: Default, E: Clone + Copy + Default {
 }
 
 impl<D, E> SearchNode<D, E> where D: Default, E: Clone + Copy + Default {
+  // TODO(20151008): pass in initial data as well (initialized by policy).
   pub fn new(prev_id: Option<usize>, id: usize, state: FastBoard, aux_state: FastBoardAux, depth: i32) -> SearchNode<D, E> {
     let legal_pos = aux_state.get_legal_positions(state.current_turn()).clone();
     SearchNode{
@@ -41,7 +41,6 @@ impl<D, E> SearchNode<D, E> where D: Default, E: Clone + Copy + Default {
       prev_id:      prev_id,
       state:        state,
       aux_state:    Some(aux_state),
-      depth:        depth,
       uninst_pos:   legal_pos,
       inst_actions: HashMap::with_capacity(1),
       inst_childs:  HashMap::with_capacity(1),
@@ -52,7 +51,7 @@ impl<D, E> SearchNode<D, E> where D: Default, E: Clone + Copy + Default {
 
 pub enum TreePathResult {
   Terminal{id: usize},
-  Leaf{id: usize},
+  Leaf{leaf_action: Action, leaf_id: usize},
 }
 
 pub struct SearchTree<P> where P: TreePolicy {
@@ -79,7 +78,8 @@ impl<P> SearchTree<P> where P: TreePolicy {
       }
       prev_node.inst_actions.insert(id, action);
       prev_node.inst_childs.insert(action, SearchEdge::new(id, action, init_q));
-      (Some(prev_id), prev_node.depth + 1)
+      //(Some(prev_id), prev_node.depth + 1)
+      (Some(prev_id), init_depth)
     } else {
       (None, init_depth)
     };
@@ -87,7 +87,10 @@ impl<P> SearchTree<P> where P: TreePolicy {
     id
   }
 
-  pub fn execute_path(&mut self, max_depth: i32, tree_policy: &P, work: &mut FastBoardWork) -> TreePathResult {
+  pub fn walk(&mut self, max_depth: i32, tree_policy: &P, work: &mut FastBoardWork) -> TreePathResult {
+    assert!(max_depth >= 1);
+    let mut prev_action = None;
+    let mut depth = 0;
     let mut id = 0;
     loop {
       let action = tree_policy.execute(&self.nodes[id]);
@@ -97,10 +100,12 @@ impl<P> SearchTree<P> where P: TreePolicy {
           return TreePathResult::Terminal{id: id};
         }
         Action::Place{pos} => {
-          if self.nodes[id].depth >= max_depth {
-            return TreePathResult::Leaf{id: id};
+          if depth >= max_depth {
+            return TreePathResult::Leaf{leaf_action: prev_action.unwrap(), leaf_id: id};
           }
           if let Some(next_id) = self.nodes[id].inst_childs.get(&action).map(|e| e.next_id) {
+            prev_action = Some(action);
+            depth += 1;
             id = next_id;
           } else {
             let mut next_state = self.nodes[id].state.clone();
@@ -111,7 +116,7 @@ impl<P> SearchTree<P> where P: TreePolicy {
             next_state.play(curr_turn, Action::Place{pos: pos}, work, &mut next_aux_state);
             next_state.update(curr_turn, Action::Place{pos: pos}, work, &mut next_aux_state);
             let next_id = self.expand(Some((id, action)), next_state, next_aux_state, 0, 0.0);
-            return TreePathResult::Leaf{id: next_id};
+            return TreePathResult::Leaf{leaf_action: action, leaf_id: next_id};
           }
         }
       }
@@ -121,7 +126,7 @@ impl<P> SearchTree<P> where P: TreePolicy {
   pub fn simulate(&mut self, action: Action, id: usize, tree_policy: &mut P, rollout_policy: &mut RolloutPolicy) {
     let result = {
       let node = &self.nodes[id];
-      rollout_policy.execute_rollout(&node.state, node.depth)
+      rollout_policy.execute_rollout(&node.state, node.aux_state.as_ref().unwrap())
     };
     tree_policy.update(result);
     let mut next_id = None;

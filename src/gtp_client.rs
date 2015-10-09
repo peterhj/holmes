@@ -159,9 +159,16 @@ impl GtpClient for Client {
     if !(num_stones >= 2 && num_stones <= 9) {
       return vec![ErrorEntity(b"invalid number of stones".to_vec())];
     }
-    if self.agent.is_valid() {
-      return vec![ErrorEntity(b"board not empty".to_vec())];
+    // XXX: The black player places the handicap stones.
+    if !self.agent.is_valid() {
+      self.agent_builder.own_color(Stone::Black);
+      self.agent_builder.remaining_defaults();
+      self.agent = self.agent_builder.build();
     }
+    // TODO(20151008): check for empty board.
+    /*if self.agent.is_valid() {
+      return vec![ErrorEntity(b"board not empty".to_vec())];
+    }*/
     let mut vertexes = vec![];
     for &pos in self.pre_game.fixed_handicap_positions(num_stones).iter() {
       let coord = pos.to_coord();
@@ -179,9 +186,16 @@ impl GtpClient for Client {
     if !(num_stones >= 2 && num_stones <= 9) {
       return vec![ErrorEntity(b"invalid number of stones".to_vec())];
     }
-    if self.agent.is_valid() {
-      return vec![ErrorEntity(b"board not empty".to_vec())];
+    // XXX: The black player places the handicap stones.
+    if !self.agent.is_valid() {
+      self.agent_builder.own_color(Stone::Black);
+      self.agent_builder.remaining_defaults();
+      self.agent = self.agent_builder.build();
     }
+    // TODO(20151008): check for empty board.
+    /*if self.agent.is_valid() {
+      return vec![ErrorEntity(b"board not empty".to_vec())];
+    }*/
     let mut vertexes = vec![];
     for &pos in self.pre_game.prefer_handicap_positions(num_stones).iter() {
       let coord = pos.to_coord();
@@ -192,9 +206,16 @@ impl GtpClient for Client {
   }
 
   fn reply_set_free_handicap(&mut self, args: &[Vec<u8>]) -> Vec<Entity> {
-    if self.agent.is_valid() {
-      return vec![ErrorEntity(b"board not empty".to_vec())];
+    // XXX: The black player places the handicap stones.
+    if !self.agent.is_valid() {
+      self.agent_builder.own_color(Stone::White);
+      self.agent_builder.remaining_defaults();
+      self.agent = self.agent_builder.build();
     }
+    // TODO(20151008): check for empty board.
+    /*if self.agent.is_valid() {
+      return vec![ErrorEntity(b"board not empty".to_vec())];
+    }*/
     for arg in args {
       let coord = match Entity::parse_vertex(arg) {
         VertexEntity(Vertex::Play(coord)) => coord,

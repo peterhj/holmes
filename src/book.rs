@@ -119,12 +119,7 @@ impl OpeningBook {
       };
       hash ^= self.table.key_stone(s, p as Pos);
     }
-    if let Some(query_id) = self.table.find(hash, |cmp_id| {
-      //println!("DEBUG: lookup: find: cmp_id {} entries.len {}", cmp_id, self.entries.len());
-      &self.entries[cmp_id].digest == digest
-    })
-    {
-      //println!("DEBUG: lookup: hash {} query_id {}", hash, query_id);
+    if let Some(query_id) = self.table.find(hash, |cmp_id| &self.entries[cmp_id].digest == digest) {
       if self.entries[query_id].turn == turn {
         return Some(&self.entries[query_id].plays);
       }

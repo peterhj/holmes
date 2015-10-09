@@ -25,6 +25,19 @@ pub fn random_shuffle_once<T: Copy, R: Rng>(xs: &mut [T], i: usize, rng: &mut R)
   xs.swap(i, j);
 }
 
+pub fn random_sample_without_replace<T: Copy, R: Rng>(xs: &mut Vec<T>, rng: &mut R) -> Option<T> {
+  let n = xs.len();
+  if n == 0 {
+    None
+  } else {
+    let uniform_dist = Range::new(0, n);
+    let j = uniform_dist.ind_sample(rng);
+    xs.swap(j, n - 1);
+    xs.pop()
+  }
+}
+
+#[derive(Clone)]
 pub struct XorShift128PlusRng {
   state: [u64; 2],
 }

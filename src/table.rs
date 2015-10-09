@@ -6,8 +6,10 @@ use rand::{Rng};
 use std::collections::{HashMap};
 use std::iter::{repeat};
 
+pub type TransTable = TranspositionTable;
+
 #[derive(Clone, Debug)]
-pub struct TransTable {
+pub struct TranspositionTable {
   mask:       u64,
   keys:       Vec<u64>,
   flags:      BitVec,
@@ -15,8 +17,8 @@ pub struct TransTable {
   collisions: HashMap<usize, Vec<(u64, usize)>>,
 }
 
-impl TransTable {
-  pub fn new<R>(min_capacity: usize, rng: &mut R) -> TransTable where R: Rng {
+impl TranspositionTable {
+  pub fn new<R>(min_capacity: usize, rng: &mut R) -> TranspositionTable where R: Rng {
     let capacity = ceil_power2(min_capacity as u64) as usize;
     assert!(capacity >= min_capacity);
     let mut keys = Vec::with_capacity(FastBoard::BOARD_SIZE * 3);
@@ -28,7 +30,7 @@ impl TransTable {
     //unique.extend(repeat((0, 0)).take(capacity));
     unsafe { unique.set_len(capacity) };
     let mask = capacity as u64 - 1;
-    TransTable{
+    TranspositionTable{
       mask:       mask,
       keys:       keys,
       flags:      flags,

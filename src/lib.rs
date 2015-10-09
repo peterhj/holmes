@@ -11,6 +11,7 @@ pub mod agent;
 pub mod book;
 pub mod contains;
 pub mod fastboard;
+pub mod fasttree;
 pub mod gtp;
 pub mod gtp_board;
 pub mod gtp_client;

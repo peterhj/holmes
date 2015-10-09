@@ -4,6 +4,9 @@
 
 #define ALWAYS_INLINE __attribute__ ((always_inline))
 
+#define F32_SCALE (1.0f / 16777216.0f)
+#define F32_TWO_PI (2.0f * 3.14159265358979323846f)
+
 extern float cephes_cosf(float);
 extern float cephes_sinf(float);
 extern float cephes_logf(float);
@@ -48,7 +51,7 @@ struct XorShift128PlusState {
 
 static inline __m256 uniform32_x8(__m256i u) ALWAYS_INLINE;
 static inline __m256 uniform32_x8(__m256i u) {
-  const __m256 scale = _mm256_set1_ps(1.0f/16777216.0f);
+  const __m256 scale = _mm256_set1_ps(F32_SCALE);
   __m256 x;
   u = _mm256_srli_epi32(u, 8);
   x = _mm256_cvtepi32_ps(u);
@@ -58,12 +61,12 @@ static inline __m256 uniform32_x8(__m256i u) {
 
 static inline float uniform32_x1(uint32_t x) ALWAYS_INLINE;
 static inline float uniform32_x1(uint32_t x) {
-  return (float)(x >> 8) * (1.0f/16777216.0f);
+  return (float)(x >> 8) * (F32_SCALE);
 }
 
 static inline void box_muller_beta32_x16(__m256 u1, __m256 u2, const float *succ_ratio, const float *num_trials, __m256 *x1, __m256 *x2) ALWAYS_INLINE;
 static inline void box_muller_beta32_x16(__m256 u1, __m256 u2, const float *succ_ratio, const float *num_trials, __m256 *x1, __m256 *x2) {
-  const float s_two_pi = 2.0f * 3.14159265358979323846f;
+  const float s_two_pi = F32_TWO_PI;
   const __m256 two_pi = _mm256_set1_ps(s_two_pi);
   const __m256 one = _mm256_set1_ps(1.0f);
   const __m256 minus_two = _mm256_set1_ps(-2.0f);
@@ -85,7 +88,7 @@ static inline void box_muller_beta32_x16(__m256 u1, __m256 u2, const float *succ
 
 static inline void box_muller_beta32_x2(float s_u1, float s_u2, const float *succ_ratio, const float *num_trials, float *x1, float *x2) ALWAYS_INLINE;
 static inline void box_muller_beta32_x2(float s_u1, float s_u2, const float *succ_ratio, const float *num_trials, float *x1, float *x2) {
-  const float s_two_pi = 2.0f * 3.14159265358979323846f;
+  const float s_two_pi = F32_TWO_PI;
   float s_mu1, s_mu2, s_sigma1, s_sigma2;
   float s_radius, s_theta;
   float s_costheta, s_sintheta;
@@ -104,7 +107,7 @@ static inline void box_muller_beta32_x2(float s_u1, float s_u2, const float *suc
 
 static inline float box_muller_beta32_x1(float s_u1, float s_u2, const float *succ_ratio, const float *num_trials) ALWAYS_INLINE;
 static inline float box_muller_beta32_x1(float s_u1, float s_u2, const float *succ_ratio, const float *num_trials) {
-  const float s_two_pi = 2.0f * 3.14159265358979323846f;
+  const float s_two_pi = F32_TWO_PI;
   float s_mu1, s_sigma1;
   float s_radius, s_theta;
   float s_costheta;
