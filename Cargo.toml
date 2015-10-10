@@ -16,6 +16,10 @@ name = "test-book"
 path = "tools/test-book.rs"
 
 [[bin]]
+name = "test-sgf"
+path = "tools/test-sgf.rs"
+
+[[bin]]
 name = "bench-board"
 path = "tools/bench-board.rs"
 

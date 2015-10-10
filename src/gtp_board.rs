@@ -1,3 +1,4 @@
+use std::fmt;
 use std::str::{from_utf8};
 
 #[derive(Clone, Copy, Debug)]
@@ -54,6 +55,13 @@ pub struct Coord {
   pub y: u8,
 }
 
+impl fmt::Debug for Coord {
+  fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+    //self.as_slice().fmt(formatter)
+    formatter.write_str(&self.to_string())
+  }
+}
+
 impl Coord {
   pub fn new(x: u8, y: u8) -> Coord {
     Coord{x: x, y: y}
@@ -69,6 +77,11 @@ impl Coord {
     let raw_y: Option<u8> = from_utf8(&code[1 ..]).unwrap().parse().ok();
     let y = raw_y.unwrap() - 1;
     Coord{x: x, y: y}
+  }
+
+  pub fn from_sgf(code: &[u8]) -> Coord {
+    assert_eq!(2, code.len());
+    Coord{x: code[0] - b'a', y: code[1] - b'a'}
   }
 
   pub fn to_bytestring(&self) -> Vec<u8> {

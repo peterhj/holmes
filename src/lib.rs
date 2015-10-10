@@ -19,6 +19,7 @@ pub mod gtp_board;
 pub mod gtp_client;
 pub mod policy;
 pub mod random;
+pub mod sgf;
 pub mod table;
 //pub mod tree;
 pub mod util;
