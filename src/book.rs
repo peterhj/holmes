@@ -73,11 +73,11 @@ impl OpeningBook {
         plays.push(pos);
         i += 1;
       }
-      for (f, r) in (0 .. 4).zip(0 .. 4) {
+      for t in Pos::iter_trans() {
         let mut hash: u64 = 0;
         let mut digest = BitSet::with_capacity(FastBoard::BOARD_SIZE * 2);
         for &(stone, pos) in matches.iter() {
-          let pos = pos.flip(f).rot(r);
+          let pos = pos.trans(t);
           match stone {
             Stone::Black => {
               hash ^= table.key_stone(stone, pos);
@@ -91,7 +91,7 @@ impl OpeningBook {
           }
         }
         let plays: Vec<_> = plays.iter()
-          .map(|&p| p.flip(f).rot(r))
+          .map(|&p| p.trans(t))
           .collect();
         let entry = BookEntry{turn: turn, digest: digest, plays: plays};
         let new_id = entries.len();

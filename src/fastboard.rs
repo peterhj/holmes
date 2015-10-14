@@ -5,21 +5,30 @@ use bit_vec::{BitVec};
 use std::cmp::{min};
 use std::collections::{HashSet};
 use std::iter::{repeat};
+use std::ops::{Range};
 use std::str::{from_utf8};
 
 const TOMBSTONE: Pos = -1;
 
 pub trait PosExt {
+  //fn iter_flips() -> ...;
+  //fn iter_rots() -> ...;
+  fn iter_trans() -> Range<u8>;
   fn from_coord(coord: Coord) -> Self where Self: Sized;
   fn to_coord(self) -> Coord;
   fn idx(self) -> usize;
-  fn rot(self, r: u8) -> Pos;
   fn flip(self, f: u8) -> Pos;
+  fn rot(self, r: u8) -> Pos;
+  fn trans(self, t: u8) -> Pos;
 }
 
 pub type Pos = i16;
 
 impl PosExt for Pos {
+  fn iter_trans() -> Range<u8> {
+    (0 .. 8)
+  }
+
   fn from_coord(coord: Coord) -> Pos {
     assert!(coord.x < 19);
     assert!(coord.y < 19);
@@ -39,6 +48,18 @@ impl PosExt for Pos {
   }
 
   #[inline]
+  fn flip(self, f: u8) -> Pos {
+    let (x, y) = (self % 19, self / 19);
+    match f {
+      0 => self,
+      1 => (19-1-x) + y * 19,
+      2 => x        + (19-1-y) * 19,
+      3 => (19-1-x) + (19-1-y) * 19,
+      _ => unreachable!(),
+    }
+  }
+
+  #[inline]
   fn rot(self, r: u8) -> Pos {
     let (x, y) = (self % 19, self / 19);
     match r {
@@ -51,13 +72,17 @@ impl PosExt for Pos {
   }
 
   #[inline]
-  fn flip(self, f: u8) -> Pos {
-    let (x, y) = (self % 19, self / 19);
-    match f {
+  fn trans(self, t: u8) -> Pos {
+    let (u, v) = (9 - (self % 19), 9 - (self / 19));
+    match t {
       0 => self,
-      1 => (19-1-x) + y * 19,
-      2 => x        + (19-1-y) * 19,
-      3 => (19-1-x) + (19-1-y) * 19,
+      1 => (9 - u) + (9 + v) * 19,
+      2 => (9 + u) + (9 - v) * 19,
+      3 => (9 - u) + (9 - v) * 19,
+      4 => (9 + v) + (9 + u) * 19,
+      5 => (9 - v) + (9 + u) * 19,
+      6 => (9 + v) + (9 - u) * 19,
+      7 => (9 - v) + (9 - u) * 19,
       _ => unreachable!(),
     }
   }
@@ -484,7 +509,8 @@ impl FastBoardAux {
         tmp_aux.clone_from(self);
         //tmp_board.play(stone, action, work, &mut Some(&mut self.clone()), false);
         tmp_board.play(stone, action, work, &mut Some(tmp_aux), false);
-        if tmp_board.get_last_suicide_captures().len() == 0 {
+        //if tmp_board.get_last_suicide_captures().len() == 0 {
+        if tmp_board.last_move_was_legal() {
           Some(ActionStatus::Legal)
         } else {
           Some(ActionStatus::IllegalSuicide)
@@ -615,6 +641,11 @@ impl FastBoardAux {
   }
 }
 
+pub enum PlayResult {
+  Okay,
+  FatalError,
+}
+
 #[derive(Clone, Debug)]
 pub struct FastBoard {
   // FIXME(20151006): for clarity, should group fields into ones modified during
@@ -633,16 +664,21 @@ pub struct FastBoard {
   // Previous board structures.
   last_turn:  Option<Stone>,  // the previously played turn.
   last_pos:   Option<Pos>,    // the previously played position.
+  last_clob:  bool,           // previous move clobbered a stone.
   last_caps:  Vec<Pos>,       // previously captured positions.
-  last_scaps: Vec<Pos>,       // previous suicide-captures.
+  last_suics: Vec<Pos>,       // previously suicided chains.
 
   // Chain data structures. Namely, this implements a linked quick-union for
   // finding and iterating over connected components, as well as a list of
   // chain liberties.
+  chains:     Vec<Option<Box<Chain>>>,
   ch_roots:   Vec<Pos>,
   ch_links:   Vec<Pos>,
   ch_sizes:   Vec<u16>,
-  chains:     Vec<Option<Box<Chain>>>,
+
+  // History data structures.
+  // TODO(20151011)
+  //cap_counts: Vec<u32>,
 }
 
 impl FastBoard {
@@ -689,12 +725,13 @@ impl FastBoard {
       ko_pos:     None,
       last_turn:  None,
       last_pos:   None,
+      last_clob:  false,
       last_caps:  Vec::with_capacity(4),
-      last_scaps: Vec::with_capacity(4),
+      last_suics: Vec::with_capacity(4),
+      chains:     Vec::with_capacity(Self::BOARD_SIZE),
       ch_roots:   Vec::with_capacity(Self::BOARD_SIZE),
       ch_links:   Vec::with_capacity(Self::BOARD_SIZE),
       ch_sizes:   Vec::with_capacity(Self::BOARD_SIZE),
-      chains:    Vec::with_capacity(Self::BOARD_SIZE),
     }
   }
 
@@ -722,6 +759,34 @@ impl FastBoard {
     digest
   }
 
+  pub fn get_bytedigest(&self) -> Vec<u32> {
+    let mut digest = Vec::with_capacity((Self::BOARD_SIZE + 16 - 1) / 16);
+    let mut offset = 0;
+    let mut mask: u32 = 0;
+    for (p, &stone) in self.stones.iter().enumerate() {
+      assert_eq!(p % 16, offset);
+      match stone {
+        Stone::Black => {
+          mask |= 1 << (2 * offset);
+        }
+        Stone::White => {
+          mask |= 1 << (2 * offset + 1);
+        }
+        Stone::Empty => {
+        }
+      }
+      offset += 1;
+      if offset == 16 {
+        digest.push(mask);
+        offset = 0;
+      }
+    }
+    if offset != 0 {
+      digest.push(mask);
+    }
+    digest
+  }
+
   pub fn reset(&mut self) {
     //self.in_txn = false;
 
@@ -733,7 +798,9 @@ impl FastBoard {
 
     self.last_pos = None;
     self.last_turn = None;
+    self.last_clob = false;
     self.last_caps.clear();
+    self.last_suics.clear();
 
     self.ch_roots.clear();
     self.ch_roots.extend(repeat(TOMBSTONE).take(Self::BOARD_SIZE));
@@ -745,9 +812,14 @@ impl FastBoard {
     self.chains.extend(repeat(None).take(Self::BOARD_SIZE));
   }
 
-  pub fn get_last_suicide_captures(&self) -> &[Pos] {
-    &self.last_scaps
+  pub fn last_move_was_legal(&self) -> bool {
+    !self.last_clob &&
+    self.last_suics.len() == 0
   }
+
+  /*pub fn get_last_suicide_captures(&self) -> &[Pos] {
+    &self.last_suics
+  }*/
 
   #[inline]
   pub fn is_occupied(&self, pos: Pos) -> bool {
@@ -839,15 +911,17 @@ impl FastBoard {
     w_score - b_score + komi
   }
 
-  pub fn play(&mut self, stone: Stone, action: Action, work: &mut FastBoardWork, aux: &mut Option<&mut FastBoardAux>, verbose: bool) {
-    //let aux = &aux;
+  pub fn play(&mut self, stone: Stone, action: Action, work: &mut FastBoardWork, aux: &mut Option<&mut FastBoardAux>, verbose: bool) -> PlayResult {
     // FIXME(20151008): ko point logic is seriously messed up.
     //println!("DEBUG: play: {:?} {:?}", stone, action);
     //assert!(!self.in_txn);
+    let mut result = PlayResult::Okay;
     work.reset();
+    self.turn = stone;
+    self.last_clob = false;
     self.last_caps.clear();
+    self.last_suics.clear();
     aux.as_mut().map(|aux| {
-      self.last_scaps.clear();
       aux.last_adj_chs.clear();
       aux.last_cap_chs.clear();
     });
@@ -856,18 +930,24 @@ impl FastBoard {
         self.last_pos = None;
       }
       Action::Place{pos} => {
-        //self.place_stone(stone, pos, &aux.as_mut().map(|x| &mut **x));
         self.place_stone(stone, pos, aux);
         let opp_stone = stone.opponent();
         let mut num_captured = 0;
         Self::for_each_adjacent(pos, |adj_pos| {
+          if let PlayResult::FatalError = result {
+            return;
+          }
           if self.stones[adj_pos.idx()] != Stone::Empty {
             if verbose {
               println!("DEBUG: adjacent to {}: {}", pos.to_coord().to_string(), adj_pos.to_coord().to_string());
             }
             let adj_head = self.traverse_chain(adj_pos);
-            assert!(adj_head != TOMBSTONE);
-            //if let Some(aux) = aux {
+            //assert!(adj_head != TOMBSTONE);
+            if adj_head == TOMBSTONE {
+              println!("WARNING: play: adj head is TOMBSTONE!");
+              result = PlayResult::FatalError;
+              return;
+            }
             aux.as_mut().map(|aux| {
               aux.last_adj_chs.push(adj_head);
             });
@@ -889,17 +969,20 @@ impl FastBoard {
             }
           }
         });
+        if let PlayResult::FatalError = result {
+          println!("WARNING: failed to play due to error!");
+          return result;
+        }
         if num_captured > 1 {
           self.ko_pos = None;
         }
         self.merge_chains_and_append(&work.merge_adj_heads, pos, aux, verbose);
-        //if let Some(aux) = aux {
         aux.as_mut().map(|aux| {
           for &head in aux.ch_heads.iter() {
             if self.stones[head.idx()] == stone &&
                 self.get_chain(head).count_pseudoliberties() == 0
             {
-              self.last_scaps.push(head);
+              self.last_suics.push(head);
             }
           }
         });
@@ -911,13 +994,16 @@ impl FastBoard {
     }
     self.last_turn = Some(stone);
     self.turn = stone.opponent();
+    result
   }
 
   fn place_stone(&mut self, stone: Stone, pos: Pos, aux: &mut Option<&mut FastBoardAux>) {
     let i = pos.idx();
+    if self.stones[i] != Stone::Empty {
+      self.last_clob = true;
+    }
     self.stones[i] = stone;
-    self.ch_roots[i] = TOMBSTONE;
-    //if let Some(aux) = aux {
+    //self.ch_roots[i] = TOMBSTONE;
     aux.as_mut().map(|aux| {
       aux.st_first.set(i, false);
       aux.st_empty.set(i, false);
@@ -931,9 +1017,8 @@ impl FastBoard {
     let i = pos.idx();
     //let stone = self.stones[i];
     self.stones[i] = Stone::Empty;
-    self.ch_roots[i] = TOMBSTONE;
+    //self.ch_roots[i] = TOMBSTONE;
     self.last_caps.push(pos);
-    //if let Some(aux) = aux {
     aux.as_mut().map(|aux| {
       aux.st_empty.set(i, true);
       /*Self::for_each_adjacent_labeled(pos, |adj_pos, adj_direction| {
@@ -968,8 +1053,15 @@ impl FastBoard {
       return TOMBSTONE;
     }
     while pos != self.ch_roots[pos.idx()] {
-      self.ch_roots[pos.idx()] = self.ch_roots[self.ch_roots[pos.idx()].idx()];
-      pos = self.ch_roots[pos.idx()];
+      match self.ch_roots[self.ch_roots[pos.idx()].idx()] {
+        TOMBSTONE => {
+          return TOMBSTONE;
+        }
+        root => {
+          self.ch_roots[pos.idx()] = root;
+          pos = root;
+        }
+      }
     }
     pos
   }
@@ -1003,7 +1095,6 @@ impl FastBoard {
       self.ch_sizes[new_head.idx()] += self.ch_sizes[old_head.idx()];
       self.ch_sizes[old_head.idx()] = 0;
       let old_chain = self.take_chain(old_head);
-      //if let Some(aux) = aux {
       aux.as_mut().map(|aux| {
         aux.ch_heads.remove(&old_head);
       });
@@ -1020,7 +1111,6 @@ impl FastBoard {
     self.ch_links[head.idx()] = head;
     self.ch_sizes[head.idx()] = 1;
     self.chains[head.idx()] = Some(Box::new(Chain::new()));
-    //if let Some(aux) = aux {
     aux.as_mut().map(|aux| {
       aux.ch_heads.insert(head);
     });
@@ -1101,7 +1191,6 @@ impl FastBoard {
     }
     self.ch_sizes[head.idx()] = 0;
     self.take_chain(head);
-    //if let Some(aux) = aux {
     aux.as_mut().map(|aux| {
       aux.ch_heads.remove(&head);
       aux.last_cap_chs.push(head);

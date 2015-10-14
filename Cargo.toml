@@ -28,6 +28,18 @@ path = "tools/bench-board.rs"
 #path = "tools/bench-tree.rs"
 
 [[bin]]
+name = "filter-gogod-data"
+path = "tools/filter-gogod-data.rs"
+
+[[bin]]
+name = "preproc-gogod-data"
+path = "tools/preproc-gogod-data.rs"
+
+[[bin]]
+name = "preproc-kgs-data"
+path = "tools/preproc-kgs-data.rs"
+
+[[bin]]
 name = "holmes-gtp"
 path = "tools/holmes-gtp.rs"
 
@@ -38,6 +50,7 @@ bufstream = "*"
 byteorder = "*"
 getopts = "*"
 rand = "*"
+rustc-serialize = "*"
 time = "*"
 
 [dependencies.statistics_avx2]

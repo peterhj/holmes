@@ -24,7 +24,7 @@ fn main() {
   println!("DEBUG: {:x} {:x} {:x} {:x}", buf[0], buf[1], buf[2], buf[3]);*/
 
   let mut rng = XorShift128PlusStreamRng::new(&seed);
-  let m = 1000_000;
+  let trials = 1000_000;
   let n = 1000;
 
   /*rng.sample32(&mut buf);
@@ -37,7 +37,7 @@ fn main() {
   unsafe { succ_ratio.set_len(n) };
 
   let start_t = get_time();
-  for _ in (0 .. m) {
+  for _ in (0 .. trials) {
     rng.sample_uniform_f32(&mut succ_ratio);
   }
   let elapsed_ms = (get_time() - start_t).num_milliseconds();
@@ -64,7 +64,7 @@ fn main() {
   let mut buf = Vec::with_capacity(n);
   unsafe { buf.set_len(n) };
   let start_t = get_time();
-  for _ in (0 .. m) {
+  for _ in (0 .. trials) {
     rng.sample_approx_beta_f32(&succ_ratio, &num_trials, &mut buf);
   }
   let elapsed_ms = (get_time() - start_t).num_milliseconds();

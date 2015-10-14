@@ -1,5 +1,6 @@
 #![feature(associated_consts)]
 
+extern crate rustc_serialize;
 extern crate statistics_avx2;
 
 extern crate bit_set;
@@ -14,6 +15,7 @@ pub mod book;
 pub mod contains;
 pub mod fastboard;
 pub mod fasttree;
+pub mod game;
 pub mod gtp;
 pub mod gtp_board;
 pub mod gtp_client;

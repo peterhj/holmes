@@ -7,7 +7,6 @@ use policy::{
   RolloutPolicy, QuasiUniformRolloutPolicy,
 };
 use random::{random_shuffle};
-//use tree::{SearchTree, TreePathResult};
 
 use rand::{thread_rng};
 use std::path::{PathBuf};
@@ -199,13 +198,8 @@ impl Agent {
     SearchProblem{
       stop_time:      get_time() + Duration::seconds(10), // FIXME(20151006)
       tree:           tree,
-      /*tree_policy:    UctSearchPolicy::new(UctSearchPolicyConfig{
-        c: 0.5, bias: 0.0, tuned: false,
-        max_trials: 100000,
-      }),*/
       tree_policy:    UctSearchPolicy{c: 0.5},
       rollout_policy: QuasiUniformRolloutPolicy::new(),
-      //work:           FastBoardWork::new(),
     }
   }
 
@@ -288,11 +282,9 @@ impl Agent {
 pub struct SearchProblem<SearchP, RolloutP> where SearchP: SearchPolicy, RolloutP: RolloutPolicy {
   stop_time:      Timespec,
   // FIXME(20151008): for now, this version of search starts over from scratch each time.
-  //tree:           SearchTree<SearchP>,
   tree:           FastSearchTree,
   tree_policy:    SearchP,
   rollout_policy: RolloutP,
-  //work:           FastBoardWork,
 }
 
 impl<SearchP, RolloutP> SearchProblem<SearchP, RolloutP> where SearchP: SearchPolicy, RolloutP: RolloutPolicy {
@@ -302,9 +294,12 @@ impl<SearchP, RolloutP> SearchProblem<SearchP, RolloutP> where SearchP: SearchPo
       ref mut tree_policy,
       ref mut rollout_policy,
       ..} = self;
+    // FIXME(20151011): hard coding number of rollouts for now.
     for _ in (0 .. 10000) {
       match tree.walk(tree_policy) {
-        SearchResult::Terminal => {}
+        SearchResult::Terminal => {
+          // FIXME(20151011): do terminal nodes result in a backup?
+        }
         SearchResult::Leaf => {
           tree.simulate(rollout_policy);
           tree.backup(tree_policy);
