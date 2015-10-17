@@ -40,6 +40,10 @@ name = "preproc-kgs-data"
 path = "tools/preproc-kgs-data.rs"
 
 [[bin]]
+name = "train-simba"
+path = "tools/train-simba.rs"
+
+[[bin]]
 name = "holmes-gtp"
 path = "tools/holmes-gtp.rs"
 
@@ -52,6 +56,18 @@ getopts = "*"
 rand = "*"
 rustc-serialize = "*"
 time = "*"
+
+[dependencies.array]
+path = "../../rembrandt-project/libarray"
+
+[dependencies.arraydb]
+path = "../../rembrandt-project/arraydb"
+
+[dependencies.async_cuda]
+path = "../../rembrandt-project/libasync_cuda"
+
+[dependencies.rembrandt]
+path = "../../rembrandt-project/rembrandt_new"
 
 [dependencies.statistics_avx2]
 path = "libstatistics_avx2"

@@ -7,7 +7,7 @@ use holmes::random::{XorShift128PlusRng};
 use rand::{Rng, SeedableRng, thread_rng};
 
 fn main() {
-  let n = 35000;
+  let n = 17000;
   //let seed = [thread_rng().next_u64(), thread_rng().next_u64()];
   let seed = [1234, 5678];
   let mut rng: XorShift128PlusRng = SeedableRng::from_seed(seed);
@@ -23,7 +23,7 @@ fn main() {
     board.reset();
     let mut stone = Stone::Black;
     for (i, &c) in valid_coords.iter().enumerate() {
-      if i >= 200 {
+      if i >= 360 {
         break;
       }
       board.play(stone, Action::Place{pos: c}, &mut work, &mut None, false);
