@@ -1,0 +1,8 @@
+# 2-layer architectures:
+
+- arch: input 19x19x4 -> conv 9x9x3 w/ rect -> conv 5x5x1:
+  - params: initial LR 0.01, anneal step 6144 0.3, minibatch size 256
+    - plateaus at around 28.0% accuracy after the 2nd annealing
+- arch: input 19x19x4 -> conv 9x9x3 w/ rect -> conv 3x3x1:
+  - params: initial LR 0.01, anneal step 6144 0.1, minibatch size 256
+    - plateaus at around 27.4% accuracy after the 2nd annealing

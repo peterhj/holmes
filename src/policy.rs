@@ -1,189 +1,16 @@
 use fastboard::{PosExt, Pos, Action, Stone, FastBoard, FastBoardAux, FastBoardWork};
 use fasttree::{FastSearchNode};
-use random::{XorShift128PlusRng, random_sample_without_replace};
+use random::{XorShift128PlusRng, choose_without_replace, sample_discrete_cdf};
 
-use rand::{SeedableRng};
+//use array::{Buffer};
+use async_cuda::context::{DeviceContext};
+use rembrandt::layer::{Layer};
+use rembrandt::net::{NetArch, LinearNetArch};
 use statistics_avx2::array::{array_argmax};
+use statistics_avx2::random::{StreamRng, XorShift128PlusStreamRng};
 
-/*pub trait TreePolicy {
-  type NodeData: Default;
-  type EdgeData: Clone + Copy + Default;
-
-  fn reset(&mut self) {
-    unimplemented!();
-  }
-
-  fn update(&mut self, result: Stone) where Self: Sized {
-    unimplemented!();
-  }
-
-  fn update_tree_node(&self, tree: &mut SearchTree<Self>, update_id: usize, next_id: Option<usize>, leaf_action: Action, result: Stone) where Self: Sized {
-    unimplemented!();
-  }
-
-  fn execute(&self, node: &SearchNode<Self::NodeData, Self::EdgeData>) -> Action {
-    unimplemented!();
-  }
-
-  fn choose_best(&self, node: &SearchNode<Self::NodeData, Self::EdgeData>) -> Action {
-    unimplemented!();
-  }
-
-  fn execute_search(&self, node: &FastSearchNode) -> Action {
-    unimplemented!();
-  }
-
-  fn execute_best(&self, node: &FastSearchNode) -> Action {
-    unimplemented!();
-  }
-}
-
-pub struct BenchmarkTreePolicy;
-
-impl BenchmarkTreePolicy {
-  pub fn new() -> BenchmarkTreePolicy {
-    BenchmarkTreePolicy
-  }
-}
-
-impl TreePolicy for BenchmarkTreePolicy {
-  type NodeData = ();
-  type EdgeData = ();
-
-  fn update_tree_node(&self, tree: &mut SearchTree<Self>, update_id: usize, next_id: Option<usize>, leaf_action: Action, result: Stone) where Self: Sized {
-  }
-
-  fn execute(&self, node: &SearchNode<(), ()>) -> Action {
-    for p in node.uninst_pos.iter() {
-      return Action::Place{pos: p as Pos};
-    }
-    Action::Pass
-  }
-}
-
-#[derive(Clone, Copy, Default)]
-pub struct UctNodeData {
-  pub n_trials: i32,
-}
-
-#[derive(Clone, Copy, Default)]
-pub struct UctEdgeData {
-  pub n_trials: i32,
-  pub n_wins:   i32,
-  pub q_value:  f32,
-}
-
-#[derive(Clone, Copy)]
-pub struct UctTreePolicyConfig {
-  pub c:          f32,
-  pub bias:       f32,
-  pub tuned:      bool,
-  pub max_trials: i32,
-}
-
-#[derive(Clone, Copy)]
-pub struct UctTreePolicy {
-  pub config:     UctTreePolicyConfig,
-  pub num_plays:  i32,
-}
-
-impl UctTreePolicy {
-  pub fn new(config: UctTreePolicyConfig) -> UctTreePolicy {
-    UctTreePolicy{
-      config: config,
-      num_plays: 0,
-    }
-  }
-
-  pub fn update_q_value(&self, s: &<Self as TreePolicy>::NodeData, sa: &<Self as TreePolicy>::EdgeData, old_q_value: f32) -> f32 {
-    let exploit_term = (sa.n_wins as f32) / (sa.n_trials as f32);
-    let explore_term = match self.config.tuned {
-      false => {
-        self.config.c * ((s.n_trials as f32).ln() / (self.config.bias + sa.n_trials as f32)).sqrt()
-      }
-      true  => {
-        // TODO
-        unimplemented!();
-      }
-    };
-    exploit_term + explore_term
-  }
-}
-
-impl TreePolicy for UctTreePolicy {
-  type NodeData = UctNodeData;
-  type EdgeData = UctEdgeData;
-
-  fn reset(&mut self) {
-    self.num_plays = 0;
-  }
-
-  fn update(&mut self, result: Stone) where Self: Sized {
-    self.num_plays += 1;
-  }
-
-  fn update_tree_node(&self, tree: &mut SearchTree<Self>, update_id: usize, next_id: Option<usize>, leaf_action: Action, result: Stone) where Self: Sized {
-    let mut update_node = &mut tree.nodes[update_id];
-    // Update node stats (n_trials).
-    update_node.data.n_trials += 1;
-    // Update edge stats (n_trials, n_wins, q_value).
-    if let Some(next_id) = next_id {
-      let update_turn = update_node.state.current_turn();
-      let next_action = update_node.inst_actions.get(&next_id).unwrap();
-      let old_q_value = update_node.inst_childs.get(&next_action).unwrap().data.q_value;
-      let mut update_edge = update_node.inst_childs.get_mut(&next_action).unwrap();
-      update_edge.data.n_trials += 1;
-      if update_turn == result {
-        update_edge.data.n_wins += 1;
-      }
-      let new_q_value = self.update_q_value(
-          &update_node.data,
-          &update_edge.data,
-          old_q_value);
-      update_edge.data.q_value = new_q_value;
-    }
-  }
-
-  fn execute(&self, node: &SearchNode<Self::NodeData, Self::EdgeData>) -> Action {
-    // TODO(20151008): choose an arm that has not yet been picked.
-    for p in node.uninst_pos.iter() {
-      return Action::Place{pos: p as Pos};
-    }
-    // TODO(20151008): choose an arm according to q.
-    //for 
-    Action::Pass
-  }
-
-  fn choose_best(&self, node: &SearchNode<Self::NodeData, Self::EdgeData>) -> Action {
-    // TODO(20151008): choose the arm with the most trials.
-    Action::Pass
-  }
-}
-
-#[derive(Clone, Copy)]
-pub struct UctRaveTreePolicy {
-  pub c:      f32,
-  pub bias:   f32,
-  pub tuned:  bool,
-  pub equiv:  f32,
-}
-
-impl TreePolicy for UctRaveTreePolicy {
-  type NodeData = UctNodeData;
-  type EdgeData = UctEdgeData;
-
-  fn update_tree_node(&self, tree: &mut SearchTree<Self>, update_id: usize, next_id: Option<usize>, leaf_action: Action, result: Stone) where Self: Sized {
-    // TODO(20151003): This particular version is the reason for the strange
-    // method signature. RAVE, if I understand it correctly, can create edges
-    // (corresponding to the leaf action) when updating the tree.
-    unimplemented!();
-  }
-
-  fn execute(&self, node: &SearchNode<Self::NodeData, Self::EdgeData>) -> Action {
-    // TODO
-    unimplemented!();
-  }
-}*/
+use bit_set::{BitSet};
+use rand::{Rng, SeedableRng, thread_rng};
 
 pub trait SearchPolicy {
   fn reset(&mut self);
@@ -199,6 +26,7 @@ pub struct UctSearchPolicy {
 
 impl SearchPolicy for UctSearchPolicy {
   fn reset(&mut self) {
+    // Do nothing.
   }
 
   fn backup(&self, n: f32, num_trials: &[f32], succ_ratio: &[f32], value: &mut [f32]) {
@@ -240,7 +68,23 @@ pub struct ThompsonSearchPolicy {
 }
 
 pub trait RolloutPolicy {
-  fn execute(&mut self, init_state: &FastBoard, init_aux_state: &FastBoardAux) -> Stone;
+  fn execute(&mut self, init_state: &FastBoard, init_aux_state: &FastBoardAux) -> Stone {
+    unimplemented!();
+  }
+
+  /*fn reset(&mut self, init_state: &FastBoard, init_aux_state: &FastBoardAux) {
+    unimplemented!();
+  }*/
+
+  fn batch_size(&self) -> usize;
+
+  fn preload_batch_state(&mut self, batch_idx: usize, state: &FastBoard) {
+    unimplemented!();
+  }
+
+  fn execute_batch_step(&mut self, batch_size: usize) -> &[f32] {
+    unimplemented!();
+  }
 }
 
 #[derive(Clone)]
@@ -256,7 +100,7 @@ impl QuasiUniformRolloutPolicy {
   pub fn new() -> QuasiUniformRolloutPolicy {
     QuasiUniformRolloutPolicy{
       // FIXME(20151008)
-      rng:        XorShift128PlusRng::from_seed([1234_5678_1234_5678, 5678_1234_5678_1234]),
+      rng:        XorShift128PlusRng::from_seed([thread_rng().next_u64(), thread_rng().next_u64()]),
       state:      FastBoard::new(),
       work:       FastBoardWork::new(),
       moves:      Vec::with_capacity(FastBoard::BOARD_SIZE),
@@ -266,6 +110,8 @@ impl QuasiUniformRolloutPolicy {
 }
 
 impl RolloutPolicy for QuasiUniformRolloutPolicy {
+  fn batch_size(&self) -> usize { 1 }
+
   fn execute(&mut self, init_state: &FastBoard, init_aux_state: &FastBoardAux) -> Stone {
     let leaf_turn = init_state.current_turn();
     self.state.clone_from(init_state);
@@ -277,7 +123,7 @@ impl RolloutPolicy for QuasiUniformRolloutPolicy {
       'rollout: for _ in (0 .. self.max_plies) {
         let ply_turn = self.state.current_turn();
         loop {
-          let pos = match random_sample_without_replace(&mut self.moves, &mut self.rng) {
+          let pos = match choose_without_replace(&mut self.moves, &mut self.rng) {
             Some(pos) => pos,
             None => break 'rollout,
           };
@@ -299,5 +145,45 @@ impl RolloutPolicy for QuasiUniformRolloutPolicy {
     } else {
       Stone::Black
     }
+  }
+}
+
+pub struct ConvNetBatchRolloutPolicy {
+  rng:    XorShift128PlusStreamRng,
+  moves:  Vec<Pos>,
+  //mask:   BitSet,
+
+  //host_input_buf: Buffer<u8>,
+  ctx:    DeviceContext,
+  arch:   LinearNetArch,
+}
+
+impl RolloutPolicy for ConvNetBatchRolloutPolicy {
+  fn batch_size(&self) -> usize { self.arch.batch_size() }
+
+  fn preload_batch_state(&mut self, batch_idx: usize, state: &FastBoard) {
+    let &mut ConvNetBatchRolloutPolicy{ref ctx, ref mut arch, ..} = self;
+    arch.data_layer().preload_batch(batch_idx, state.extract_features(), ctx);
+    arch.loss_layer().premask_batch(batch_idx, state.extract_mask(), ctx);
+  }
+
+  fn execute_batch_step(&mut self, batch_size: usize) -> &[f32] {
+    {
+      let &mut ConvNetBatchRolloutPolicy{
+        ref mut rng, ref mut moves,
+        ref ctx, ref mut arch, ..} = self;
+      arch.data_layer().load_batch(batch_size, ctx);
+      arch.loss_layer().mask_batch(batch_size, ctx);
+      arch.evaluate(ctx);
+      let batch_cdfs = arch.loss_layer().predict_cdfs(batch_size, ctx).as_slice();
+      batch_cdfs
+      /*for batch_idx in (0 .. batch_size) {
+        let cdf = &batch_cdfs[batch_idx * FastBoard::BOARD_SIZE .. (batch_idx + 1) * FastBoard::BOARD_SIZE];
+        let j = sample_discrete_cdf(cdf, rng);
+        moves[batch_idx] = j as Pos;
+      }*/
+    }
+    //let &mut ConvNetBatchRolloutPolicy{ref moves, ..} = self;
+    //moves
   }
 }

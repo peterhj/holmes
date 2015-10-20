@@ -1,6 +1,9 @@
+extern crate array;
+extern crate async;
 extern crate async_cuda;
 extern crate rembrandt;
 extern crate rand;
+extern crate time;
 
 use rembrandt::config::{ModelConfigFile};
 use rembrandt::data::{DatasetConfiguration, DataSourceBuilder};
@@ -11,16 +14,20 @@ use rembrandt::opt::{
   OptState, Optimizer, SgdOptimizer,
 };
 
+use array::*;
+use async::*;
+use async_cuda::array_types::*;
 use async_cuda::context::{DeviceContext};
 
 use rand::{Rng, thread_rng};
 use std::path::{PathBuf};
+use time::{Duration, get_time};
 
 fn main() {
-  train_simba_2_layers();
+  bench_net();
 }
 
-fn train_simba_2_layers() {
+fn bench_net() {
   let mut rng = thread_rng();
   let ctx = DeviceContext::new(0);
 
@@ -44,12 +51,12 @@ fn train_simba_2_layers() {
   let conv1_layer_cfg = Conv2dLayerConfig{
     in_width: 19, in_height: 19, in_channels: 4,
     conv_size: 9, conv_stride: 1, conv_pad: 4,
-    out_channels: 16,
+    out_channels: 3,
     act_fun: ActivationFunction::Rect,
     init_weights: ParamsInitialization::Normal{mean: 0.0, std: 0.01},
   };
   let conv2_layer_cfg = Conv2dLayerConfig{
-    in_width: 19, in_height: 19, in_channels: 16,
+    in_width: 19, in_height: 19, in_channels: 3,
     conv_size: 3, conv_stride: 1, conv_pad: 1,
     out_channels: 1,
     act_fun: ActivationFunction::Identity,
@@ -72,20 +79,45 @@ fn train_simba_2_layers() {
     layer.initialize_params(&ctx);
   }
 
-  let mut state = OptState{epoch: 0, t: 0};
+  let num_planes = 8;
 
-  let dataset_cfg = DatasetConfiguration::open(&PathBuf::from("experiments/gogodb.data"));
-  let mut train_data_source = if let Some(&(ref name, ref cfg)) = dataset_cfg.datasets.get("train") {
-    DataSourceBuilder::build(name, cfg.clone())
-  } else {
-    panic!("missing train data source!");
-  };
-  let mut test_data_source = if let Some(&(ref name, ref cfg)) = dataset_cfg.datasets.get("valid") {
-    DataSourceBuilder::build(name, cfg.clone())
-  } else {
-    panic!("missing validation data source!");
-  };
+  let host_input_buf = Array2d::<u8>::with_zeros((361*num_planes, 256));
+  let mut device_input_buf = DeviceBuf::<u8>::with_zeros(361*num_planes*256);
+  let mut host_output_buf = Array2d::<f32>::with_zeros((361, 256));
+  let mut device_output_buf = DeviceBuf::<f32>::with_zeros(361*256);
 
-  let sgd = SgdOptimizer;
-  sgd.train(&opt_cfg, &mut state, &mut arch, &mut *train_data_source, &mut *test_data_source, &ctx);
+  let trials = 1000;
+  ctx.blocking_sync();
+  let start_time = get_time();
+  for _ in (0 .. trials) {
+    let host_view = host_input_buf.as_view();
+    let mut device_view = device_input_buf.as_mut_view_2d((361*num_planes, 256));
+    let guard = device_view.sync_load(&host_view, &ctx);
+  }
+  ctx.blocking_sync();
+  let lap_time = get_time();
+  let elapsed_ms = (lap_time - start_time).num_milliseconds();
+  println!("round-way transfer:");
+  println!("  elapsed:    {:.3} ms", elapsed_ms as f32);
+  println!("  throughput: {:.3}/s", (trials * arch.batch_size()) as f32 / (elapsed_ms as f32 * 0.001));
+
+  let trials = 1000;
+  ctx.blocking_sync();
+  let start_time = get_time();
+  for _ in (0 .. trials) {
+    let host_input_view = host_input_buf.as_view();
+    let mut device_input_view = device_input_buf.as_mut_view_2d((361*num_planes, 256));
+    let input_guard = device_input_view.sync_load(&host_input_view, &ctx);
+    arch.evaluate(&ctx);
+    let _ = arch.predict_probabilities(&ctx);
+    let device_output_view = device_output_buf.as_view_2d((361, 256));
+    let mut host_output_view = host_output_buf.as_mut_view();
+    let output_guard = device_output_view.sync_store(&mut host_output_view, &ctx);
+  }
+  ctx.blocking_sync();
+  let lap_time = get_time();
+  let elapsed_ms = (lap_time - start_time).num_milliseconds();
+  println!("net evaluation:");
+  println!("  elapsed:    {:.3} ms", elapsed_ms as f32);
+  println!("  throughput: {:.3}/s", (trials * arch.batch_size()) as f32 / (elapsed_ms as f32 * 0.001));
 }

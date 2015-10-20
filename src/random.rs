@@ -1,4 +1,8 @@
+use statistics_avx2::array::{array_binary_search};
+use statistics_avx2::random::{StreamRng};
+
 use std::cmp::{min};
+use std::num::Wrapping as Wrap;
 use rand::{Rng, SeedableRng};
 use rand::distributions::{Range};
 use rand::distributions::{IndependentSample};
@@ -25,7 +29,7 @@ pub fn random_shuffle_once<T: Copy, R: Rng>(xs: &mut [T], i: usize, rng: &mut R)
   xs.swap(i, j);
 }
 
-pub fn random_sample_without_replace<T: Copy, R: Rng>(xs: &mut Vec<T>, rng: &mut R) -> Option<T> {
+pub fn choose_without_replace<T: Copy, R: Rng>(xs: &mut Vec<T>, rng: &mut R) -> Option<T> {
   let n = xs.len();
   if n == 0 {
     None
@@ -35,6 +39,19 @@ pub fn random_sample_without_replace<T: Copy, R: Rng>(xs: &mut Vec<T>, rng: &mut
     xs.swap(j, n - 1);
     xs.pop()
   }
+}
+
+pub fn sample_discrete_cdf<R>(cdf: &[f32], rng: &mut R) -> usize where R: StreamRng {
+  let mut u = [0.0f32];
+  rng.sample_uniform_f32(&mut u);
+  let j = array_binary_search(cdf, u[0]);
+  assert!(j < cdf.len());
+  j
+}
+
+pub fn batch_sample_discrete_cdfs<R>(batch_cdf: &[f32], rng: &mut R) where R: StreamRng {
+  // TODO(20151019)
+  unimplemented!();
 }
 
 #[derive(Clone)]
@@ -50,7 +67,7 @@ impl Rng for XorShift128PlusRng {
     s1 ^= s1 << 23;
     s1 = s1 ^ s0 ^ (s1 >> 17) ^ (s0 >> 26);
     unsafe { *self.state.get_unchecked_mut(1) = s1 };
-    s1 + s0
+    (Wrap(s1) + Wrap(s0)).0
   }
 
   fn next_u32(&mut self) -> u32 {

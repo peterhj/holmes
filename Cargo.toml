@@ -28,6 +28,10 @@ path = "tools/bench-board.rs"
 #path = "tools/bench-tree.rs"
 
 [[bin]]
+name = "bench-net"
+path = "tools/bench-net.rs"
+
+[[bin]]
 name = "filter-gogod-data"
 path = "tools/filter-gogod-data.rs"
 
@@ -62,6 +66,9 @@ path = "../../rembrandt-project/libarray"
 
 [dependencies.arraydb]
 path = "../../rembrandt-project/arraydb"
+
+[dependencies.async]
+path = "../../rembrandt-project/libasync"
 
 [dependencies.async_cuda]
 path = "../../rembrandt-project/libasync_cuda"

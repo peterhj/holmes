@@ -1,5 +1,7 @@
 use gtp_board::{Player, Coord, Vertex};
 
+use array::{Array2d, Array3d};
+
 use bit_set::{BitSet};
 use bit_vec::{BitVec};
 use std::cmp::{min};
@@ -10,15 +12,26 @@ use std::str::{from_utf8};
 
 const TOMBSTONE: Pos = -1;
 
+// XXX: Feature representation.
+// Current board position.
+const GREEN_PLANE:      usize = 0;
+const RED_PLANE:        usize = FastBoard::BOARD_SIZE;
+// Previous board position.
+const PREV_GREEN_PLANE: usize = FastBoard::BOARD_SIZE * 2;
+const PREV_RED_PLANE:   usize = FastBoard::BOARD_SIZE * 3;
+// TODO(20151020): Liberties/atari status.
+const GREEN_ATARI:      usize = FastBoard::BOARD_SIZE * 4;
+const GREEN_NON_ATARI:  usize = FastBoard::BOARD_SIZE * 5;
+const RED_ATARI:        usize = FastBoard::BOARD_SIZE * 6;
+const RED_NON_ATARI:    usize = FastBoard::BOARD_SIZE * 7;
+const NUM_PLANES:       usize = 4;
+//const NUM_PLANES:       usize = 8;
+
 pub trait PosExt {
-  //fn iter_flips() -> ...;
-  //fn iter_rots() -> ...;
   fn iter_trans() -> Range<u8>;
   fn from_coord(coord: Coord) -> Self where Self: Sized;
   fn to_coord(self) -> Coord;
   fn idx(self) -> usize;
-  fn flip(self, f: u8) -> Pos;
-  fn rot(self, r: u8) -> Pos;
   fn trans(self, t: u8) -> Pos;
 }
 
@@ -48,32 +61,9 @@ impl PosExt for Pos {
   }
 
   #[inline]
-  fn flip(self, f: u8) -> Pos {
-    let (x, y) = (self % 19, self / 19);
-    match f {
-      0 => self,
-      1 => (19-1-x) + y * 19,
-      2 => x        + (19-1-y) * 19,
-      3 => (19-1-x) + (19-1-y) * 19,
-      _ => unreachable!(),
-    }
-  }
-
-  #[inline]
-  fn rot(self, r: u8) -> Pos {
-    let (x, y) = (self % 19, self / 19);
-    match r {
-      0 => self,
-      1 => y        + (19-1-x) * 19,
-      2 => (19-1-x) + (19-1-y) * 19,
-      3 => (19-1-y) + x * 19,
-      _ => unreachable!(),
-    }
-  }
-
-  #[inline]
   fn trans(self, t: u8) -> Pos {
-    let (u, v) = (9 - (self % 19), 9 - (self / 19));
+    let (x, y) = (self % 19, self / 19);
+    let (u, v) = (x - 9, y - 9);
     match t {
       0 => self,
       1 => (9 - u) + (9 + v) * 19,
@@ -381,7 +371,6 @@ pub struct FastBoardAux {
   st_empty:     BitVec,         // position is empty.
   st_legal:     Vec<BitSet>,    // legal positions.
   st_reach:     Vec<BitVec>,    // whether stones of a certain color reach empty.
-  //st_adj:       Vec<BitVec>,    // adjacent stones of a certain color (4 bits/pos).
 
   // Empty regions are tracked using a dynamic connectivity data structure.
   // Possible data structures:
@@ -417,13 +406,9 @@ impl FastBoardAux {
         BitVec::from_elem(FastBoard::BOARD_SIZE, false),
         BitVec::from_elem(FastBoard::BOARD_SIZE, false),
       ],
-      /*st_adj:       vec![
-        BitVec::from_elem(FastBoard::BOARD_SIZE * 4, false),
-        BitVec::from_elem(FastBoard::BOARD_SIZE * 4, false),
-      ],*/
       ch_heads:     HashSet::new(),
       last_adj_chs: Vec::with_capacity(4),
-      last_cap_chs:   Vec::with_capacity(4),
+      last_cap_chs: Vec::with_capacity(4),
       //hash: 0,
     }
   }
@@ -435,8 +420,6 @@ impl FastBoardAux {
     self.st_legal[1].extend((0 .. FastBoard::BOARD_SIZE));
     self.st_reach[0].clear();
     self.st_reach[1].clear();
-    //self.st_adj[0].clear();
-    //self.st_adj[1].clear();
     self.ch_heads.clear();
     //self.hash = 0;
   }
@@ -654,7 +637,11 @@ pub struct FastBoard {
   // Undo-safe txns.
   //in_txn:     bool,           // is the board in a txn?
 
-  // Basic board structure.
+  // Feature extraction.
+  features:   Array3d<u8>,    // board features.
+  mask:       Array2d<f32>,   // legal moves mask.
+
+  // Current board structure.
   turn:       Stone,          // whose turn it is to move.
   stones:     Vec<Stone>,     // the stone configuration on the board.
   ko_pos:     Option<Pos>,    // the ko point, if any.
@@ -720,6 +707,8 @@ impl FastBoard {
   pub fn new() -> FastBoard {
     FastBoard{
       //in_txn:     false,
+      features:   Array3d::with_zeros((Self::BOARD_DIM as usize, Self::BOARD_DIM as usize, NUM_PLANES)),
+      mask:       Array2d::with_zeros((Self::BOARD_SIZE, 1)),
       turn:       Stone::Black,
       stones:     Vec::with_capacity(Self::BOARD_SIZE),
       ko_pos:     None,
@@ -787,8 +776,19 @@ impl FastBoard {
     digest
   }
 
+  pub fn extract_features(&self) -> &Array3d<u8> {
+    &self.features
+  }
+
+  pub fn extract_mask(&self) -> &Array2d<f32> {
+    &self.mask
+  }
+
   pub fn reset(&mut self) {
     //self.in_txn = false;
+
+    self.features.zero_out();
+    self.mask.zero_out();
 
     // FIXME(20151004): some of this should depend on a static configuration.
     self.turn = Stone::Black;
@@ -802,14 +802,14 @@ impl FastBoard {
     self.last_caps.clear();
     self.last_suics.clear();
 
+    self.chains.clear();
+    self.chains.extend(repeat(None).take(Self::BOARD_SIZE));
     self.ch_roots.clear();
     self.ch_roots.extend(repeat(TOMBSTONE).take(Self::BOARD_SIZE));
     self.ch_links.clear();
     self.ch_links.extend(repeat(TOMBSTONE).take(Self::BOARD_SIZE));
     self.ch_sizes.clear();
     self.ch_sizes.extend(repeat(0).take(Self::BOARD_SIZE));
-    self.chains.clear();
-    self.chains.extend(repeat(None).take(Self::BOARD_SIZE));
   }
 
   pub fn last_move_was_legal(&self) -> bool {
@@ -925,6 +925,7 @@ impl FastBoard {
       aux.last_adj_chs.clear();
       aux.last_cap_chs.clear();
     });
+
     match action {
       Action::Resign | Action::Pass => {
         self.last_pos = None;
@@ -990,40 +991,79 @@ impl FastBoard {
           // TODO(20151005): check if not actually a kos pos.
         }
         self.last_pos = Some(pos);
+        // XXX(20151019): Update mask for network evaluation.
+        self.mask.as_mut_slice()[pos.idx()] = 1.0;
       }
     }
     self.last_turn = Some(stone);
+    {
+      // XXX(20151019): Update mask for network evaluation.
+      let mut mask = self.mask.as_mut_slice();
+      for &cap_pos in self.last_caps.iter() {
+        mask[cap_pos.idx()] = 0.0;
+      }
+    }
     self.turn = stone.opponent();
+
     result
   }
 
   fn place_stone(&mut self, stone: Stone, pos: Pos, aux: &mut Option<&mut FastBoardAux>) {
+    assert!(stone != Stone::Empty);
     let i = pos.idx();
-    if self.stones[i] != Stone::Empty {
+    let prev_stone = self.stones[i];
+    if prev_stone != Stone::Empty {
       self.last_clob = true;
     }
     self.stones[i] = stone;
-    //self.ch_roots[i] = TOMBSTONE;
+    {
+      let mut features = self.features.as_mut_slice();
+      if stone == self.turn {
+        features[GREEN_PLANE + i] = 1;
+        features[RED_PLANE + i] = 0;
+      } else {
+        features[GREEN_PLANE + i] = 0;
+        features[RED_PLANE + i] = 1;
+      }
+      if prev_stone == self.turn {
+        features[PREV_GREEN_PLANE + i] = 1;
+        features[PREV_RED_PLANE + i] = 0;
+      } else if prev_stone == self.turn.opponent() {
+        features[PREV_GREEN_PLANE + i] = 0;
+        features[PREV_RED_PLANE + i] = 1;
+      } else {
+        features[PREV_GREEN_PLANE + i] = 0;
+        features[PREV_RED_PLANE + i] = 0;
+      }
+    }
     aux.as_mut().map(|aux| {
       aux.st_first.set(i, false);
       aux.st_empty.set(i, false);
-      /*Self::for_each_adjacent_labeled(pos, |adj_pos, adj_direction| {
-        aux.st_adj[stone.offset()].set(adj_pos.idx() * 4 + adj_direction ^ 0x02, true);
-      });*/
     });
   }
 
   fn capture_stone(&mut self, pos: Pos, aux: &mut Option<&mut FastBoardAux>) {
     let i = pos.idx();
-    //let stone = self.stones[i];
+    let prev_stone = self.stones[i];
     self.stones[i] = Stone::Empty;
-    //self.ch_roots[i] = TOMBSTONE;
     self.last_caps.push(pos);
+    {
+      let mut features = self.features.as_mut_slice();
+      features[GREEN_PLANE + i] = 0;
+      features[RED_PLANE + i] = 0;
+      if prev_stone == self.turn {
+        features[PREV_GREEN_PLANE + i] = 1;
+        features[PREV_RED_PLANE + i] = 0;
+      } else if prev_stone == self.turn.opponent() {
+        features[PREV_GREEN_PLANE + i] = 0;
+        features[PREV_RED_PLANE + i] = 1;
+      } else {
+        features[PREV_GREEN_PLANE + i] = 0;
+        features[PREV_RED_PLANE + i] = 0;
+      }
+    }
     aux.as_mut().map(|aux| {
       aux.st_empty.set(i, true);
-      /*Self::for_each_adjacent_labeled(pos, |adj_pos, adj_direction| {
-        aux.st_adj[stone.offset()].set(adj_pos.idx() * 4 + adj_direction ^ 0x02, false);
-      });*/
     });
   }
 

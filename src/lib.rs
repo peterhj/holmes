@@ -1,6 +1,9 @@
 #![feature(associated_consts)]
+#![feature(wrapping)]
 
 extern crate array;
+extern crate async_cuda;
+extern crate rembrandt;
 extern crate statistics_avx2;
 
 extern crate bit_set;
@@ -24,5 +27,4 @@ pub mod policy;
 pub mod random;
 pub mod sgf;
 pub mod table;
-//pub mod tree;
 pub mod util;

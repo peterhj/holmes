@@ -1,0 +1,13 @@
+# Convolutional Nets
+
+In `tools/bench-net.rs`, benchmarking small candidate nets for the rollout
+policy. Notably, using cuDNN convolutions and temporary no-op softmaxes, can
+evaluate 210k states/s (conv1 is 9x9x4x16, conv2 is 3x3x16x1).
+
+Additionally, copying memory seems to fairly efficient. Copying to the device
+seems to be more performant than copying to the host, but having both in a tight
+loop only degrades performance of the above net by about 10%.
+
+# Checking fast legal moves during rollouts
+
+This results in about a 15x slowdown in its current form.
