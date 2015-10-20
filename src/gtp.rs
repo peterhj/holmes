@@ -800,10 +800,13 @@ impl GtpController {
       // Variant ("none", "absolute", "byoyomi", or "canadian").
       //StringEntity(b"byoyomi".to_vec()),
       StringEntity(b"time_settings".to_vec()),
+      // FIXME(20151020): "blitz" settings for fast testing.
       // Main time in seconds.
-      IntEntity(300),
+      //IntEntity(300),
+      IntEntity(5),
       // Byo-yomi time in seconds.
-      IntEntity(40),
+      //IntEntity(40),
+      IntEntity(5),
       // Byo-yomi stones (Canadian) or periods (Japanese).
       IntEntity(1), // 5
     ]);

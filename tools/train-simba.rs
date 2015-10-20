@@ -4,7 +4,14 @@ extern crate rand;
 
 use rembrandt::config::{ModelConfigFile};
 use rembrandt::data::{DatasetConfiguration, DataSourceBuilder};
-use rembrandt::layer::*;
+use rembrandt::layer::{
+  Layer,
+  ParamsInitialization, ActivationFunction,
+  DataLayerConfig, Conv2dLayerConfig, SoftmaxLossLayerConfig,
+};
+use rembrandt::layer::device::{
+  DataLayer, Conv2dLayer, SoftmaxLossLayer,
+};
 use rembrandt::net::{NetArch, LinearNetArch};
 use rembrandt::opt::{
   OptConfig, DescentSchedule, AnnealingPolicy,
