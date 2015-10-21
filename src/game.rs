@@ -68,16 +68,16 @@ impl GameHistory {
     })
   }
 
-  pub fn feature_frame_size() -> usize {
+  /*pub fn feature_frame_size() -> usize {
     FastBoard::BOARD_SIZE * 4
-  }
+  }*/
 
   pub fn extract_features(&self) -> Vec<(Array3d<u8>, i32)> {
     const GREEN_PLANE:      usize = 0;
     const RED_PLANE:        usize = FastBoard::BOARD_SIZE;
-    const PREV_GREEN_PLANE: usize = FastBoard::BOARD_SIZE * 2;
-    const PREV_RED_PLANE:   usize = FastBoard::BOARD_SIZE * 3;
-    const NUM_PLANES:       usize = 4;
+    //const PREV_GREEN_PLANE: usize = FastBoard::BOARD_SIZE * 2;
+    //const PREV_RED_PLANE:   usize = FastBoard::BOARD_SIZE * 3;
+    const NUM_PLANES:       usize = 2;
 
     let zeros: Vec<_> = repeat(0).take(FastBoard::BOARD_SIZE * NUM_PLANES).collect();
     let mut features_seq = vec![];
@@ -92,7 +92,7 @@ impl GameHistory {
           x[RED_PLANE + p] = 1;
         }
       }
-      if let Some(ref prev_state) = prev_state {
+      /*if let Some(ref prev_state) = prev_state {
         for p in (0 .. FastBoard::BOARD_SIZE) {
           let stone = prev_state.get_stone(p as Pos);
           if stone == turn {
@@ -101,7 +101,7 @@ impl GameHistory {
             x[PREV_RED_PLANE + p] = 1;
           }
         }
-      }
+      }*/
       prev_state = Some(state.clone());
       let label = match action {
         Action::Place{pos} => pos as i32,

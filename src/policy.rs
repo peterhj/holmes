@@ -163,7 +163,7 @@ impl RolloutPolicy for ConvNetBatchRolloutPolicy {
 
   fn preload_batch_state(&mut self, batch_idx: usize, state: &FastBoard) {
     let &mut ConvNetBatchRolloutPolicy{ref ctx, ref mut arch, ..} = self;
-    arch.data_layer().preload_batch(batch_idx, state.extract_features(), ctx);
+    arch.data_layer().preload_frame(batch_idx, state.extract_features(), ctx);
     arch.loss_layer().premask_batch(batch_idx, state.extract_mask(), ctx);
   }
 
@@ -172,7 +172,7 @@ impl RolloutPolicy for ConvNetBatchRolloutPolicy {
       let &mut ConvNetBatchRolloutPolicy{
         ref mut rng, ref mut moves,
         ref ctx, ref mut arch, ..} = self;
-      arch.data_layer().load_batch(batch_size, ctx);
+      arch.data_layer().load_frames(batch_size, ctx);
       arch.loss_layer().mask_batch(batch_size, ctx);
       arch.evaluate(ctx);
       let batch_cdfs = arch.loss_layer().predict_cdfs(batch_size, ctx).as_slice();

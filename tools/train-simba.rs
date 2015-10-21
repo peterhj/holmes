@@ -34,10 +34,11 @@ fn train_simba_2_layers() {
   let opt_cfg = OptConfig{
     minibatch_size: 256,
     max_iters:      100000,
-    init_step_size: 0.01,
+    init_step_size: 0.1,
     momentum:       0.9,
     l2_reg_coef:    0.0,
-    anneal:         AnnealingPolicy::Step{step_iters: 6144, decay: 0.1},
+    //anneal:         AnnealingPolicy::Step{step_iters: 6144, decay: 0.1},
+    anneal:         AnnealingPolicy::Step{step_iters: 12288, decay: 0.1},
     interval_size:  400,
   };
   let descent = DescentSchedule::new(opt_cfg);
@@ -49,15 +50,15 @@ fn train_simba_2_layers() {
     channels: 4,
   };
   let conv1_layer_cfg = Conv2dLayerConfig{
-    in_width: 19, in_height: 19, in_channels: 4,
-    conv_size: 9, conv_stride: 1, conv_pad: 4,
-    out_channels: 16,
+    in_width: 19, in_height: 19, in_channels: 2,
+    conv_size: 7, conv_stride: 1, conv_pad: 3,
+    out_channels: 15,
     act_fun: ActivationFunction::Rect,
     init_weights: ParamsInitialization::Normal{mean: 0.0, std: 0.01},
   };
   let conv2_layer_cfg = Conv2dLayerConfig{
-    in_width: 19, in_height: 19, in_channels: 16,
-    conv_size: 3, conv_stride: 1, conv_pad: 1,
+    in_width: 19, in_height: 19, in_channels: 15,
+    conv_size: 5, conv_stride: 1, conv_pad: 2,
     out_channels: 1,
     act_fun: ActivationFunction::Identity,
     init_weights: ParamsInitialization::Normal{mean: 0.0, std: 0.01},

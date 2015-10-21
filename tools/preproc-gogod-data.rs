@@ -31,17 +31,18 @@ fn main() {
     let line = line.unwrap();
     index_lines.push(line);
   }
-  index_lines.sort_by(|a, b| {
+  /*index_lines.sort_by(|a, b| {
     let a_toks: Vec<_> = a.rsplitn(2, '/').collect();
     let b_toks: Vec<_> = b.rsplitn(2, '/').collect();
     a_toks[0].cmp(&b_toks[0])
-  });
+  });*/
   let sgf_paths: Vec<_> = index_lines.iter()
     .map(|line| PathBuf::from(line)).collect();
   println!("num sgf paths: {}", sgf_paths.len());
 
   //let frame_sz = GameHistory::feature_frame_size();
-  let serial_frame_sz = <Array3d<u8> as ArrayDeserialize<u8, NdArrayFormat>>::serial_size((19, 19, 4));
+  //let serial_frame_sz = <Array3d<u8> as ArrayDeserialize<u8, NdArrayFormat>>::serial_size((19, 19, 4));
+  let serial_frame_sz = <Array3d<u8> as ArrayDeserialize<u8, NdArrayFormat>>::serial_size((19, 19, 2));
   let n = sgf_paths.len() * 200;
   let mut frames_db = ArrayDb::create(frames_db_path, n, serial_frame_sz);
   let mut labels_db = ArrayDb::create(labels_db_path, n, size_of::<i32>());
