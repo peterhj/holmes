@@ -62,19 +62,24 @@ rustc-serialize = "*"
 time = "*"
 
 [dependencies.array]
-path = "../../rembrandt-project/libarray"
+#path = "../../rembrandt-project/libarray"
+path = "../rembrandt-project/libarray"
 
 [dependencies.arraydb]
-path = "../../rembrandt-project/arraydb"
+#path = "../../rembrandt-project/arraydb"
+path = "../rembrandt-project/arraydb"
 
 [dependencies.async]
-path = "../../rembrandt-project/libasync"
+#path = "../../rembrandt-project/libasync"
+path = "../rembrandt-project/libasync"
 
 [dependencies.async_cuda]
-path = "../../rembrandt-project/libasync_cuda"
+#path = "../../rembrandt-project/libasync_cuda"
+path = "../rembrandt-project/libasync_cuda"
 
 [dependencies.rembrandt]
-path = "../../rembrandt-project/rembrandt_new"
+#path = "../../rembrandt-project/rembrandt_new"
+path = "../rembrandt-project/rembrandt_new"
 
 [dependencies.statistics_avx2]
 path = "libstatistics_avx2"

@@ -55,9 +55,9 @@ fn main() {
         break;
       }
       valid_coords.extend(board.last_captures().iter());
-      let features = board.extract_features();
+      /*let features = board.extract_features();
       let offset = (idx * 360 + i) % 256;
-      copy_memory(features.as_slice(), &mut features_buf[offset * 361 * 4 .. (offset + 1) * 361 * 4]);
+      copy_memory(features.as_slice(), &mut features_buf[offset * 361 * 4 .. (offset + 1) * 361 * 4]);*/
       stone = stone.opponent();
       i += 1;
     }

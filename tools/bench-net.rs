@@ -12,7 +12,7 @@ use rembrandt::layer::{
   ParamsInitialization, ActivationFunction,
   DataLayerConfig, Conv2dLayerConfig, SoftmaxLossLayerConfig,
 };
-use rembrandt::layer::device::{
+use rembrandt::layer::{
   DataLayer, Conv2dLayer, SoftmaxLossLayer,
 };
 use rembrandt::net::{NetArch, LinearNetArch};
@@ -48,35 +48,42 @@ fn bench_net() {
     interval_size:  400,
   };
   let descent = DescentSchedule::new(opt_cfg);
+
   let batch_size = 256;
+  let num_planes = 8;
+  let num_hidden = 16;
 
   let data_layer_cfg = DataLayerConfig{
     raw_width: 19, raw_height: 19,
     crop_width: 19, crop_height: 19,
-    channels: 4,
+    channels: num_planes,
   };
   let conv1_layer_cfg = Conv2dLayerConfig{
-    in_width: 19, in_height: 19, in_channels: 4,
+    in_width: 19, in_height: 19, in_channels: num_planes,
     conv_size: 9, conv_stride: 1, conv_pad: 4,
-    out_channels: 3,
+    out_channels: num_hidden,
     act_fun: ActivationFunction::Rect,
     init_weights: ParamsInitialization::Normal{mean: 0.0, std: 0.01},
   };
   let conv2_layer_cfg = Conv2dLayerConfig{
-    in_width: 19, in_height: 19, in_channels: 3,
-    conv_size: 3, conv_stride: 1, conv_pad: 1,
+    in_width: 19, in_height: 19, in_channels: num_hidden,
+    conv_size: 5, conv_stride: 1, conv_pad: 2,
     out_channels: 1,
     act_fun: ActivationFunction::Identity,
     init_weights: ParamsInitialization::Normal{mean: 0.0, std: 0.01},
   };
+  let loss_layer_cfg = SoftmaxLossLayerConfig{
+    num_categories: 361,
+    do_mask: false,
+  };
   let data_layer = DataLayer::new(0, data_layer_cfg, batch_size);
   let conv1_layer = Conv2dLayer::new(0, conv1_layer_cfg, batch_size, Some(&data_layer), &ctx);
   let conv2_layer = Conv2dLayer::new(0, conv2_layer_cfg, batch_size, Some(&conv1_layer), &ctx);
-  let softmax_layer = SoftmaxLossLayer::new(0, 361, batch_size, Some(&conv2_layer));
+  let softmax_layer = SoftmaxLossLayer::new(0, loss_layer_cfg, batch_size, Some(&conv2_layer));
 
   let mut arch = LinearNetArch::new(batch_size,
-      Box::new(data_layer),
-      Box::new(softmax_layer),
+      data_layer,
+      softmax_layer,
       vec![
         Box::new(conv1_layer),
         Box::new(conv2_layer),
@@ -85,8 +92,6 @@ fn bench_net() {
   for layer in arch.hidden_layers_forward() {
     layer.initialize_params(&ctx);
   }
-
-  let num_planes = 8;
 
   let host_input_buf = Array2d::<u8>::with_zeros((361*num_planes, 256));
   let mut device_input_buf = DeviceBuf::<u8>::with_zeros(361*num_planes*256);
@@ -114,12 +119,13 @@ fn bench_net() {
   for _ in (0 .. trials) {
     let host_input_view = host_input_buf.as_view();
     let mut device_input_view = device_input_buf.as_mut_view_2d((361*num_planes, 256));
-    let input_guard = device_input_view.sync_load(&host_input_view, &ctx);
+    device_input_view.sync_load(&host_input_view, &ctx);
     arch.evaluate(&ctx);
-    let _ = arch.predict_probabilities(&ctx);
-    let device_output_view = device_output_buf.as_view_2d((361, 256));
+    //let _ = arch.predict_labels(&ctx);
+    let _ = arch.loss_layer().predict_probs(batch_size, &ctx);
+    /*let device_output_view = device_output_buf.as_view_2d((361, 256));
     let mut host_output_view = host_output_buf.as_mut_view();
-    let output_guard = device_output_view.sync_store(&mut host_output_view, &ctx);
+    device_output_view.sync_store(&mut host_output_view, &ctx);*/
   }
   ctx.blocking_sync();
   let lap_time = get_time();

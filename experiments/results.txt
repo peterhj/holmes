@@ -1,8 +1,22 @@
 # 2-layer architectures:
 
-- arch: input 19x19x4 -> conv 9x9x3 w/ rect -> conv 5x5x1:
-  - params: initial LR 0.01, anneal step 6144 0.3, minibatch size 256
+- arch: input 19x19x4 -> conv 9x9x16 w/ rect -> conv 5x5x1:
+  - params: initial LR 0.01, step {6144 0.3}, minibatch size 256, momentum 0.9
     - plateaus at around 28.0% accuracy after the 2nd annealing
-- arch: input 19x19x4 -> conv 9x9x3 w/ rect -> conv 3x3x1:
-  - params: initial LR 0.01, anneal step 6144 0.1, minibatch size 256
+- arch: input 19x19x4 -> conv 9x9x16 w/ rect -> conv 3x3x1:
+  - params: initial LR 0.01, step {6144 0.1}, minibatch size 256, momentum 0.9
     - plateaus at around 27.4% accuracy after the 2nd annealing
+    - accidentally trained maybe this one for several epochs, ended up at
+      29% accuracy
+- arch: input 19x19x4 -> conv 9x9x8 w/ rect -> conv 3x3x1:
+  - params: initial LR 0.1, step twice {3072 0.01 6144 0.001}, minibatch size 256, momentum 0.9
+    - plateaus at around 25.8% accuracy
+
+# 3-layer architectures:
+
+- arch: input 19x19x4 (curr board + prev board) -> conv 9x9x16 w/ rect -> conv 3x3x16 w/ rect -> conv 3x3x1
+  - params: initial LR 0.1, step twice {3072 0.01 6144 0.001}, minibatch size 256, momentum 0.9
+    - plateaus at around 29.6%-29.7% accuracy
+- arch: input 19x19x4 (curr board + prev board) -> conv 9x9x8 w/ rect -> conv 3x3x8 w/ rect -> conv 3x3x1
+  - params: initial LR 0.1, step twice {3072 0.01 6144 0.001}, minibatch size 256, momentum 0.9
+    - plateaus at around 26.3%-26.4% accuracy
