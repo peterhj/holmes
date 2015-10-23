@@ -46,6 +46,17 @@ pub fn sample_discrete_cdf<R>(cdf: &[f32], rng: &mut R) -> usize where R: Stream
   rng.sample_uniform_f32(&mut u);
   let j = array_binary_search(cdf, u[0]);
   assert!(j < cdf.len());
+  assert!(cdf[j] <= u[0]);
+  j
+}
+
+pub fn sample_discrete_cdf_scaled<R>(cdf: &[f32], rng: &mut R) -> usize where R: StreamRng {
+  let mut u = [0.0f32];
+  rng.sample_uniform_f32(&mut u);
+  let scale = cdf[cdf.len() - 1];
+  let j = array_binary_search(cdf, scale * u[0]);
+  assert!(j < cdf.len());
+  assert!(cdf[j] <= u[0]);
   j
 }
 

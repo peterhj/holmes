@@ -46,6 +46,7 @@ fn bench_net() {
     l2_reg_coef:    0.0,
     anneal:         AnnealingPolicy::Step{step_iters: 6144, decay: 0.1},
     interval_size:  400,
+    save_iters:     None,
   };
   let descent = DescentSchedule::new(opt_cfg);
 
@@ -81,7 +82,9 @@ fn bench_net() {
   let conv2_layer = Conv2dLayer::new(0, conv2_layer_cfg, batch_size, Some(&conv1_layer), &ctx);
   let softmax_layer = SoftmaxLossLayer::new(0, loss_layer_cfg, batch_size, Some(&conv2_layer));
 
-  let mut arch = LinearNetArch::new(batch_size,
+  let mut arch = LinearNetArch::new(
+      PathBuf::from(""),
+      batch_size,
       data_layer,
       softmax_layer,
       vec![

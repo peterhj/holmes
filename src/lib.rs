@@ -1,4 +1,5 @@
 #![feature(associated_consts)]
+#![feature(clone_from_slice)]
 #![feature(wrapping)]
 
 extern crate array;
@@ -25,6 +26,7 @@ pub mod gtp_board;
 pub mod gtp_client;
 pub mod policy;
 pub mod random;
+pub mod search;
 pub mod sgf;
 pub mod table;
 pub mod util;

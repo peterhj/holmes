@@ -46,6 +46,7 @@ fn train_simba_2_layers() {
                       first_rate: 0.01, second_rate: 0.001,
                     },
     interval_size:  400,
+    save_iters:     Some(400),
   };
   let descent = DescentSchedule::new(opt_cfg);
 
@@ -91,7 +92,9 @@ fn train_simba_2_layers() {
   let softmax_layer = SoftmaxLossLayer::new(0, loss_layer_cfg, batch_size, Some(&conv2_layer));
   //let softmax_layer = SoftmaxLossLayer::new(0, loss_layer_cfg, batch_size, Some(&conv3_layer));
 
-  let mut arch = LinearNetArch::new(batch_size,
+  let mut arch = LinearNetArch::new(
+      PathBuf::from("experiments/models/convnet_19x19x4_conv_9x9x16R_conv_3x3x1"),
+      batch_size,
       data_layer,
       softmax_layer,
       vec![

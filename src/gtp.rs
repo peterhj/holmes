@@ -803,10 +803,10 @@ impl GtpController {
       // FIXME(20151020): "blitz" settings for fast testing.
       // Main time in seconds.
       //IntEntity(300),
-      IntEntity(5),
+      IntEntity(15),
       // Byo-yomi time in seconds.
       //IntEntity(40),
-      IntEntity(5),
+      IntEntity(15),
       // Byo-yomi stones (Canadian) or periods (Japanese).
       IntEntity(1), // 5
     ]);

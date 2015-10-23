@@ -12,6 +12,14 @@ pub fn array_sum(xs: &[f32]) -> f32 {
   unsafe { statistics_array_sum(xs.as_ptr(), xs.len() as size_t) }
 }
 
+pub fn array_prefix_sum(xs: &[f32], ys: &mut [f32]) {
+  let mut sum = 0.0;
+  for (i, &x) in xs.iter().enumerate() {
+    ys[i] = sum;
+    sum += x;
+  }
+}
+
 pub fn array_argmax(xs: &[f32]) -> usize {
   unsafe { statistics_array_argmax(xs.as_ptr(), xs.len() as size_t) as usize }
 }

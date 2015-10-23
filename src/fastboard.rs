@@ -12,20 +12,20 @@ use std::str::{from_utf8};
 
 const TOMBSTONE: Pos = -1;
 
-// XXX: Feature representation.
+// XXX: Absolute feature representation.
 // Current board position.
-const GREEN_PLANE:      usize = 0;
-const RED_PLANE:        usize = FastBoard::BOARD_SIZE;
+const BLACK_PLANE:        usize = 0;
+const WHITE_PLANE:        usize = FastBoard::BOARD_SIZE;
 // Previous board position.
-const PREV_GREEN_PLANE: usize = FastBoard::BOARD_SIZE * 2;
-const PREV_RED_PLANE:   usize = FastBoard::BOARD_SIZE * 3;
-// TODO(20151020): Liberties/atari status.
-const GREEN_ATARI:      usize = FastBoard::BOARD_SIZE * 4;
-const GREEN_NON_ATARI:  usize = FastBoard::BOARD_SIZE * 5;
-const RED_ATARI:        usize = FastBoard::BOARD_SIZE * 6;
-const RED_NON_ATARI:    usize = FastBoard::BOARD_SIZE * 7;
-const NUM_PLANES:       usize = 4;
-//const NUM_PLANES:       usize = 8;
+const PREV_BLACK_PLANE:   usize = FastBoard::BOARD_SIZE * 2;
+const PREV_WHITE_PLANE:   usize = FastBoard::BOARD_SIZE * 3;
+// Atari/liveness status.
+/*const BLACK_ATARI_PLANE:  usize = FastBoard::BOARD_SIZE * 4;
+const BLACK_LIVE_PLANE:   usize = FastBoard::BOARD_SIZE * 5;
+const WHITE_ATARI_PLANE:  usize = FastBoard::BOARD_SIZE * 6;
+const WHITE_LIVE_PLANE:   usize = FastBoard::BOARD_SIZE * 7;*/
+const NUM_PLANES:         usize = 4;
+//const NUM_PLANES:         usize = 8;
 
 pub trait PosExt {
   fn iter_trans() -> Range<u8>;
@@ -200,12 +200,13 @@ impl RuleSet {
 
 #[derive(Clone, Debug)]
 pub struct Chain {
-  ps_libs: Vec<Pos>,
+  ps_libs:  Vec<Pos>,
+  ps_opps:  Vec<Pos>,
 }
 
 impl Chain {
   pub fn new() -> Chain {
-    Chain{ps_libs: Vec::with_capacity(4) }
+    Chain{ps_libs: Vec::with_capacity(4), ps_opps: Vec::with_capacity(4)}
   }
 
   pub fn add_pseudoliberty(&mut self, lib: Pos) {
@@ -217,6 +218,21 @@ impl Chain {
     while i < self.ps_libs.len() {
       if self.ps_libs[i] == lib {
         self.ps_libs.swap_remove(i);
+      } else {
+        i += 1;
+      }
+    }
+  }
+
+  pub fn add_pseudoenemy(&mut self, opp: Pos) {
+    self.ps_opps.push(opp);
+  }
+
+  pub fn remove_pseudoenemy(&mut self, opp: Pos) {
+    let mut i = 0;
+    while i < self.ps_opps.len() {
+      if self.ps_opps[i] == opp {
+        self.ps_opps.swap_remove(i);
       } else {
         i += 1;
       }
@@ -654,6 +670,7 @@ pub struct FastBoard {
   last_clob:  bool,           // previous move clobbered a stone.
   last_caps:  Vec<Pos>,       // previously captured positions.
   last_suics: Vec<Pos>,       // previously suicided chains.
+  //last_toucs: Vec<Pos>,       // previously "touched" positions.
 
   // Chain data structures. Namely, this implements a linked quick-union for
   // finding and iterating over connected components, as well as a list of
@@ -717,6 +734,7 @@ impl FastBoard {
       last_clob:  false,
       last_caps:  Vec::with_capacity(4),
       last_suics: Vec::with_capacity(4),
+      //last_toucs: Vec::with_capacity(4),
       chains:     Vec::with_capacity(Self::BOARD_SIZE),
       ch_roots:   Vec::with_capacity(Self::BOARD_SIZE),
       ch_links:   Vec::with_capacity(Self::BOARD_SIZE),
@@ -726,6 +744,10 @@ impl FastBoard {
 
   pub fn current_turn(&self) -> Stone {
     self.turn
+  }
+
+  pub fn last_position(&self) -> Option<Pos> {
+    self.last_pos
   }
 
   pub fn last_captures(&self) -> &[Pos] {
@@ -780,7 +802,8 @@ impl FastBoard {
     &self.features
   }
 
-  pub fn extract_mask(&self) -> &Array2d<f32> {
+  pub fn extract_mask(&self, turn: Stone) -> &Array2d<f32> {
+    // FIXME(20151023): need to maintain 2 masks.
     &self.mask
   }
 
@@ -801,6 +824,7 @@ impl FastBoard {
     self.last_clob = false;
     self.last_caps.clear();
     self.last_suics.clear();
+    //self.last_toucs.clear();
 
     self.chains.clear();
     self.chains.extend(repeat(None).take(Self::BOARD_SIZE));
@@ -921,6 +945,7 @@ impl FastBoard {
     self.last_clob = false;
     self.last_caps.clear();
     self.last_suics.clear();
+    //self.last_toucs.clear();
     aux.as_mut().map(|aux| {
       aux.last_adj_chs.clear();
       aux.last_cap_chs.clear();
@@ -949,6 +974,7 @@ impl FastBoard {
               result = PlayResult::FatalError;
               return;
             }
+            //self.last_toucs.extend(self.get_chain(adj_head).ps_libs.iter());
             aux.as_mut().map(|aux| {
               aux.last_adj_chs.push(adj_head);
             });
@@ -1018,22 +1044,30 @@ impl FastBoard {
     self.stones[i] = stone;
     {
       let mut features = self.features.as_mut_slice();
-      if stone == self.turn {
-        features[GREEN_PLANE + i] = 1;
-        features[RED_PLANE + i] = 0;
-      } else {
-        features[GREEN_PLANE + i] = 0;
-        features[RED_PLANE + i] = 1;
+      match stone {
+        Stone::Black => {
+          features[BLACK_PLANE + i] = 1;
+          features[WHITE_PLANE + i] = 0;
+        }
+        Stone::White => {
+          features[BLACK_PLANE + i] = 0;
+          features[WHITE_PLANE + i] = 1;
+        }
+        _ => unreachable!(),
       }
-      if prev_stone == self.turn {
-        features[PREV_GREEN_PLANE + i] = 1;
-        features[PREV_RED_PLANE + i] = 0;
-      } else if prev_stone == self.turn.opponent() {
-        features[PREV_GREEN_PLANE + i] = 0;
-        features[PREV_RED_PLANE + i] = 1;
-      } else {
-        features[PREV_GREEN_PLANE + i] = 0;
-        features[PREV_RED_PLANE + i] = 0;
+      match prev_stone {
+        Stone::Black => {
+          features[PREV_BLACK_PLANE + i] = 1;
+          features[PREV_WHITE_PLANE + i] = 0;
+        }
+        Stone::White => {
+          features[PREV_BLACK_PLANE + i] = 0;
+          features[PREV_WHITE_PLANE + i] = 1;
+        }
+        Stone::Empty => {
+          features[PREV_BLACK_PLANE + i] = 0;
+          features[PREV_WHITE_PLANE + i] = 0;
+        }
       }
     }
     aux.as_mut().map(|aux| {
@@ -1049,17 +1083,21 @@ impl FastBoard {
     self.last_caps.push(pos);
     {
       let mut features = self.features.as_mut_slice();
-      features[GREEN_PLANE + i] = 0;
-      features[RED_PLANE + i] = 0;
-      if prev_stone == self.turn {
-        features[PREV_GREEN_PLANE + i] = 1;
-        features[PREV_RED_PLANE + i] = 0;
-      } else if prev_stone == self.turn.opponent() {
-        features[PREV_GREEN_PLANE + i] = 0;
-        features[PREV_RED_PLANE + i] = 1;
-      } else {
-        features[PREV_GREEN_PLANE + i] = 0;
-        features[PREV_RED_PLANE + i] = 0;
+      features[BLACK_PLANE + i] = 0;
+      features[WHITE_PLANE + i] = 0;
+      match prev_stone {
+        Stone::Black => {
+          features[PREV_BLACK_PLANE + i] = 1;
+          features[PREV_WHITE_PLANE + i] = 0;
+        }
+        Stone::White => {
+          features[PREV_BLACK_PLANE + i] = 0;
+          features[PREV_WHITE_PLANE + i] = 1;
+        }
+        Stone::Empty => {
+          features[PREV_BLACK_PLANE + i] = 0;
+          features[PREV_WHITE_PLANE + i] = 0;
+        }
       }
     }
     aux.as_mut().map(|aux| {
@@ -1155,8 +1193,11 @@ impl FastBoard {
       aux.ch_heads.insert(head);
     });
     Self::for_each_adjacent(head, |adj_pos| {
-      if let Stone::Empty = self.stones[adj_pos.idx()] {
+      let adj_stone = self.stones[adj_pos.idx()];
+      if let Stone::Empty = adj_stone {
         self.get_chain_mut(head).add_pseudoliberty(adj_pos);
+      } else if self.stones[head.idx()].opponent() == adj_stone {
+        self.get_chain_mut(head).add_pseudoenemy(adj_pos);
       }
     });
   }
@@ -1173,8 +1214,11 @@ impl FastBoard {
     self.ch_links[head.idx()] = pos;
     self.ch_sizes[head.idx()] += 1;
     Self::for_each_adjacent(pos, |adj_pos| {
-      if let Stone::Empty = self.stones[adj_pos.idx()] {
+      let adj_stone = self.stones[adj_pos.idx()];
+      if let Stone::Empty = adj_stone {
         self.get_chain_mut(head).add_pseudoliberty(adj_pos);
+      } else if self.stones[pos.idx()].opponent() == adj_stone {
+        self.get_chain_mut(head).add_pseudoenemy(adj_pos);
       }
     });
     if verbose {
@@ -1190,16 +1234,50 @@ impl FastBoard {
   }
 
   fn merge_chains_and_append(&mut self, heads: &[Pos], pos: Pos, aux: &mut Option<&mut FastBoardAux>, verbose: bool) {
-    let mut prev_root = None;
+    let mut prev_head = None;
     for i in (0 .. heads.len()) {
-      match prev_root {
-        None    => prev_root = Some(heads[i]),
-        Some(r) => prev_root = Some(self.union_chains(r, heads[i], aux)),
+      match prev_head {
+        None    => prev_head = Some(heads[i]),
+        Some(r) => prev_head = Some(self.union_chains(r, heads[i], aux)),
       }
     }
-    match prev_root {
-      None    => self.create_chain(pos, aux, verbose),
-      Some(r) => self.add_to_chain(r, pos, verbose),
+    // TODO(20151022): update features with atari.
+    match prev_head {
+      None    => {
+        self.create_chain(pos, aux, verbose);
+        // XXX: Update atari features for newly created chain (consists of only
+        // a single stone).
+        /*{
+          let num_libs = self.get_chain(pos).approx_count_liberties();
+          let (atari_feat, live_feat) = if num_libs == 1 {
+            (1.0, 0.0)
+          } else if num_libs >= 2 {
+            (0.0, 1.0)
+          } else {
+            unreachable!();
+          };
+          let mut features = self.features.as_mut_slice();
+          let i = pos.idx();
+          match stone {
+            Stone::Black => {
+              features[BLACK_ATARI_PLANE + i] = atari_feat;
+              features[BLACK_LIVE_PLANE + i] = live_feat;
+            }
+            Stone::White => {
+              features[WHITE_ATARI_PLANE + i] = atari_feat;
+              features[WHITE_LIVE_PLANE + i] = live_feat;
+            }
+            Stone::Empty => unreachable!(),
+          }
+        }*/
+        // XXX: Update atari features for adjacent enemies.
+        // TODO(20151022)
+      }
+      Some(r) => {
+        // TODO: update chain at prev_head.
+        self.add_to_chain(r, pos, verbose);
+        // TODO: update chain at r.
+      }
     }
   }
 
@@ -1207,30 +1285,66 @@ impl FastBoard {
     let mut num_captured = 0;
     let mut prev;
     let mut next = head;
-    let stone = self.stones[head.idx()].opponent();
+    let stone = self.stones[head.idx()];
+    let opp_stone = stone.opponent();
     loop {
       prev = next;
       next = self.ch_links[prev.idx()];
       self.capture_stone(next, aux);
       Self::for_each_adjacent(next, |adj_pos| {
-        if self.stones[adj_pos.idx()] == stone {
+        if self.stones[adj_pos.idx()] == opp_stone {
           let adj_head = self.traverse_chain(adj_pos);
           // XXX: Need to check for tombstone here. The killed chain is adjacent
           // to the freshly placed stone, which is currently not in a chain.
           if adj_head != TOMBSTONE {
-            self.get_chain_mut(adj_head).add_pseudoliberty(next);
+            let mut adj_chain = self.get_chain_mut(adj_head);
+            adj_chain.add_pseudoliberty(next);
+            adj_chain.remove_pseudoenemy(next);
           }
         }
       });
       self.ch_roots[next.idx()] = TOMBSTONE;
       self.ch_links[prev.idx()] = TOMBSTONE;
+      // XXX: Update atari features for killed chain's own stones.
+      /*{
+        let mut features = self.features.as_mut_slice();
+        let next_i = next.idx();
+        // FIXME(20151022): convert to absolute features.
+        if stone == self.turn {
+          features[GREEN_ATARI_PLANE + next_i] = 0.0;
+          features[GREEN_NON_ATARI_PLANE + next_i] = 0.0;
+        } else if stone == self.turn.opponent() {
+          features[RED_ATARI_PLANE + next_i] = 0.0;
+          features[RED_NON_ATARI_PLANE + next_i] = 0.0;
+        } else {
+          unreachable!();
+        }
+      }*/
       num_captured += 1;
       if next == head {
         break;
       }
     }
     self.ch_sizes[head.idx()] = 0;
-    self.take_chain(head);
+    let killed_chain = self.take_chain(head);
+    // XXX: Update atari features for killed chain's adjacent enemy stones.
+    /*{
+      let mut features = self.features.as_mut_slice();
+      for &opp_pos in killed_chain.ps_opps.iter() {
+        let opp_i = opp_pos.idx();
+        let stone = self.stones[opp_i];
+        // FIXME(20151022): convert to absolute features.
+        if stone == self.turn {
+          features[GREEN_ATARI_PLANE + opp_i] = 0.0;
+          features[GREEN_NON_ATARI_PLANE + opp_i] = 0.0;
+        } else if stone == self.turn.opponent() {
+          features[RED_ATARI_PLANE + opp_i] = 0.0;
+          features[RED_NON_ATARI_PLANE + opp_i] = 0.0;
+        } else {
+          unreachable!();
+        }
+      }
+    }*/
     aux.as_mut().map(|aux| {
       aux.ch_heads.remove(&head);
       aux.last_cap_chs.push(head);

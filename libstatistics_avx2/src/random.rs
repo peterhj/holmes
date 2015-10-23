@@ -17,6 +17,29 @@ extern "C" {
 }
 
 pub trait StreamRng: Rng {
+  fn with_seed(seed: &[u64]) -> Self where Self: Sized {
+    let mut rng = Self::new_unseeded();
+    rng.seed(seed);
+    rng.burn(Self::burn_len());
+    rng
+  }
+
+  fn with_rng_seed(r: &mut Rng) -> Self where Self: Sized {
+    let mut seed = Vec::with_capacity(Self::seed_len());
+    for _ in (0 .. Self::seed_len()) {
+      seed.push(r.next_u64());
+    }
+    let rng = Self::with_seed(&seed);
+    rng
+  }
+
+  fn new_unseeded() -> Self where Self: Sized;
+  fn seed_len() -> usize;
+  fn burn_len() -> usize;
+
+  fn seed(&mut self, seed: &[u64]);
+  fn burn(&mut self, burn64: usize);
+
   fn sample_u32(&mut self, xs: &mut [u32]);
   fn sample_uniform_f32(&mut self, xs: &mut [f32]);
 
@@ -29,42 +52,12 @@ pub struct XorShift128PlusStreamRng {
   state: XorShift128PlusState,
 }
 
+//impl StreamRng for XorShift128PlusStreamRng {
+//}
+
 impl XorShift128PlusStreamRng {
-  pub fn seed_len() -> usize {
-    8
-  }
-
   pub fn new(seed: &[u64]) -> XorShift128PlusStreamRng {
-    let mut rng = Self::new_unseeded();
-    rng.seed(seed);
-    // XXX: This increases the initial state entropy (many zeros to half zeros).
-    // See Figure 4 in <http://arxiv.org/abs/1404.0390> for details.
-    rng.burn(20);
-    rng
-  }
-
-  pub fn new_unseeded() -> XorShift128PlusStreamRng {
-    XorShift128PlusStreamRng{
-      state: XorShift128PlusState{
-        s0: [0, 0, 0, 0],
-        s1: [0, 0, 0, 0],
-      }
-    }
-  }
-
-  pub fn seed(&mut self, seed: &[u64]) {
-    for i in (0 .. min(4, seed.len())) {
-      self.state.s0[i] = seed[i];
-    }
-    for i in (4 .. min(8, seed.len())) {
-      self.state.s1[i - 4] = seed[i];
-    }
-  }
-
-  pub fn burn(&mut self, burn64: usize) {
-    for _ in (0 .. burn64) {
-      self.next_u64();
-    }
+    Self::with_seed(seed)
   }
 }
 
@@ -83,6 +76,40 @@ impl Rng for XorShift128PlusStreamRng {
 }
 
 impl StreamRng for XorShift128PlusStreamRng {
+  fn seed_len() -> usize {
+    8
+  }
+
+  fn burn_len() -> usize {
+    // XXX: This increases the initial state entropy (many zeros to half zeros).
+    // See Figure 4 in <http://arxiv.org/abs/1404.0390> for details.
+    20
+  }
+
+  fn new_unseeded() -> XorShift128PlusStreamRng {
+    XorShift128PlusStreamRng{
+      state: XorShift128PlusState{
+        s0: [0, 0, 0, 0],
+        s1: [0, 0, 0, 0],
+      }
+    }
+  }
+
+  fn seed(&mut self, seed: &[u64]) {
+    for i in (0 .. min(4, seed.len())) {
+      self.state.s0[i] = seed[i];
+    }
+    for i in (4 .. min(8, seed.len())) {
+      self.state.s1[i - 4] = seed[i];
+    }
+  }
+
+  fn burn(&mut self, burn64: usize) {
+    for _ in (0 .. burn64) {
+      self.next_u64();
+    }
+  }
+
   fn sample_u32(&mut self, xs: &mut [u32]) {
     unsafe { xorshift128plus_avx2_stream32(&mut self.state as *mut _, xs.as_mut_ptr(), xs.len() as size_t) };
   }
