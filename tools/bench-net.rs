@@ -38,17 +38,18 @@ fn bench_net() {
   let mut rng = thread_rng();
   let ctx = DeviceContext::new(0);
 
-  let opt_cfg = OptConfig{
+  /*let opt_cfg = OptConfig{
     minibatch_size: 256,
     max_iters:      100000,
     init_step_size: 0.01,
     momentum:       0.9,
     l2_reg_coef:    0.0,
     anneal:         AnnealingPolicy::Step{step_iters: 6144, decay: 0.1},
-    interval_size:  400,
-    save_iters:     None,
+    display_interval:   400,
+    validate_interval:  400,
+    save_interval:      None,
   };
-  let descent = DescentSchedule::new(opt_cfg);
+  let descent = DescentSchedule::new(opt_cfg);*/
 
   let batch_size = 256;
   let num_planes = 8;

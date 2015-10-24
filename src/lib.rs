@@ -24,6 +24,7 @@ pub mod game;
 pub mod gtp;
 pub mod gtp_board;
 pub mod gtp_client;
+pub mod mctree;
 pub mod policy;
 pub mod random;
 pub mod search;

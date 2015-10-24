@@ -29,6 +29,15 @@ pub fn random_shuffle_once<T: Copy, R: Rng>(xs: &mut [T], i: usize, rng: &mut R)
   xs.swap(i, j);
 }
 
+pub fn arg_choose<T: Copy, R: Rng>(xs: &[T], rng: &mut R) -> Option<(T, usize)> {
+  if xs.is_empty() {
+    None
+  } else {
+    let j = rng.gen_range(0, xs.len());
+    Some((xs[j], j))
+  }
+}
+
 pub fn choose_without_replace<T: Copy, R: Rng>(xs: &mut Vec<T>, rng: &mut R) -> Option<T> {
   let n = xs.len();
   if n == 0 {

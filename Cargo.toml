@@ -48,6 +48,10 @@ name = "train-simba"
 path = "tools/train-simba.rs"
 
 [[bin]]
+name = "train-move"
+path = "tools/train-move.rs"
+
+[[bin]]
 name = "holmes-gtp"
 path = "tools/holmes-gtp.rs"
 

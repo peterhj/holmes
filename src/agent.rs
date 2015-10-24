@@ -141,6 +141,9 @@ impl Default for AgentConfig {
 pub struct Agent {
   valid:          bool,
   config:         AgentConfig,
+  search_policy:  UctSearchPolicy,
+  //rollout_policy: UniformRolloutPolicy,
+  rollout_policy: ConvNetBatchRolloutPolicy,
   opening_book:   OpeningBook,
   state_history:  Vec<(FastBoard, FastBoardAux)>,
   action_history: Vec<(Stone, Action)>,
@@ -157,6 +160,9 @@ impl Agent {
     Agent{
       valid:          false,
       config:         Default::default(),
+      search_policy:  UctSearchPolicy{c: 0.5},
+      //rollout_policy: UniformRolloutPolicy::new(),
+      rollout_policy: ConvNetBatchRolloutPolicy::new(),
       opening_book:   OpeningBook::load_fuego(&PathBuf::from("data/book-fuego.dat"), &mut thread_rng()),
       state_history:  Vec::new(),
       action_history: Vec::new(),
@@ -195,18 +201,19 @@ impl Agent {
     }
   }
 
-  pub fn begin_search(&self) -> SearchProblem<UctSearchPolicy, UniformRolloutPolicy> {
+  pub fn begin_search(&self) -> BatchSearchProblem {
     let mut tree = FastSearchTree::new();
     //tree.reset(&self.current_state, &self.current_aux, self.current_ply as i32, 0.0);
     tree.root(&self.current_state, &self.current_aux);
-    SearchProblem{
+    /*SearchProblem{
       //stop_time:      get_time() + Duration::seconds(10), // FIXME(20151006)
       rng:            XorShift128PlusStreamRng::with_rng_seed(&mut thread_rng()),
       tree:           tree,
       traj:           Trajectory::new(),
       tree_policy:    UctSearchPolicy{c: 0.5},
       rollout_policy: UniformRolloutPolicy::new(),
-    }
+    }*/
+    BatchSearchProblem::new(tree, self.rollout_policy.batch_size())
   }
 
   pub fn play_external(&mut self, player: Player, vertex: Vertex) -> MoveResult {
@@ -274,7 +281,7 @@ impl Agent {
       action.to_vertex()
     } else {
       let mut search_problem = self.begin_search();
-      let action = search_problem.join();
+      let action = search_problem.join(&mut self.search_policy, &mut self.rollout_policy);
       if let MoveResult::Okay = self.play(turn, action, true) {
         //println!("DEBUG: played {:?}, captures? {:?}", action, self.current_state.last_captures());
         action.to_vertex()

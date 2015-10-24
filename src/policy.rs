@@ -1,21 +1,24 @@
 use fastboard::{PosExt, Pos, Action, Stone, FastBoard, FastBoardAux, FastBoardWork};
-use fasttree::{ExecutionBehavior, NodeId, FastSearchNode};
+use fasttree::{ExecutionBehavior, Trajectory, NodeId, FastSearchNode, FastSearchTree};
 use random::{XorShift128PlusRng, choose_without_replace, sample_discrete_cdf};
 
-//use array::{Buffer};
 use async_cuda::context::{DeviceContext};
-use rembrandt::layer::{Layer};
+use rembrandt::layer::{
+  Layer,
+  ParamsInitialization, ActivationFunction,
+  DataLayerConfig, Conv2dLayerConfig, SoftmaxLossLayerConfig,
+  DataLayer, Conv2dLayer, SoftmaxLossLayer,
+};
 use rembrandt::net::{NetArch, LinearNetArch};
 use statistics_avx2::array::{array_argmax};
 use statistics_avx2::random::{StreamRng, XorShift128PlusStreamRng};
 
 use bit_set::{BitSet};
 use rand::{Rng, SeedableRng, thread_rng};
+use std::path::{PathBuf};
 
 pub trait SearchPolicy {
-  fn reset(&mut self);
-  //fn backup(&self, n: f32, num_trials: &[f32], succ_ratio: &[f32], value: &mut [f32]);
-  fn backup(&self, node: &mut FastSearchNode, search_pairs: &[(NodeId, Pos)], rollout_moves: &[Pos], outcome: f32);
+  fn backup(&self, tree: &mut FastSearchTree, traj: &Trajectory) -> usize;
   fn execute_search(&self, node: &FastSearchNode) -> Action;
   fn execute_best(&self, node: &FastSearchNode) -> Action;
 }
@@ -25,46 +28,64 @@ pub struct UctSearchPolicy {
   pub c:  f32,
 }
 
-impl SearchPolicy for UctSearchPolicy {
-  fn reset(&mut self) {
-    // Do nothing.
-  }
-
-  /*fn backup(&self, n: f32, num_trials: &[f32], succ_ratio: &[f32], value: &mut [f32]) {
-    for j in (0 .. value.len()) {
-      value[j] = succ_ratio[j] + self.c * (n.ln() / num_trials[j]).sqrt();
+impl UctSearchPolicy {
+  fn backup_node(&self, node: &mut FastSearchNode, update_mov: Pos, outcome: f32) -> bool {
+    if !node.rev_moves.contains_key(&update_mov) {
+      //println!("WARNING: uct: node does not have update mov: {:?}",
+      //    update_mov);
+      return false;
     }
-  }*/
-
-  fn backup(&self, node: &mut FastSearchNode, search_pairs: &[(NodeId, Pos)], rollout_moves: &[Pos], outcome: f32) {
-    // XXX(20151022): Outcome and reward conventions:
-    // Outcomes are absolutely valued:
-    //    W win: > 0.0 outcome.
-    //    B win: < 0.0 outcome.
-    // Rewards are relatively valued:
-    //    curr turn win:  +1 reward
-    //    oppo turn win:   0 reward
-    // FIXME(20151022): relative rewards.
-    let reward = if outcome > 0.0 {
-      1.0
-    } else {
-      0.0
-    };
-    if search_pairs.len() == 0 {
-      if rollout_moves.len() > 0 {
-        let j = rollout_moves[0];
-        node.credit_one_arm(j, reward);
+    let update_j = node.rev_moves[&update_mov];
+    let reward = if outcome >= 0.0 {
+      if let Stone::White = node.state.current_turn() {
+        1.0
       } else {
-        println!("WARNING: during backup, leaf node had no rollout moves!");
+        0.0
       }
     } else {
-      let j = search_pairs[0].1;
-      node.credit_one_arm(j, reward);
-    }
+      if let Stone::Black = node.state.current_turn() {
+        1.0
+      } else {
+        0.0
+      }
+    };
+    node.credit_one_arm(update_j, reward);
     // TODO(20151022): could do a SIMD version of this.
     for j in (0 .. node.value.len()) {
       node.value[j] = node.succ_ratio[j] + self.c * (node.total_trials.ln() / node.num_trials[j]).sqrt();
     }
+    true
+  }
+}
+
+impl SearchPolicy for UctSearchPolicy {
+  fn backup(&self, tree: &mut FastSearchTree, traj: &Trajectory) -> usize {
+    // XXX(20151022): Outcome and reward conventions:
+    // Outcomes are absolutely valued:
+    //    W win: >= 0.0 outcome.
+    //    B win: < 0.0 outcome.
+    // Rewards are relatively valued:
+    //    curr turn win:  +1 reward
+    //    oppo turn win:   0 reward
+    // FIXME(20151023): use tree and traj to backup multiple nodes.
+    let (leaf_id, leaf_turn, _) = traj.search_result.unwrap();
+    if traj.rollout_moves.len() == 0 {
+      //println!("WARNING: during backup, leaf node had no rollout moves!");
+      return 0;
+    }
+    let mut success = 1;
+    if !self.backup_node(tree.nodes.get_mut(&leaf_id).unwrap(), traj.rollout_moves[0].1, traj.outcome) {
+      println!("WARNING: uct: leaf backup failed: id: {:?} mov: {:?}",
+          leaf_id, traj.rollout_moves[0].1);
+      success = 0;
+    }
+    for &(id, _, mov) in traj.search_pairs.iter().rev() {
+      if !self.backup_node(tree.nodes.get_mut(&id).unwrap(), mov, traj.outcome) {
+        println!("WARNING: uct: inner backup failed: id: {:?} mov: {:?} search movs: {:?}",
+            id, mov, traj.search_pairs);
+      }
+    }
+    success
   }
 
   fn execute_search(&self, node: &FastSearchNode) -> Action {
@@ -90,13 +111,33 @@ impl SearchPolicy for UctSearchPolicy {
 pub struct RaveSearchPolicy;
 
 #[derive(Clone, Copy)]
-pub struct ThompsonSearchPolicyConfig {
-  pub max_trials: i32,
-}
+pub struct ThompsonSearchPolicy;
 
-#[derive(Clone, Copy)]
-pub struct ThompsonSearchPolicy {
-  config: ThompsonSearchPolicyConfig,
+impl SearchPolicy for ThompsonSearchPolicy {
+  fn backup(&self, tree: &mut FastSearchTree, traj: &Trajectory) -> usize {
+    // TODO
+    unimplemented!();
+  }
+
+  fn execute_search(&self, node: &FastSearchNode) -> Action {
+    // TODO
+    unimplemented!();
+    /*if node.moves.len() > 0 {
+      let j = array_argmax(&node.value);
+      Action::Place{pos: node.moves[j]}
+    } else {
+      Action::Pass
+    }*/
+  }
+
+  fn execute_best(&self, node: &FastSearchNode) -> Action {
+    if node.moves.len() > 0 {
+      let j = array_argmax(&node.num_trials);
+      Action::Place{pos: node.moves[j]}
+    } else {
+      Action::Pass
+    }
+  }
 }
 
 pub trait RolloutPolicy {
@@ -110,10 +151,6 @@ pub trait RolloutPolicy {
 
   fn batch_size(&self) -> usize;
   fn execution_behavior(&self) -> ExecutionBehavior;
-
-  /*fn get_rng(&mut self) -> &mut StreamRng {
-    unimplemented!();
-  }*/
 
   fn preload_batch_state(&mut self, batch_idx: usize, state: &FastBoard) {
     unimplemented!();
@@ -216,9 +253,62 @@ impl RolloutPolicy for UniformRolloutPolicy {
 }
 
 pub struct ConvNetBatchRolloutPolicy {
-  rng:    XorShift128PlusStreamRng,
+  //rng:    XorShift128PlusStreamRng,
   ctx:    DeviceContext,
   arch:   LinearNetArch,
+}
+
+impl ConvNetBatchRolloutPolicy {
+  pub fn new() -> ConvNetBatchRolloutPolicy {
+    let ctx = DeviceContext::new(0);
+    let batch_size = 256;
+    let num_hidden = 16;
+    let data_layer_cfg = DataLayerConfig{
+      raw_width: 19, raw_height: 19,
+      crop_width: 19, crop_height: 19,
+      channels: 4,
+    };
+    let conv1_layer_cfg = Conv2dLayerConfig{
+      in_width: 19, in_height: 19, in_channels: 4,
+      conv_size: 9, conv_stride: 1, conv_pad: 4,
+      out_channels: num_hidden,
+      act_fun: ActivationFunction::Rect,
+      init_weights: ParamsInitialization::Normal{mean: 0.0, std: 0.01},
+    };
+    let conv2_layer_cfg = Conv2dLayerConfig{
+      in_width: 19, in_height: 19, in_channels: num_hidden,
+      conv_size: 3, conv_stride: 1, conv_pad: 1,
+      out_channels: 1,
+      act_fun: ActivationFunction::Identity,
+      init_weights: ParamsInitialization::Normal{mean: 0.0, std: 0.01},
+    };
+    let loss_layer_cfg = SoftmaxLossLayerConfig{
+      num_categories: 361,
+      // FIXME(20151023): masking.
+      do_mask: false,
+      //do_mask: true,
+    };
+    let data_layer = DataLayer::new(0, data_layer_cfg, batch_size);
+    let conv1_layer = Conv2dLayer::new(0, conv1_layer_cfg, batch_size, Some(&data_layer), &ctx);
+    let conv2_layer = Conv2dLayer::new(0, conv2_layer_cfg, batch_size, Some(&conv1_layer), &ctx);
+    let softmax_layer = SoftmaxLossLayer::new(0, loss_layer_cfg, batch_size, Some(&conv2_layer));
+    let mut arch = LinearNetArch::new(
+        PathBuf::from("experiments/models/convnet_19x19x4_conv_9x9x16R_conv_3x3x1"),
+        batch_size,
+        data_layer,
+        softmax_layer,
+        vec![
+          Box::new(conv1_layer),
+          Box::new(conv2_layer),
+        ],
+    );
+    arch.load_layer_params(None, &ctx);
+
+    ConvNetBatchRolloutPolicy {
+      ctx:  ctx,
+      arch: arch,
+    }
+  }
 }
 
 impl RolloutPolicy for ConvNetBatchRolloutPolicy {
@@ -228,33 +318,24 @@ impl RolloutPolicy for ConvNetBatchRolloutPolicy {
   fn preload_batch_state(&mut self, batch_idx: usize, state: &FastBoard) {
     let &mut ConvNetBatchRolloutPolicy{ref ctx, ref mut arch, ..} = self;
     let turn = state.current_turn();
+    // XXX: FastBoard features are absolutely arranged; the features we feed to
+    // the net must be relatively arranged. Do this by performing a special
+    // permutation of the feature planes.
     arch.data_layer().preload_frame_permute(batch_idx, state.extract_features(), turn.offset(), ctx);
-    arch.loss_layer().preload_mask(batch_idx, state.extract_mask(turn), ctx);
+    //arch.loss_layer().preload_mask(batch_idx, state.extract_mask(turn), ctx);
   }
 
   fn execute_batch(&mut self, batch_size: usize) {
-    //{
     let &mut ConvNetBatchRolloutPolicy{
-      ref mut rng,
       ref ctx, ref mut arch, ..} = self;
-
     arch.data_layer().load_frames(batch_size, ctx);
-    arch.loss_layer().load_masks(batch_size, ctx);
+    //arch.loss_layer().load_masks(batch_size, ctx);
     arch.evaluate(ctx);
+    arch.loss_layer().store_labels(batch_size, &self.ctx);
     arch.loss_layer().store_cdfs(batch_size, &self.ctx);
-
-    /*for batch_idx in (0 .. batch_size) {
-      f(batch_idx, self);
-    }*/
-
-      /*for batch_idx in (0 .. batch_size) {
-        let cdf = &batch_cdfs[batch_idx * FastBoard::BOARD_SIZE .. (batch_idx + 1) * FastBoard::BOARD_SIZE];
-        let j = sample_discrete_cdf(cdf, rng);
-        moves[batch_idx] = j as Pos;
-      }*/
-    //}
-    //let &mut ConvNetBatchRolloutPolicy{ref moves, ..} = self;
-    //moves
+    arch.loss_layer().store_probs(batch_size, &self.ctx);
+    let labels = arch.loss_layer().predict_labels(batch_size, &self.ctx);
+    //println!("DEBUG: convnet policy: labels: {:?}", labels);
   }
 
   fn read_policy(&mut self, batch_idx: usize) -> &[f32] {

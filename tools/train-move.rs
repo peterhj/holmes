@@ -31,28 +31,27 @@ fn train_simba_2_layers() {
   let mut rng = thread_rng();
   let ctx = DeviceContext::new(0);
 
+  let batch_size = 128;
+  let num_hidden = 128;
+
   let opt_cfg = OptConfig{
-    minibatch_size: 256,
+    minibatch_size: batch_size,
     max_iters:      100000,
-    //init_step_size: 0.01,
     init_step_size: 0.1,
     momentum:       0.9,
     l2_reg_coef:    0.0,
-    //anneal:         AnnealingPolicy::Step{step_iters: 6144, decay: 0.1},
-    //anneal:         AnnealingPolicy::Step{step_iters: 12288, decay: 0.1},
-    //anneal:         AnnealingPolicy::StepOnce{step_iters: 3072, new_rate: 0.01},
-    anneal:         AnnealingPolicy::StepTwice{
-                      first_step: 3072, second_step: 6144,
+    anneal:         AnnealingPolicy::StepOnce{
+      step_iters: 2048, new_rate: 0.01,
+    },
+    /*anneal:         AnnealingPolicy::StepTwice{
+                      first_step: 2048, second_step: 12288,
                       first_rate: 0.01, second_rate: 0.001,
-                    },
-    display_interval:   20,
-    validate_interval:  400,
-    save_interval:      Some(400),
+                    },*/
+    display_interval:   1024,
+    validate_interval:  2048,
+    save_interval:      Some(2048),
   };
   let descent = DescentSchedule::new(opt_cfg);
-
-  let batch_size = 256;
-  let num_hidden = 16;
 
   let data_layer_cfg = DataLayerConfig{
     raw_width: 19, raw_height: 19,
@@ -61,21 +60,19 @@ fn train_simba_2_layers() {
   };
   let conv1_layer_cfg = Conv2dLayerConfig{
     in_width: 19, in_height: 19, in_channels: 4,
-    conv_size: 9, conv_stride: 1, conv_pad: 4,
+    conv_size: 5, conv_stride: 1, conv_pad: 2,
     out_channels: num_hidden,
     act_fun: ActivationFunction::Rect,
     init_weights: ParamsInitialization::Normal{mean: 0.0, std: 0.01},
   };
-  let conv2_layer_cfg = Conv2dLayerConfig{
+  let inner_conv_layer_cfg = Conv2dLayerConfig{
     in_width: 19, in_height: 19, in_channels: num_hidden,
     conv_size: 3, conv_stride: 1, conv_pad: 1,
-    out_channels: 1,
-    //out_channels: num_hidden,
-    act_fun: ActivationFunction::Identity,
-    //act_fun: ActivationFunction::Rect,
+    out_channels: num_hidden,
+    act_fun: ActivationFunction::Rect,
     init_weights: ParamsInitialization::Normal{mean: 0.0, std: 0.01},
   };
-  let conv3_layer_cfg = Conv2dLayerConfig{
+  let final_conv_layer_cfg = Conv2dLayerConfig{
     in_width: 19, in_height: 19, in_channels: num_hidden,
     conv_size: 3, conv_stride: 1, conv_pad: 1,
     out_channels: 1,
@@ -88,20 +85,19 @@ fn train_simba_2_layers() {
   };
   let data_layer = DataLayer::new(0, data_layer_cfg, batch_size);
   let conv1_layer = Conv2dLayer::new(0, conv1_layer_cfg, batch_size, Some(&data_layer), &ctx);
-  let conv2_layer = Conv2dLayer::new(0, conv2_layer_cfg, batch_size, Some(&conv1_layer), &ctx);
-  //let conv3_layer = Conv2dLayer::new(0, conv3_layer_cfg, batch_size, Some(&conv2_layer), &ctx);
-  let softmax_layer = SoftmaxLossLayer::new(0, loss_layer_cfg, batch_size, Some(&conv2_layer));
-  //let softmax_layer = SoftmaxLossLayer::new(0, loss_layer_cfg, batch_size, Some(&conv3_layer));
+  let conv2_layer = Conv2dLayer::new(0, inner_conv_layer_cfg, batch_size, Some(&conv1_layer), &ctx);
+  let conv3_layer = Conv2dLayer::new(0, final_conv_layer_cfg, batch_size, Some(&conv2_layer), &ctx);
+  let softmax_layer = SoftmaxLossLayer::new(0, loss_layer_cfg, batch_size, Some(&conv3_layer));
 
   let mut arch = LinearNetArch::new(
-      PathBuf::from("experiments/models/convnet_19x19x4_conv_9x9x16R_conv_3x3x1"),
+      PathBuf::from("experiments/models/maddison_3_layers"),
       batch_size,
       data_layer,
       softmax_layer,
       vec![
         Box::new(conv1_layer),
         Box::new(conv2_layer),
-        //Box::new(conv3_layer),
+        Box::new(conv3_layer),
       ],
   );
   for layer in arch.hidden_layers_forward() {
