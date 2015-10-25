@@ -1,5 +1,6 @@
 use fastboard::{PosExt, Pos, Action, Stone, FastBoard, FastBoardAux, FastBoardWork};
 use fasttree::{ExecutionBehavior, Trajectory, NodeId, FastSearchNode, FastSearchTree};
+use mctree::{McTrajectory, McNode, McSearchTree};
 use random::{XorShift128PlusRng, choose_without_replace, sample_discrete_cdf};
 
 use async_cuda::context::{DeviceContext};
@@ -21,6 +22,9 @@ pub trait SearchPolicy {
   fn backup(&self, tree: &mut FastSearchTree, traj: &Trajectory) -> usize;
   fn execute_search(&self, node: &FastSearchNode) -> Action;
   fn execute_best(&self, node: &FastSearchNode) -> Action;
+
+  fn backup_new(&self, traj: &mut McTrajectory) { unimplemented!(); }
+  fn execute_best_new(&self, node: &McNode) -> Action { unimplemented!(); }
 }
 
 #[derive(Clone, Copy)]
@@ -55,6 +59,31 @@ impl UctSearchPolicy {
       node.value[j] = node.succ_ratio[j] + self.c * (node.total_trials.ln() / node.num_trials[j]).sqrt();
     }
     true
+  }
+
+  fn backup_node_new(&self, node: &mut McNode, update_mov: Pos, update_j: usize, outcome: f32) {
+    if node.valid_moves[update_j] != update_mov {
+      println!("WARNING: uct policy: node valid mov index {} is not {:?}!",
+          update_j, update_mov);
+      return;
+    }
+    let reward = if outcome >= 0.0 {
+      if let Stone::White = node.state.current_turn() {
+        1.0
+      } else {
+        0.0
+      }
+    } else {
+      if let Stone::Black = node.state.current_turn() {
+        1.0
+      } else {
+        0.0
+      }
+    };
+    node.credit_one_arm(update_j, reward);
+    for j in (0 .. node.value.len()) {
+      node.value[j] = (node.succ_trials[j] / node.num_trials[j]) + self.c * (node.total_visits.ln() / node.num_trials[j]).sqrt();
+    }
   }
 }
 
@@ -101,6 +130,53 @@ impl SearchPolicy for UctSearchPolicy {
     if node.moves.len() > 0 {
       let j = array_argmax(&node.num_trials);
       Action::Place{pos: node.moves[j]}
+    } else {
+      Action::Pass
+    }
+  }
+
+  fn backup_new(&self, traj: &mut McTrajectory) {
+    let outcome = traj.score.expect("FATAL: uct policy: backup: missing outcome!");
+    /*if traj.rollout_moves.is_empty() {
+      println!("WARNING: uct policy: backup: no rollouts in this trajectory!");
+      return;
+    }*/
+    if !traj.rollout_moves.is_empty() {
+      if let Some(ref mut leaf_node) = traj.leaf_node {
+        let update_mov = traj.rollout_moves[0];
+        let mut update_j = None;
+        for (j, &mov) in leaf_node.borrow().valid_moves.iter().enumerate() {
+          if mov == update_mov {
+            update_j = Some(j);
+            break;
+          }
+        }
+        if update_j.is_none() {
+          println!("WARNING: uct policy: backup: leaf node is missing first rollout move!");
+          return;
+        }
+        self.backup_node_new(&mut leaf_node.borrow_mut(), update_mov, update_j.unwrap(), outcome);
+      } else {
+        println!("WARNING: uct policy: backup: no leaf node in this trajectory!");
+        return;
+      }
+    }
+    for &mut (ref mut node, mov, j) in traj.search_pairs.iter_mut().rev() {
+      if node.borrow().valid_moves[j] != mov {
+        println!("WARNING: uct policy: backup: inner node has mismatched move!");
+        return;
+      }
+      self.backup_node_new(&mut node.borrow_mut(), mov, j, outcome);
+    }
+  }
+
+  fn execute_best_new(&self, node: &McNode) -> Action {
+    println!("DEBUG: uct policy: executing best...");
+    if !node.valid_moves.is_empty() {
+      let j = array_argmax(&node.num_trials);
+      println!("DEBUG: uct policy:   argmax: ({}, {}) trials: {:?}",
+          j, node.num_trials[j], node.num_trials);
+      Action::Place{pos: node.valid_moves[j]}
     } else {
       Action::Pass
     }

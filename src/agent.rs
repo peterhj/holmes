@@ -2,6 +2,7 @@ use book::{OpeningBook};
 use fastboard::{PosExt, Pos, Stone, Action, ActionStatus, FastBoard, FastBoardAux, FastBoardWork};
 use fasttree::{FastSearchTree, SearchResult, Trajectory};
 use gtp_board::{Player, Coord, Vertex, RuleSystem, TimeSystem, MoveResult, UndoResult};
+use mctree::{McSearchTree, McSearchProblem};
 use policy::{
   SearchPolicy, UctSearchPolicy,
   RolloutPolicy, UniformRolloutPolicy, ConvNetBatchRolloutPolicy,
@@ -12,7 +13,7 @@ use search::{SearchProblem, BatchSearchProblem};
 use statistics_avx2::random::{StreamRng, XorShift128PlusStreamRng};
 
 use bit_set::{BitSet};
-use rand::{thread_rng};
+use rand::{Rng, thread_rng};
 use std::path::{PathBuf};
 use time::{Timespec, Duration, get_time};
 
@@ -141,9 +142,12 @@ impl Default for AgentConfig {
 pub struct Agent {
   valid:          bool,
   config:         AgentConfig,
+
   search_policy:  UctSearchPolicy,
-  //rollout_policy: UniformRolloutPolicy,
-  rollout_policy: ConvNetBatchRolloutPolicy,
+  rollout_policy: UniformRolloutPolicy,
+  //rollout_policy: ConvNetBatchRolloutPolicy,
+  tree:           McSearchTree,
+
   opening_book:   OpeningBook,
   state_history:  Vec<(FastBoard, FastBoardAux)>,
   action_history: Vec<(Stone, Action)>,
@@ -160,9 +164,12 @@ impl Agent {
     Agent{
       valid:          false,
       config:         Default::default(),
+
       search_policy:  UctSearchPolicy{c: 0.5},
-      //rollout_policy: UniformRolloutPolicy::new(),
-      rollout_policy: ConvNetBatchRolloutPolicy::new(),
+      rollout_policy: UniformRolloutPolicy::new(),
+      //rollout_policy: ConvNetBatchRolloutPolicy::new(),
+      tree:           McSearchTree::new_with_root(FastBoard::new(), FastBoardAux::new()),
+
       opening_book:   OpeningBook::load_fuego(&PathBuf::from("data/book-fuego.dat"), &mut thread_rng()),
       state_history:  Vec::new(),
       action_history: Vec::new(),
@@ -191,6 +198,7 @@ impl Agent {
     self.current_aux.reset();
     self.current_ply = 0;
     self.work.reset();
+    self.tree.set_root(self.current_state.clone(), self.current_aux.clone());
   }
 
   pub fn get_stone(&self, pos: Pos) -> Stone {
@@ -201,8 +209,12 @@ impl Agent {
     }
   }
 
-  pub fn begin_search(&self) -> BatchSearchProblem {
-    let mut tree = FastSearchTree::new();
+  pub fn begin_search<'a>(&'a mut self) -> McSearchProblem<'a> {
+    // TODO(20151024)
+    let &mut Agent{ref search_policy, ref mut rollout_policy, ref mut tree, ..} = self;
+    McSearchProblem::new(10000, search_policy, rollout_policy, tree)
+
+    /*let mut tree = FastSearchTree::new();
     //tree.reset(&self.current_state, &self.current_aux, self.current_ply as i32, 0.0);
     tree.root(&self.current_state, &self.current_aux);
     /*SearchProblem{
@@ -213,7 +225,7 @@ impl Agent {
       tree_policy:    UctSearchPolicy{c: 0.5},
       rollout_policy: UniformRolloutPolicy::new(),
     }*/
-    BatchSearchProblem::new(tree, self.rollout_policy.batch_size())
+    BatchSearchProblem::new(tree, self.rollout_policy.batch_size())*/
   }
 
   pub fn play_external(&mut self, player: Player, vertex: Vertex) -> MoveResult {
@@ -239,6 +251,12 @@ impl Agent {
         self.action_history.push((turn, action));
         current_state.play(turn, action, work, &mut Some(current_aux), true);
         current_aux.update(turn, &current_state, work, tmp_board, tmp_aux);
+        if let Action::Place{pos} = action {
+          self.tree.apply_move(turn, pos);
+        } else {
+          // XXX(20151024): on pass/resign, all nodes are essentially invalid.
+          self.tree.set_root(current_state.clone(), current_aux.clone());
+        }
         self.current_ply += 1;
         MoveResult::Okay
       }
@@ -268,7 +286,7 @@ impl Agent {
   pub fn gen_move(&mut self, turn: Stone) -> Vertex {
     let digest = self.current_state.get_digest();
     if let Some(mut book_plays) = self.opening_book.lookup(turn, &digest).map(|ps| ps.to_vec()) {
-      random_shuffle(&mut book_plays, &mut thread_rng());
+      thread_rng().shuffle(&mut book_plays);
       let mut action = Action::Pass;
       for &pos in book_plays.iter() {
         action = Action::Place{pos: pos};
@@ -280,8 +298,7 @@ impl Agent {
       }
       action.to_vertex()
     } else {
-      let mut search_problem = self.begin_search();
-      let action = search_problem.join(&mut self.search_policy, &mut self.rollout_policy);
+      let action = self.begin_search().join();
       if let MoveResult::Okay = self.play(turn, action, true) {
         //println!("DEBUG: played {:?}, captures? {:?}", action, self.current_state.last_captures());
         action.to_vertex()

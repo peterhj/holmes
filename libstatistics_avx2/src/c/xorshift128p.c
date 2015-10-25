@@ -37,7 +37,7 @@ struct XorShift128PlusState {
     _mm256_add_epi64(s0, s1); \
   })
 
-#define XORSHIFT128PLUS_STREAM32_X1_BODY(state) \
+#define XORSHIFT128PLUS_STREAM32_X2_BODY(state) \
   ({ \
     uint64_t r0, r1; \
     r0 = state->s1[0]; \
@@ -141,12 +141,12 @@ void xorshift128plus_avx2_stream32(struct XorShift128PlusState *state, uint32_t 
     }
   }
 tail:
-  for ( ; xs < xs_end; xs += 2) {
-    uint64_t x = XORSHIFT128PLUS_STREAM32_X1_BODY(state);
+  for ( ; xs + 2 <= xs_end; xs += 2) {
+    uint64_t x = XORSHIFT128PLUS_STREAM32_X2_BODY(state);
     *((uint64_t *)xs) = x;
   }
   if (xs < xs_end) {
-    uint64_t x = XORSHIFT128PLUS_STREAM32_X1_BODY(state);
+    uint64_t x = XORSHIFT128PLUS_STREAM32_X2_BODY(state);
     *xs = (uint32_t)x;
   }
 }
@@ -173,9 +173,14 @@ void xorshift128plus_avx2_uniform32(struct XorShift128PlusState *state, float *x
     }
   }
 tail:
-  for ( ; xs < xs_end; xs += 1) {
-    uint64_t x = XORSHIFT128PLUS_STREAM32_X1_BODY(state);
-    *xs = uniform32_x1(x);
+  for ( ; xs + 2 <= xs_end; xs += 2) {
+    uint64_t r = XORSHIFT128PLUS_STREAM32_X2_BODY(state);
+    *xs = uniform32_x1(r);
+    *(xs + 1) = uniform32_x1(r >> 32);
+  }
+  if (xs < xs_end) {
+    uint64_t r = XORSHIFT128PLUS_STREAM32_X2_BODY(state);
+    *xs = uniform32_x1(r);
   }
 }
 
@@ -217,17 +222,15 @@ tail:
     // TODO(20151007): SSE version.
   }*/
   for ( ; xs + 2 <= xs_end; succ_ratio += 2, num_trials += 2, xs += 2) {
-    uint64_t r1 = XORSHIFT128PLUS_STREAM32_X1_BODY(state);
-    uint64_t r2 = XORSHIFT128PLUS_STREAM32_X1_BODY(state);
-    float u1 = uniform32_x1(r1);
-    float u2 = uniform32_x1(r2);
+    uint64_t r = XORSHIFT128PLUS_STREAM32_X2_BODY(state);
+    float u1 = uniform32_x1(r);
+    float u2 = uniform32_x1(r >> 32);
     box_muller_beta32_x2(u1, u2, succ_ratio, num_trials, xs, xs + 1);
   }
   if (xs < xs_end) {
-    uint64_t r1 = XORSHIFT128PLUS_STREAM32_X1_BODY(state);
-    uint64_t r2 = XORSHIFT128PLUS_STREAM32_X1_BODY(state);
-    float u1 = uniform32_x1(r1);
-    float u2 = uniform32_x1(r2);
+    uint64_t r = XORSHIFT128PLUS_STREAM32_X2_BODY(state);
+    float u1 = uniform32_x1(r);
+    float u2 = uniform32_x1(r >> 32);
     *xs = box_muller_beta32_x1(u1, u2, succ_ratio, num_trials);
   }
 }
