@@ -12,7 +12,7 @@ use std::collections::{HashMap};
 use std::iter::{repeat};
 use std::rc::{Rc, Weak};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum RolloutBehavior {
   SelectUniform,
   SelectKGreedy{top_k: usize},
@@ -23,10 +23,11 @@ pub struct McTrajectory {
   pub search_pairs:   Vec<(Rc<RefCell<McNode>>, Pos, usize)>,
   pub leaf_node:      Option<Rc<RefCell<McNode>>>,
 
-  state:  FastBoard,
-  work:   FastBoardWork,
-  pub rollout_moves:  Vec<Pos>,
+  pub rollout_moves:  Vec<(Stone, Pos)>,
   pub score:          Option<f32>,
+
+  state:  FastBoard,
+  //work:   FastBoardWork,
 }
 
 impl McTrajectory {
@@ -34,10 +35,10 @@ impl McTrajectory {
     McTrajectory{
       search_pairs: Vec::new(),
       leaf_node: None,
-      state: FastBoard::new(),
-      work: FastBoardWork::new(),
       rollout_moves: Vec::new(),
       score: None,
+      state: FastBoard::new(),
+      //work: FastBoardWork::new(),
     }
   }
 
@@ -61,12 +62,16 @@ pub struct McNode {
   pub state:        FastBoard,
   pub aux_state:    FastBoardAux,
 
-  pub valid_moves:  Vec<Pos>,
-  pub child_nodes:  Vec<Option<Rc<RefCell<McNode>>>>,
-  pub total_visits:   f32,
-  pub num_trials:   Vec<f32>,
-  pub succ_trials:  Vec<f32>,
-  pub value:        Vec<f32>,
+  pub valid_moves:      Vec<Pos>,
+  pub child_nodes:      Vec<Option<Rc<RefCell<McNode>>>>,
+  pub total_visits:     f32,
+  pub num_trials:       Vec<f32>,
+  pub num_succs:        Vec<f32>,
+  pub num_trials_prior: Vec<f32>,
+  pub num_succs_prior:  Vec<f32>,
+  pub num_trials_rave:  Vec<f32>,
+  pub num_succs_rave:   Vec<f32>,
+  pub values:           Vec<f32>,
 }
 
 impl McNode {
@@ -79,7 +84,7 @@ impl McNode {
       child_nodes:  Vec::with_capacity(FastBoard::BOARD_SIZE),
       total_visits:   0.0,
       num_trials:   repeat(0.0).take(FastBoard::BOARD_SIZE).collect(),
-      succ_trials:  repeat(0.0).take(FastBoard::BOARD_SIZE).collect(),
+      num_succs:  repeat(0.0).take(FastBoard::BOARD_SIZE).collect(),
     }
   }*/
 
@@ -95,12 +100,16 @@ impl McNode {
       parent_node:  parent.map(|ref node| Rc::downgrade(node)),
       state:        state,
       aux_state:    aux,
-      valid_moves:  valid_moves,
-      child_nodes:  repeat(None).take(num_moves).collect(),
-      total_visits:   0.0,
-      num_trials:   repeat(0.0).take(num_moves).collect(),
-      succ_trials:  repeat(0.0).take(num_moves).collect(),
-      value:        repeat(0.0).take(num_moves).collect(),
+      valid_moves:      valid_moves,
+      child_nodes:      repeat(None).take(num_moves).collect(),
+      total_visits:     0.0,
+      num_trials:       repeat(0.0).take(num_moves).collect(),
+      num_succs:        repeat(0.0).take(num_moves).collect(),
+      num_trials_prior: repeat(0.0).take(num_moves).collect(),
+      num_succs_prior:  repeat(0.0).take(num_moves).collect(),
+      num_trials_rave:  repeat(0.0).take(num_moves).collect(),
+      num_succs_rave:   repeat(0.0).take(num_moves).collect(),
+      values:           repeat(0.0).take(num_moves).collect(),
     }
   }
 
@@ -121,9 +130,49 @@ impl McNode {
     self.state.current_turn()
   }
 
-  pub fn credit_one_arm(&mut self, j: usize, reward: f32) {
+  /*pub fn credit_one_arm(&mut self, j: usize, reward: f32) {
     self.num_trials[j] += 1.0;
-    self.succ_trials[j] += reward;
+    self.num_succs[j] += reward;
+  }
+
+  pub fn credit_one_arm_rave(&mut self, j: usize, reward: f32) {
+    self.num_trials_rave[j] += 1.0;
+    self.num_succs_rave[j] += reward;
+  }*/
+
+  pub fn get_relative_reward(&self, outcome: f32) -> f32 {
+    let turn = self.state.current_turn();
+    let reward = if outcome >= 0.0 {
+      if let Stone::White = turn { 1.0 } else { 0.0 }
+    } else {
+      if let Stone::Black = turn { 1.0 } else { 0.0 }
+    };
+    reward
+  }
+
+  pub fn credit_arm(&mut self, j: usize, expected_move: Pos, outcome: f32) {
+    if self.valid_moves[j] != expected_move {
+      println!("WARNING: thompson policy: node valid mov index {} is not {:?}!",
+          j, expected_move);
+      return;
+    }
+    let reward = self.get_relative_reward(outcome);
+    self.num_trials[j] += 1.0;
+    self.num_succs[j] += reward;
+  }
+
+  pub fn credit_arms_rave(&mut self, rave_mask: &[BitSet], outcome: f32) {
+    let turn = self.state.current_turn();
+    let turn_off = turn.offset();
+    let reward = self.get_relative_reward(outcome);
+    let &mut McNode{ref valid_moves,
+      ref mut num_trials_rave, ref mut num_succs_rave, ..} = self;
+    for (j, &mov) in valid_moves.iter().enumerate() {
+      if rave_mask[turn_off].contains(&mov.idx()) {
+        num_trials_rave[j] += 1.0;
+        num_succs_rave[j] += reward;
+      }
+    }
   }
 }
 
@@ -147,7 +196,7 @@ impl McSearchTree {
       rng:  rng,
 
       root_node:  Rc::new(RefCell::new(root_node)),
-      max_depth:  30, // FIXME(20151024): for debugging.
+      max_depth:  100, // FIXME(20151024): for debugging.
 
       work:       FastBoardWork::new(),
       tmp_board:  FastBoard::new(),
@@ -189,7 +238,7 @@ impl McSearchTree {
     }
   }
 
-  pub fn walk(&mut self, search_policy: &SearchPolicy, traj: &mut McTrajectory) {
+  pub fn walk(&mut self, search_policy: &mut SearchPolicy, traj: &mut McTrajectory) {
     traj.reset();
     let mut cursor_node = self.root_node.clone();
     let mut depth = 0;
@@ -204,7 +253,8 @@ impl McSearchTree {
         return;
       }
       // FIXME(20151024): select a greedy or random action using a policy.
-      let move_pair = arg_choose(&cursor_node.borrow().valid_moves, &mut self.rng);
+      //let move_pair = arg_choose(&cursor_node.borrow().valid_moves, &mut self.rng);
+      let move_pair = search_policy.execute_search_new(&cursor_node.borrow());
       if let Some((mov, j)) = move_pair {
         traj.search_pairs.push((cursor_node.clone(), mov, j));
         let cursor_has_jth_child = cursor_node.borrow().child_nodes[j].is_some();
@@ -227,7 +277,7 @@ impl McSearchTree {
             leaf_state.play(leaf_turn, Action::Place{pos: mov}, &mut self.work, &mut Some(&mut leaf_aux), false);
             leaf_aux.update(leaf_turn, &leaf_state, &mut self.work, &mut self.tmp_board, &mut self.tmp_aux);
             let mut leaf_node = Rc::new(RefCell::new(McNode::new(Some(cursor_node.clone()), leaf_state, leaf_aux, &mut self.rng)));
-            leaf_node.borrow_mut().total_visits += 1.0;
+            leaf_node.borrow_mut().total_visits = 1.0;
             cursor_node.borrow_mut().child_nodes[j] = Some(leaf_node.clone());
             traj.init_leaf(leaf_node);
             return;
@@ -245,14 +295,14 @@ pub struct McSearchProblem<'a> {
   rng:  XorShift128PlusRng,
   max_playouts:   usize,
   batch_size:     usize,
-  search_policy:  &'a SearchPolicy,
+  search_policy:  &'a mut SearchPolicy,
   rollout_policy: &'a mut RolloutPolicy,
   tree:           &'a mut McSearchTree,
   trajs:          Vec<McTrajectory>,
 }
 
 impl<'a> McSearchProblem<'a> {
-  pub fn new(max_playouts: usize, search_policy: &'a SearchPolicy, rollout_policy: &'a mut RolloutPolicy, tree: &'a mut McSearchTree) -> McSearchProblem<'a> {
+  pub fn new(max_playouts: usize, search_policy: &'a mut SearchPolicy, rollout_policy: &'a mut RolloutPolicy, tree: &'a mut McSearchTree) -> McSearchProblem<'a> {
     let batch_size = rollout_policy.batch_size();
     let mut trajs = Vec::with_capacity(batch_size);
     for _ in (0 .. batch_size) {
@@ -272,10 +322,12 @@ impl<'a> McSearchProblem<'a> {
   pub fn join(mut self) -> Action {
     let batch_size = self.batch_size;
     let num_batches = (self.max_playouts + batch_size - 1) / batch_size;
-    let behavior = RolloutBehavior::SelectUniform;
+    let behavior = self.rollout_policy.rollout_behavior();
+    println!("DEBUG: mc search problem: num batches: {} batch size: {} behavior: {:?}",
+        num_batches, batch_size, behavior);
 
+    let mut scores: HashMap<i32, usize> = HashMap::new();
     for batch in (0 .. num_batches) {
-      // TODO: walk tree.
       for batch_idx in (0 .. batch_size) {
         self.tree.walk(self.search_policy, &mut self.trajs[batch_idx]);
       }
@@ -284,36 +336,42 @@ impl<'a> McSearchProblem<'a> {
         RolloutBehavior::SelectUniform => {
           // TODO(20151024)
           let mut work = FastBoardWork::new();
-          let mut valid_moves = self.trajs[0].leaf_node.as_ref().unwrap().borrow()
-              .valid_moves.clone();
-          let mut depth = 0;
-          loop {
-            let mut did_play = false;
-            while !valid_moves.is_empty() {
-              let turn = self.trajs[0].state.current_turn();
-              let pos = choose_without_replace(&mut valid_moves, &mut self.rng);
-              if let Some(pos) = pos {
-                if self.trajs[0].state.is_legal_move_fast(turn, pos) {
-                  self.trajs[0].state.play(turn, Action::Place{pos: pos}, &mut work, &mut None, false);
-                  self.trajs[0].rollout_moves.push(pos);
-                  did_play = true;
-                  break;
+          for batch_idx in (0 .. batch_size) {
+            let mut valid_moves = self.trajs[batch_idx].leaf_node.as_ref().unwrap().borrow()
+                .valid_moves.clone();
+            let mut depth = 0;
+            loop {
+              let mut did_play = false;
+              while !valid_moves.is_empty() {
+                let turn = self.trajs[batch_idx].state.current_turn();
+                let pos = choose_without_replace(&mut valid_moves, &mut self.rng);
+                if let Some(pos) = pos {
+                  if self.trajs[batch_idx].state.is_legal_move_fast(turn, pos) {
+                    self.trajs[batch_idx].state.play(turn, Action::Place{pos: pos}, &mut work, &mut None, false);
+                    self.trajs[batch_idx].rollout_moves.push((turn, pos));
+                    did_play = true;
+                    break;
+                  }
                 }
               }
+              if did_play {
+                // XXX(20151026): Not playing "under the stones"; although maybe
+                // some plays which were not previously valid (due to liberties)
+                // may become valid.
+                //valid_moves.extend(self.trajs[batch_idx].state.last_captures().iter());
+              }
+              if valid_moves.is_empty() {
+                break;
+              }
+              depth += 1;
+              if depth >= 210 {
+                break;
+              }
             }
-            if did_play {
-              // FIXME(20151024): there are other moves which are also valid...
-              valid_moves.extend(self.trajs[0].state.last_captures().iter());
-            }
-            if valid_moves.is_empty() {
-              break;
-            }
-            depth += 1;
-            if depth >= 210 {
-              break;
-            }
+            // FIXME(20151026): when scoring, what komi to use?
+            let score = self.trajs[batch_idx].state.score_fast(0.5);
+            self.trajs[batch_idx].score = Some(score);
           }
-          self.trajs[0].score = Some(self.trajs[0].state.score_fast(6.5));
         }
 
         RolloutBehavior::SelectKGreedy{top_k} => {
@@ -336,12 +394,20 @@ impl<'a> McSearchProblem<'a> {
         }
       }
 
-      // TODO: backup tree.
       for batch_idx in (0 .. batch_size) {
+        if let Some(score) = self.trajs[batch_idx].score {
+          let int_score = (2.0 * score).round() as i32;
+          if !scores.contains_key(&int_score) {
+            scores.insert(int_score, 0);
+          }
+          *scores.get_mut(&int_score).unwrap() += 1;
+        }
         self.search_policy.backup_new(&mut self.trajs[batch_idx]);
       }
     }
 
+    println!("DEBUG: mc search problem: scores: {:?}", scores);
+    println!("DEBUG: mc search problem: end search: root visits: {}", self.tree.root_node.borrow().total_visits);
     self.search_policy.execute_best_new(&self.tree.root_node.borrow())
   }
 }

@@ -779,7 +779,8 @@ impl GtpController {
     let cmd_str = create_command_string(self.id.increment(), &[
       StringEntity(b"komi".to_vec()),
       // FIXME: fixed sample komi for now.
-      FloatEntity(7.5),
+      //FloatEntity(7.5),
+      FloatEntity(6.5),
     ]);
     ctl_to_client_tx.send(GtpMessage::Command(cmd_str))
       .unwrap();

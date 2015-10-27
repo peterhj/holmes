@@ -1,6 +1,6 @@
 use fastboard::{PosExt, Pos, Action, Stone, FastBoard, FastBoardAux, FastBoardWork};
 use fasttree::{ExecutionBehavior, Trajectory, NodeId, FastSearchNode, FastSearchTree};
-use mctree::{McTrajectory, McNode, McSearchTree};
+use mctree::{RolloutBehavior, McTrajectory, McNode, McSearchTree};
 use random::{XorShift128PlusRng, choose_without_replace, sample_discrete_cdf};
 
 use async_cuda::context::{DeviceContext};
@@ -16,14 +16,19 @@ use statistics_avx2::random::{StreamRng, XorShift128PlusStreamRng};
 
 use bit_set::{BitSet};
 use rand::{Rng, SeedableRng, thread_rng};
+use rand::distributions::{IndependentSample};
+use rand::distributions::gamma::{Gamma};
+use std::cmp::{max};
+use std::iter::{repeat};
 use std::path::{PathBuf};
 
 pub trait SearchPolicy {
-  fn backup(&self, tree: &mut FastSearchTree, traj: &Trajectory) -> usize;
-  fn execute_search(&self, node: &FastSearchNode) -> Action;
-  fn execute_best(&self, node: &FastSearchNode) -> Action;
+  fn backup(&self, tree: &mut FastSearchTree, traj: &Trajectory) -> usize { unimplemented!(); }
+  fn execute_search(&self, node: &FastSearchNode) -> Action { unimplemented!(); }
+  fn execute_best(&self, node: &FastSearchNode) -> Action { unimplemented!(); }
 
-  fn backup_new(&self, traj: &mut McTrajectory) { unimplemented!(); }
+  fn backup_new(&mut self, traj: &mut McTrajectory) { unimplemented!(); }
+  fn execute_search_new(&mut self, node: &McNode) -> Option<(Pos, usize)> { unimplemented!(); }
   fn execute_best_new(&self, node: &McNode) -> Action { unimplemented!(); }
 }
 
@@ -33,7 +38,7 @@ pub struct UctSearchPolicy {
 }
 
 impl UctSearchPolicy {
-  fn backup_node(&self, node: &mut FastSearchNode, update_mov: Pos, outcome: f32) -> bool {
+  /*fn backup_node(&self, node: &mut FastSearchNode, update_mov: Pos, outcome: f32) -> bool {
     if !node.rev_moves.contains_key(&update_mov) {
       //println!("WARNING: uct: node does not have update mov: {:?}",
       //    update_mov);
@@ -59,36 +64,29 @@ impl UctSearchPolicy {
       node.value[j] = node.succ_ratio[j] + self.c * (node.total_trials.ln() / node.num_trials[j]).sqrt();
     }
     true
-  }
+  }*/
 
   fn backup_node_new(&self, node: &mut McNode, update_mov: Pos, update_j: usize, outcome: f32) {
-    if node.valid_moves[update_j] != update_mov {
+    /*if node.valid_moves[update_j] != update_mov {
       println!("WARNING: uct policy: node valid mov index {} is not {:?}!",
           update_j, update_mov);
       return;
     }
     let reward = if outcome >= 0.0 {
-      if let Stone::White = node.state.current_turn() {
-        1.0
-      } else {
-        0.0
-      }
+      if let Stone::White = node.state.current_turn() { 1.0 } else { 0.0 }
     } else {
-      if let Stone::Black = node.state.current_turn() {
-        1.0
-      } else {
-        0.0
-      }
+      if let Stone::Black = node.state.current_turn() { 1.0 } else { 0.0 }
     };
-    node.credit_one_arm(update_j, reward);
-    for j in (0 .. node.value.len()) {
-      node.value[j] = (node.succ_trials[j] / node.num_trials[j]) + self.c * (node.total_visits.ln() / node.num_trials[j]).sqrt();
+    node.credit_one_arm(update_j, reward);*/
+    node.credit_arm(update_j, update_mov, outcome);
+    for j in (0 .. node.values.len()) {
+      node.values[j] = (node.num_succs[j] / node.num_trials[j]) + self.c * (node.total_visits.ln() / node.num_trials[j]).sqrt();
     }
   }
 }
 
 impl SearchPolicy for UctSearchPolicy {
-  fn backup(&self, tree: &mut FastSearchTree, traj: &Trajectory) -> usize {
+  /*fn backup(&self, tree: &mut FastSearchTree, traj: &Trajectory) -> usize {
     // XXX(20151022): Outcome and reward conventions:
     // Outcomes are absolutely valued:
     //    W win: >= 0.0 outcome.
@@ -119,7 +117,7 @@ impl SearchPolicy for UctSearchPolicy {
 
   fn execute_search(&self, node: &FastSearchNode) -> Action {
     if node.moves.len() > 0 {
-      let j = array_argmax(&node.value);
+      let j = array_argmax(&node.values);
       Action::Place{pos: node.moves[j]}
     } else {
       Action::Pass
@@ -133,9 +131,9 @@ impl SearchPolicy for UctSearchPolicy {
     } else {
       Action::Pass
     }
-  }
+  }*/
 
-  fn backup_new(&self, traj: &mut McTrajectory) {
+  fn backup_new(&mut self, traj: &mut McTrajectory) {
     let outcome = traj.score.expect("FATAL: uct policy: backup: missing outcome!");
     /*if traj.rollout_moves.is_empty() {
       println!("WARNING: uct policy: backup: no rollouts in this trajectory!");
@@ -143,7 +141,7 @@ impl SearchPolicy for UctSearchPolicy {
     }*/
     if !traj.rollout_moves.is_empty() {
       if let Some(ref mut leaf_node) = traj.leaf_node {
-        let update_mov = traj.rollout_moves[0];
+        let update_mov = traj.rollout_moves[0].1;
         let mut update_j = None;
         for (j, &mov) in leaf_node.borrow().valid_moves.iter().enumerate() {
           if mov == update_mov {
@@ -183,33 +181,175 @@ impl SearchPolicy for UctSearchPolicy {
   }
 }
 
-#[derive(Clone, Copy)]
-pub struct RaveSearchPolicy;
+#[derive(Clone)]
+pub struct ThompsonRaveSearchPolicy {
+  rng:  XorShift128PlusRng,
+  accum_rave_mask:  Vec<BitSet>,
+}
 
-#[derive(Clone, Copy)]
-pub struct ThompsonSearchPolicy;
-
-impl SearchPolicy for ThompsonSearchPolicy {
-  fn backup(&self, tree: &mut FastSearchTree, traj: &Trajectory) -> usize {
-    // TODO
-    unimplemented!();
+impl ThompsonRaveSearchPolicy {
+  pub fn new() -> ThompsonRaveSearchPolicy {
+    let mut rng = XorShift128PlusRng::from_seed([thread_rng().next_u64(), thread_rng().next_u64()]);
+    ThompsonRaveSearchPolicy{
+      rng:  rng,
+      accum_rave_mask:  vec![
+        BitSet::with_capacity(FastBoard::BOARD_SIZE),
+        BitSet::with_capacity(FastBoard::BOARD_SIZE),
+      ],
+    }
   }
 
-  fn execute_search(&self, node: &FastSearchNode) -> Action {
-    // TODO
-    unimplemented!();
-    /*if node.moves.len() > 0 {
-      let j = array_argmax(&node.value);
-      Action::Place{pos: node.moves[j]}
+  /*fn credit_node_new(&self, node: &mut McNode, update_mov: Pos, update_j: usize, outcome: f32) {
+    if node.valid_moves[update_j] != update_mov {
+      println!("WARNING: thompson policy: node valid mov index {} is not {:?}!",
+          update_j, update_mov);
+      return;
+    }
+    let reward = if outcome >= 0.0 {
+      if let Stone::White = node.state.current_turn() { 1.0 } else { 0.0 }
     } else {
-      Action::Pass
-    }*/
+      if let Stone::Black = node.state.current_turn() { 1.0 } else { 0.0 }
+    };
+    node.credit_one_arm(update_j, reward);
   }
 
-  fn execute_best(&self, node: &FastSearchNode) -> Action {
-    if node.moves.len() > 0 {
+  fn credit_node_rave(&self, node: &mut McNode, update_mov: Pos, update_j: usize, outcome: f32) {
+    if node.valid_moves[update_j] != update_mov {
+      println!("WARNING: thompson policy: node valid mov index {} is not {:?}!",
+          update_j, update_mov);
+      return;
+    }
+    let reward = if outcome >= 0.0 {
+      if let Stone::White = node.state.current_turn() { 1.0 } else { 0.0 }
+    } else {
+      if let Stone::Black = node.state.current_turn() { 1.0 } else { 0.0 }
+    };
+    node.credit_one_arm_rave(update_j, reward);
+  }*/
+
+  fn backup_node_new(node: &mut McNode) {
+    let equiv_n = 1000.0;
+    //let beta = (0.5 * equiv_n / (node.total_visits + equiv_n)).sqrt();
+    for j in (0 .. node.values.len()) {
+      let n = node.num_trials[j];
+      let s = node.num_succs[j];
+      let pn = node.num_trials_prior[j];
+      let ps = node.num_succs_prior[j];
+      let rn = node.num_trials_rave[j];
+      let rs = node.num_succs_rave[j];
+      let val_mc = (s + ps) / (n + pn);
+      if rn == 0.0 {
+        node.values[j] = val_mc
+      } else {
+        // XXX(20151027): This version of the RAVE beta is from michi.
+        let beta = rn / (rn + (n + pn) + (n + pn) * rn / equiv_n);
+        let val_rave = rs / rn;
+        node.values[j] = (1.0 - beta) * val_mc + beta * val_rave;
+      }
+    }
+  }
+}
+
+impl SearchPolicy for ThompsonRaveSearchPolicy {
+  fn backup_new(&mut self, traj: &mut McTrajectory) {
+    let outcome = traj.score.expect("FATAL: thompson policy: backup: missing outcome!");
+    /*let mut accum_rave_mask: Vec<Vec<bool>> = vec![
+      repeat(false).take(FastBoard::BOARD_SIZE).collect(),
+      repeat(false).take(FastBoard::BOARD_SIZE).collect(),
+    ];*/
+    let &mut ThompsonRaveSearchPolicy{ref mut accum_rave_mask, ..} = self;
+    accum_rave_mask[0].clear();
+    accum_rave_mask[1].clear();
+    if !traj.rollout_moves.is_empty() {
+      if let Some(ref mut leaf_node) = traj.leaf_node {
+        // Perform MC update.
+        let update_mov = traj.rollout_moves[0].1;
+        let mut update_j = None;
+        for (j, &mov) in leaf_node.borrow().valid_moves.iter().enumerate() {
+          if mov == update_mov {
+            update_j = Some(j);
+            break;
+          }
+        }
+        if update_j.is_none() {
+          println!("WARNING: uct policy: backup: leaf node is missing first rollout move!");
+          return;
+        }
+        let mut leaf_node = leaf_node.borrow_mut();
+        leaf_node.credit_arm(update_j.unwrap(), update_mov, outcome);
+
+        // Perform RAVE update.
+        for &(turn, mov) in traj.rollout_moves.iter().rev() {
+          accum_rave_mask[turn.offset()].insert(mov.idx());
+        }
+        leaf_node.credit_arms_rave(&accum_rave_mask, outcome);
+
+        Self::backup_node_new(&mut leaf_node);
+      } else {
+        println!("WARNING: thompson policy: backup: no leaf node in this trajectory!");
+        return;
+      }
+    }
+    for &mut (ref mut node, update_mov, update_j) in traj.search_pairs.iter_mut().rev() {
+      // Perform MC update.
+      let mut node = node.borrow_mut();
+      if node.valid_moves[update_j] != update_mov {
+        println!("WARNING: thompson policy: backup: inner node has mismatched move!");
+        return;
+      }
+      node.credit_arm(update_j, update_mov, outcome);
+
+      // Perform RAVE update.
+      let turn = node.state.current_turn();
+      let turn_off = turn.offset();
+      accum_rave_mask[turn_off].insert(update_mov.idx());
+      node.credit_arms_rave(&accum_rave_mask, outcome);
+
+      Self::backup_node_new(&mut node);
+    }
+  }
+
+  fn execute_search_new(&mut self, node: &McNode) -> Option<(Pos, usize)> {
+    // FIXME(20151025): use fast beta sampling.
+    //let n = node.total_visits;
+    let mut max_pos: Option<(f32, Pos, usize)> = None;
+    for (j, &mov) in node.valid_moves.iter().enumerate() {
+      let n = node.num_trials[j];
+      assert!(n >= 0.0);
+      // XXX(20151027): Taking max of epsilon b/c gamma requires positive shape
+      // parameter.
+      let gamma_a = Gamma::new((1.0e-6f32.max(node.values[j]) * n) as f64 + 1.0, 1.0);
+      let gamma_b = Gamma::new(n as f64 + 1.0, 1.0);
+      let x = gamma_a.ind_sample(&mut self.rng) as f32;
+      let y = gamma_b.ind_sample(&mut self.rng) as f32;
+      let u = x / (x + y);
+      if max_pos.is_none() || max_pos.unwrap().0 < u {
+        max_pos = Some((u, mov, j));
+      }
+    }
+    if max_pos.is_none() {
+      None
+    } else {
+      let max_pos = max_pos.unwrap();
+      //(Action::Place{pos: max_pos.1}, Some(max_pos.2))
+      Some((max_pos.1, max_pos.2))
+    }
+  }
+
+  fn execute_best_new(&self, node: &McNode) -> Action {
+    println!("DEBUG: thompson policy: executing best...");
+    if !node.valid_moves.is_empty() {
+      /*let j = array_argmax(&node.values);
+      println!("DEBUG: thompson policy:   argmax: ({}, {}) values: {:?}",
+          j, node.num_trials[j], node.values);*/
       let j = array_argmax(&node.num_trials);
-      Action::Place{pos: node.moves[j]}
+      println!("DEBUG: thompson policy:   argmax: ({}, {})",
+          j, node.num_trials[j]);
+      println!("DEBUG: thompson policy:   trials: {:?}",
+          node.num_trials);
+      println!("DEBUG: thompson policy:   values: {:?}",
+          node.values);
+      Action::Place{pos: node.valid_moves[j]}
     } else {
       Action::Pass
     }
@@ -227,6 +367,7 @@ pub trait RolloutPolicy {
 
   fn batch_size(&self) -> usize;
   fn execution_behavior(&self) -> ExecutionBehavior;
+  fn rollout_behavior(&self) -> RolloutBehavior;
 
   fn preload_batch_state(&mut self, batch_idx: usize, state: &FastBoard) {
     unimplemented!();
@@ -307,17 +448,18 @@ impl RolloutPolicy for QuasiUniformRolloutPolicy {
   }
 }*/
 
-pub struct UniformRolloutPolicy;
+pub struct QuasiUniformRolloutPolicy;
 
-impl UniformRolloutPolicy {
-  pub fn new() -> UniformRolloutPolicy {
-    UniformRolloutPolicy
+impl QuasiUniformRolloutPolicy {
+  pub fn new() -> QuasiUniformRolloutPolicy {
+    QuasiUniformRolloutPolicy
   }
 }
 
-impl RolloutPolicy for UniformRolloutPolicy {
+impl RolloutPolicy for QuasiUniformRolloutPolicy {
   fn batch_size(&self) -> usize { 1 }
   fn execution_behavior(&self) -> ExecutionBehavior { ExecutionBehavior::Uniform }
+  fn rollout_behavior(&self) -> RolloutBehavior { RolloutBehavior::SelectUniform }
 
   fn preload_batch_state(&mut self, batch_idx: usize, state: &FastBoard) {
     // Do nothing.
@@ -388,8 +530,11 @@ impl ConvNetBatchRolloutPolicy {
 }
 
 impl RolloutPolicy for ConvNetBatchRolloutPolicy {
-  fn batch_size(&self) -> usize { self.arch.batch_size() }
+  fn batch_size(&self) -> usize { 1 }
+  //fn batch_size(&self) -> usize { self.arch.batch_size() }
   fn execution_behavior(&self) -> ExecutionBehavior { ExecutionBehavior::DiscreteDist }
+  fn rollout_behavior(&self) -> RolloutBehavior { RolloutBehavior::SelectUniform }
+  //fn rollout_behavior(&self) -> RolloutBehavior { RolloutBehavior::SelectKGreedy{top_k: 20} }
 
   fn preload_batch_state(&mut self, batch_idx: usize, state: &FastBoard) {
     let &mut ConvNetBatchRolloutPolicy{ref ctx, ref mut arch, ..} = self;

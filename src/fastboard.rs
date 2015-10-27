@@ -33,6 +33,8 @@ pub trait PosExt {
   fn to_coord(self) -> Coord;
   fn idx(self) -> usize;
   fn trans(self, t: u8) -> Pos;
+  fn inv_trans(self, t: u8) -> Pos;
+  fn is_edge(self) -> bool;
 }
 
 pub type Pos = i16;
@@ -76,6 +78,32 @@ impl PosExt for Pos {
       _ => unreachable!(),
     }
   }
+
+  #[inline]
+  fn inv_trans(self, t: u8) -> Pos {
+    let (x, y) = (self % 19, self / 19);
+    let (u, v) = (x - 9, y - 9);
+    // XXX: Most inverse transforms are the same as the forward transforms,
+    // except for two (labeled below).
+    match t {
+      0 => self,
+      1 => (9 - u) + (9 + v) * 19,
+      2 => (9 + u) + (9 - v) * 19,
+      3 => (9 - u) + (9 - v) * 19,
+      4 => (9 + v) + (9 + u) * 19,
+      5 => (9 + v) + (9 - u) * 19,  // XXX: this one is inverted.
+      6 => (9 - v) + (9 + u) * 19,  // XXX: this one is inverted.
+      7 => (9 - v) + (9 - u) * 19,
+      _ => unreachable!(),
+    }
+  }
+
+  #[inline]
+  fn is_edge(self) -> bool {
+    let (x, y) = (self % 19, self / 19);
+    (x == 0 || x == (19 - 1) ||
+     y == 0 || y == (19 - 1))
+  }
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
@@ -113,9 +141,9 @@ impl Stone {
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 pub enum Action {
-  Resign,
-  Pass,
   Place{pos: Pos},
+  Pass,
+  Resign,
 }
 
 impl Action {
@@ -201,12 +229,15 @@ impl RuleSet {
 #[derive(Clone, Debug)]
 pub struct Chain {
   ps_libs:  Vec<Pos>,
-  ps_opps:  Vec<Pos>,
+  //ps_opps:  Vec<Pos>,
 }
 
 impl Chain {
   pub fn new() -> Chain {
-    Chain{ps_libs: Vec::with_capacity(4), ps_opps: Vec::with_capacity(4)}
+    Chain{
+      ps_libs: Vec::with_capacity(4),
+      //ps_opps: Vec::with_capacity(4),
+    }
   }
 
   pub fn add_pseudoliberty(&mut self, lib: Pos) {
@@ -224,7 +255,7 @@ impl Chain {
     }
   }
 
-  pub fn add_pseudoenemy(&mut self, opp: Pos) {
+  /*pub fn add_pseudoenemy(&mut self, opp: Pos) {
     self.ps_opps.push(opp);
   }
 
@@ -237,7 +268,7 @@ impl Chain {
         i += 1;
       }
     }
-  }
+  }*/
 
   pub fn count_pseudoliberties(&self) -> usize {
     self.ps_libs.len()
@@ -452,9 +483,11 @@ impl FastBoardAux {
         if verbose {
           println!("DEBUG: check move: {:?} {}", stone, pos.to_coord().to_string());
         }
+
         // Local checks: these touch only the candidate position and its
         // 4-adjacent positions.
         let i = pos.idx();
+
         // Position is occupied.
         if !self.st_empty[i] {
           if verbose {
@@ -462,35 +495,16 @@ impl FastBoardAux {
           }
           return Some(ActionStatus::IllegalOccupied);
         }
-        // Position is not an eye.
-        // Approximate definition of an eye:
-        // 1. surrounded on all 4 sides by the opponent's chain;
-        // 2. the surrounding chain has at least 2 liberties.
-        let opp_stone = stone.opponent();
-        let mut n_adj_opp = 0;
-        let mut n_adj = 0;
-        FastBoard::for_each_adjacent(pos, |adj_pos| {
-          n_adj += 1;
-          if board.stones[adj_pos.idx()] == opp_stone {
-            n_adj_opp += 1;
+
+        // Position is an opponent's eye.
+        if board.is_eye1(stone, pos) {
+          if verbose {
+            println!("DEBUG: illegal move: playing in opponent's 1-eye");
           }
-        });
-        if n_adj_opp == n_adj {
-          let mut eye_adj_libs = 2;
-          FastBoard::for_each_adjacent(pos, |adj_pos| {
-            let adj_head = board.traverse_chain_slow(adj_pos);
-            assert!(adj_head != TOMBSTONE);
-            let adj_chain = board.get_chain(adj_head);
-            eye_adj_libs = min(eye_adj_libs, adj_chain.approx_count_liberties());
-          });
-          if eye_adj_libs >= 2 {
-            if verbose {
-              println!("DEBUG: illegal move: single-point eye");
-            }
-            return Some(ActionStatus::IllegalSuicide);
-          }
+          return Some(ActionStatus::IllegalSuicide);
         }
-        // Ko rule.
+
+        // Play at the ko point.
         // FIXME(20151009): fix ko point stuff.
         /*let first_play = self.st_first[i];
         if first_play {
@@ -686,26 +700,45 @@ pub struct FastBoard {
 }
 
 impl FastBoard {
-  pub const BOARD_DIM:  i16   = 19;
-  pub const BOARD_SIZE: usize = 361;
+  pub const BOARD_DIM:      i16   = 19;
+  pub const BOARD_SIZE:     usize = 361;
+  pub const BOARD_MAX_POS:  i16   = 361;
 
   pub fn for_each_adjacent<F>(pos: Pos, mut f: F) where F: FnMut(Pos) {
     let (x, y) = (pos % Self::BOARD_DIM, pos / Self::BOARD_DIM);
+    let upper = Self::BOARD_DIM - 1;
     if x >= 1 {
       f(pos - 1);
     }
     if y >= 1 {
       f(pos - Self::BOARD_DIM);
     }
-    if x < Self::BOARD_DIM - 1 {
+    if x < upper {
       f(pos + 1);
     }
-    if y < Self::BOARD_DIM - 1 {
+    if y < upper {
       f(pos + Self::BOARD_DIM);
     }
   }
 
-  pub fn for_each_adjacent_labeled<F>(pos: Pos, mut f: F) where F: FnMut(Pos, usize) {
+  pub fn for_each_diagonal<F>(pos: Pos, mut f: F) where F: FnMut(Pos) {
+    let (x, y) = (pos % Self::BOARD_DIM, pos / Self::BOARD_DIM);
+    let upper = Self::BOARD_DIM - 1;
+    if x >= 1 && y >= 1 {
+      f(pos - 1 - Self::BOARD_DIM);
+    }
+    if x >= 1 && y < upper {
+      f(pos - 1 + Self::BOARD_DIM);
+    }
+    if x < upper && y >= 1 {
+      f(pos + 1 - Self::BOARD_DIM);
+    }
+    if x < upper && y < upper {
+      f(pos + 1 + Self::BOARD_DIM);
+    }
+  }
+
+  /*pub fn for_each_adjacent_labeled<F>(pos: Pos, mut f: F) where F: FnMut(Pos, usize) {
     let (x, y) = (pos % Self::BOARD_DIM, pos / Self::BOARD_DIM);
     if x >= 1 {
       f(pos - 1,                0);
@@ -719,7 +752,7 @@ impl FastBoard {
     if y < Self::BOARD_DIM - 1 {
       f(pos + Self::BOARD_DIM,  3);
     }
-  }
+  }*/
 
   pub fn new() -> FastBoard {
     FastBoard{
@@ -856,39 +889,64 @@ impl FastBoard {
   }
 
   #[inline]
-  pub fn is_single_eye(&self, stone: Stone, pos: Pos) -> bool {
-    // FIXME(20151009): fix this pseudo-single-point-eye logic:
-    // <http://computer-go.org/pipermail/computer-go/2013-February/005735.html>
-    // - empty point
-    // - orthogonal neighbors are of same color
-    // - diagonal neighbors contain no more than one opposite color, unless
-    //   it is a border in which case no oppo stones allowed
-
-    // Position is not an eye.
-    // Approximate definition of an eye:
-    // 1. surrounded on all 4 sides by the opponent's chain;
-    // 2. the surrounding chain has at least 2 liberties.
+  pub fn is_eyeish(&self, stone: Stone, pos: Pos) -> bool {
     let opp_stone = stone.opponent();
-    let mut is_eye_1 = true;
+    let mut eyeish = true;
     FastBoard::for_each_adjacent(pos, |adj_pos| {
       if self.stones[adj_pos.idx()] != opp_stone {
-        is_eye_1 = false;
+        eyeish = false;
       }
     });
-    if is_eye_1 {
-      let mut eye_adj_libs = None;
-      FastBoard::for_each_adjacent(pos, |adj_pos| {
-        if eye_adj_libs.is_none() {
-          let adj_head = self.traverse_chain_slow(adj_pos);
-          let adj_chain = self.get_chain(adj_head);
-          eye_adj_libs = Some(adj_chain.approx_count_liberties());
-        }
-      });
-      if let Some(2) = eye_adj_libs {
-        return false;
-      }
+    eyeish
+  }
+
+  #[inline]
+  pub fn is_eyelike(&self, stone: Stone, pos: Pos) -> bool {
+    let opp_stone = stone.opponent();
+    if !self.is_eyeish(stone, pos) {
+      return false;
     }
-    true
+    let mut false_count = if pos.is_edge() { 1 } else { 0 };
+    FastBoard::for_each_diagonal(pos, |diag_pos| {
+      if self.stones[diag_pos.idx()] == opp_stone {
+        false_count += 1;
+      }
+    });
+    false_count < 2
+  }
+
+  #[inline]
+  pub fn is_eye1(&self, stone: Stone, pos: Pos) -> bool {
+    // Approximate definition of an eye:
+    // 1. surrounded on all sides by the opponent's chains;
+    // 2. the surrounding chains each have at least 2 liberties.
+    let opp_stone = stone.opponent();
+    let mut n_adj_opp = 0;
+    let mut n_adj = 0;
+    FastBoard::for_each_adjacent(pos, |adj_pos| {
+      n_adj += 1;
+      if self.stones[adj_pos.idx()] == opp_stone {
+        n_adj_opp += 1;
+      }
+    });
+    if n_adj_opp == n_adj {
+      // XXX: This part checks that none of the surrounding opponent chains are
+      // susceptible to capture by the placed stone.
+      let mut eye_adj_libs = 2;
+      FastBoard::for_each_adjacent(pos, |adj_pos| {
+        let adj_head = self.traverse_chain_slow(adj_pos);
+        assert!(adj_head != TOMBSTONE);
+        let adj_chain = self.get_chain(adj_head);
+        eye_adj_libs = min(eye_adj_libs, adj_chain.approx_count_liberties());
+      });
+      if eye_adj_libs >= 2 {
+        true
+      } else {
+        false
+      }
+    } else {
+      false
+    }
   }
 
   pub fn is_legal_move_fast(&self, stone: Stone, pos: Pos) -> bool {
@@ -897,7 +955,8 @@ impl FastBoard {
     if self.is_occupied(pos) {
       return false;
     }
-    if self.is_single_eye(stone, pos) {
+    //if self.is_single_eye(stone, pos) {
+    if self.is_eyelike(stone, pos) {
       return false;
     }
     // FIXME(20151009): ko rule.
@@ -1196,8 +1255,8 @@ impl FastBoard {
       let adj_stone = self.stones[adj_pos.idx()];
       if let Stone::Empty = adj_stone {
         self.get_chain_mut(head).add_pseudoliberty(adj_pos);
-      } else if self.stones[head.idx()].opponent() == adj_stone {
-        self.get_chain_mut(head).add_pseudoenemy(adj_pos);
+      /*} else if self.stones[head.idx()].opponent() == adj_stone {
+        self.get_chain_mut(head).add_pseudoenemy(adj_pos);*/
       }
     });
   }
@@ -1217,8 +1276,8 @@ impl FastBoard {
       let adj_stone = self.stones[adj_pos.idx()];
       if let Stone::Empty = adj_stone {
         self.get_chain_mut(head).add_pseudoliberty(adj_pos);
-      } else if self.stones[pos.idx()].opponent() == adj_stone {
-        self.get_chain_mut(head).add_pseudoenemy(adj_pos);
+      /*} else if self.stones[pos.idx()].opponent() == adj_stone {
+        self.get_chain_mut(head).add_pseudoenemy(adj_pos);*/
       }
     });
     if verbose {
@@ -1299,7 +1358,7 @@ impl FastBoard {
           if adj_head != TOMBSTONE {
             let mut adj_chain = self.get_chain_mut(adj_head);
             adj_chain.add_pseudoliberty(next);
-            adj_chain.remove_pseudoenemy(next);
+            /*adj_chain.remove_pseudoenemy(next);*/
           }
         }
       });

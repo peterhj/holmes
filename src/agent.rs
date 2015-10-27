@@ -4,8 +4,8 @@ use fasttree::{FastSearchTree, SearchResult, Trajectory};
 use gtp_board::{Player, Coord, Vertex, RuleSystem, TimeSystem, MoveResult, UndoResult};
 use mctree::{McSearchTree, McSearchProblem};
 use policy::{
-  SearchPolicy, UctSearchPolicy,
-  RolloutPolicy, UniformRolloutPolicy, ConvNetBatchRolloutPolicy,
+  SearchPolicy, UctSearchPolicy, ThompsonRaveSearchPolicy,
+  RolloutPolicy, QuasiUniformRolloutPolicy, ConvNetBatchRolloutPolicy,
 };
 use random::{random_shuffle};
 use search::{SearchProblem, BatchSearchProblem};
@@ -143,9 +143,9 @@ pub struct Agent {
   valid:          bool,
   config:         AgentConfig,
 
-  search_policy:  UctSearchPolicy,
-  rollout_policy: UniformRolloutPolicy,
-  //rollout_policy: ConvNetBatchRolloutPolicy,
+  search_policy:  ThompsonRaveSearchPolicy,
+  //rollout_policy: QuasiUniformRolloutPolicy,
+  rollout_policy: ConvNetBatchRolloutPolicy,
   tree:           McSearchTree,
 
   opening_book:   OpeningBook,
@@ -154,6 +154,7 @@ pub struct Agent {
   current_state:  FastBoard,
   current_aux:    FastBoardAux,
   current_ply:    usize,
+  opponent_pass:  bool,
   work:           FastBoardWork,
   tmp_board:      FastBoard,
   tmp_aux:        FastBoardAux,
@@ -165,9 +166,10 @@ impl Agent {
       valid:          false,
       config:         Default::default(),
 
-      search_policy:  UctSearchPolicy{c: 0.5},
-      rollout_policy: UniformRolloutPolicy::new(),
-      //rollout_policy: ConvNetBatchRolloutPolicy::new(),
+      //search_policy:  UctSearchPolicy{c: 0.5},
+      search_policy:  ThompsonRaveSearchPolicy::new(),
+      //rollout_policy: QuasiUniformRolloutPolicy::new(),
+      rollout_policy: ConvNetBatchRolloutPolicy::new(),
       tree:           McSearchTree::new_with_root(FastBoard::new(), FastBoardAux::new()),
 
       opening_book:   OpeningBook::load_fuego(&PathBuf::from("data/book-fuego.dat"), &mut thread_rng()),
@@ -176,6 +178,7 @@ impl Agent {
       current_state:  FastBoard::new(),
       current_aux:    FastBoardAux::new(),
       current_ply:    0,
+      opponent_pass:  false,
       work:           FastBoardWork::new(),
       tmp_board:      FastBoard::new(),
       tmp_aux:        FastBoardAux::new(),
@@ -211,8 +214,8 @@ impl Agent {
 
   pub fn begin_search<'a>(&'a mut self) -> McSearchProblem<'a> {
     // TODO(20151024)
-    let &mut Agent{ref search_policy, ref mut rollout_policy, ref mut tree, ..} = self;
-    McSearchProblem::new(10000, search_policy, rollout_policy, tree)
+    let &mut Agent{ref mut search_policy, ref mut rollout_policy, ref mut tree, ..} = self;
+    McSearchProblem::new(50000, search_policy, rollout_policy, tree)
 
     /*let mut tree = FastSearchTree::new();
     //tree.reset(&self.current_state, &self.current_aux, self.current_ply as i32, 0.0);
@@ -223,7 +226,7 @@ impl Agent {
       tree:           tree,
       traj:           Trajectory::new(),
       tree_policy:    UctSearchPolicy{c: 0.5},
-      rollout_policy: UniformRolloutPolicy::new(),
+      rollout_policy: QuasiUniformRolloutPolicy::new(),
     }*/
     BatchSearchProblem::new(tree, self.rollout_policy.batch_size())*/
   }
@@ -236,6 +239,13 @@ impl Agent {
 
   pub fn play(&mut self, turn: Stone, action: Action, check_legal: bool) -> MoveResult {
     assert_eq!(self.current_state.current_turn(), turn);
+    if turn == self.config.whoami.opponent() &&
+        (action == Action::Resign || action == Action::Pass)
+    {
+      self.opponent_pass = true;
+    } else {
+      self.opponent_pass = false;
+    }
     let &mut Agent{
       ref mut current_state, ref mut current_aux,
       ref mut work, ref mut tmp_board, ref mut tmp_aux, ..} = self;
@@ -252,7 +262,9 @@ impl Agent {
         current_state.play(turn, action, work, &mut Some(current_aux), true);
         current_aux.update(turn, &current_state, work, tmp_board, tmp_aux);
         if let Action::Place{pos} = action {
-          self.tree.apply_move(turn, pos);
+          // FIXME(20151026): drop the tree?
+          self.tree = McSearchTree::new_with_root(current_state.clone(), current_aux.clone());
+          //self.tree.apply_move(turn, pos);
         } else {
           // XXX(20151024): on pass/resign, all nodes are essentially invalid.
           self.tree.set_root(current_state.clone(), current_aux.clone());
@@ -284,6 +296,11 @@ impl Agent {
   }
 
   pub fn gen_move(&mut self, turn: Stone) -> Vertex {
+    // FIXME(20151025): heuristic for playing against gnugo;
+    // if gnugo passed, we pass too.
+    if turn == self.config.whoami && self.opponent_pass {
+      return Action::Pass.to_vertex()
+    }
     let digest = self.current_state.get_digest();
     if let Some(mut book_plays) = self.opening_book.lookup(turn, &digest).map(|ps| ps.to_vec()) {
       thread_rng().shuffle(&mut book_plays);
