@@ -22,6 +22,81 @@ use std::cmp::{max};
 use std::iter::{repeat};
 use std::path::{PathBuf};
 
+pub trait PriorPolicy {
+  fn batch_size(&self) -> usize;
+}
+
+pub struct NoPriorPolicy;
+
+impl PriorPolicy for NoPriorPolicy {
+  fn batch_size(&self) -> usize { 1 }
+}
+
+pub struct ConvNetBatchPriorPolicy {
+  ctx:    DeviceContext,
+  arch:   LinearNetArch,
+}
+
+impl ConvNetBatchPriorPolicy {
+  pub fn new() -> ConvNetBatchPriorPolicy {
+    let ctx = DeviceContext::new(0);
+    let batch_size = 256;
+    let num_hidden = 16;
+    let data_layer_cfg = DataLayerConfig{
+      raw_width: 19, raw_height: 19,
+      crop_width: 19, crop_height: 19,
+      channels: 4,
+    };
+    let conv1_layer_cfg = Conv2dLayerConfig{
+      in_width: 19, in_height: 19, in_channels: 4,
+      conv_size: 9, conv_stride: 1, conv_pad: 4,
+      out_channels: num_hidden,
+      act_fun: ActivationFunction::Rect,
+      init_weights: ParamsInitialization::Normal{mean: 0.0, std: 0.01},
+    };
+    let conv2_layer_cfg = Conv2dLayerConfig{
+      in_width: 19, in_height: 19, in_channels: num_hidden,
+      conv_size: 3, conv_stride: 1, conv_pad: 1,
+      out_channels: 1,
+      act_fun: ActivationFunction::Identity,
+      init_weights: ParamsInitialization::Normal{mean: 0.0, std: 0.01},
+    };
+    let loss_layer_cfg = SoftmaxLossLayerConfig{
+      num_categories: 361,
+      // FIXME(20151023): masking.
+      do_mask: false,
+      //do_mask: true,
+    };
+    let data_layer = DataLayer::new(0, data_layer_cfg, batch_size);
+    let conv1_layer = Conv2dLayer::new(0, conv1_layer_cfg, batch_size, Some(&data_layer), &ctx);
+    let conv2_layer = Conv2dLayer::new(0, conv2_layer_cfg, batch_size, Some(&conv1_layer), &ctx);
+    let softmax_layer = SoftmaxLossLayer::new(0, loss_layer_cfg, batch_size, Some(&conv2_layer));
+
+    // XXX(20151028): The prior convnet params maximize accuracy.
+    let mut arch = LinearNetArch::new(
+        PathBuf::from("experiments/models/convnet_19x19x4_conv_9x9x16R_conv_3x3x1"),
+        batch_size,
+        data_layer,
+        softmax_layer,
+        vec![
+          Box::new(conv1_layer),
+          Box::new(conv2_layer),
+        ],
+    );
+    arch.load_layer_params(None, &ctx);
+
+    ConvNetBatchPriorPolicy {
+      ctx:  ctx,
+      arch: arch,
+    }
+  }
+}
+
+impl PriorPolicy for ConvNetBatchPriorPolicy {
+  //fn batch_size(&self) -> usize { 256 }
+  fn batch_size(&self) -> usize { self.arch.batch_size() }
+}
+
 pub trait SearchPolicy {
   fn backup(&self, tree: &mut FastSearchTree, traj: &Trajectory) -> usize { unimplemented!(); }
   fn execute_search(&self, node: &FastSearchNode) -> Action { unimplemented!(); }
@@ -315,13 +390,12 @@ impl SearchPolicy for ThompsonRaveSearchPolicy {
     let mut max_pos: Option<(f32, Pos, usize)> = None;
     for (j, &mov) in node.valid_moves.iter().enumerate() {
       let n = node.num_trials[j];
-      assert!(n >= 0.0);
-      // XXX(20151027): Taking max of epsilon b/c gamma requires positive shape
-      // parameter.
-      let gamma_a = Gamma::new((1.0e-6f32.max(node.values[j]) * n) as f64 + 1.0, 1.0);
-      let gamma_b = Gamma::new(n as f64 + 1.0, 1.0);
-      let x = gamma_a.ind_sample(&mut self.rng) as f32;
-      let y = gamma_b.ind_sample(&mut self.rng) as f32;
+      let succ_value = 0.0f32.max(node.values[j]) * n;
+      let fail_value = n - succ_value;
+      let gamma_succ = Gamma::new(succ_value as f64 + 1.0, 1.0);
+      let gamma_fail = Gamma::new(fail_value as f64 + 1.0, 1.0);
+      let x = gamma_succ.ind_sample(&mut self.rng) as f32;
+      let y = gamma_fail.ind_sample(&mut self.rng) as f32;
       let u = x / (x + y);
       if max_pos.is_none() || max_pos.unwrap().0 < u {
         max_pos = Some((u, mov, j));
@@ -343,8 +417,8 @@ impl SearchPolicy for ThompsonRaveSearchPolicy {
       println!("DEBUG: thompson policy:   argmax: ({}, {}) values: {:?}",
           j, node.num_trials[j], node.values);*/
       let j = array_argmax(&node.num_trials);
-      println!("DEBUG: thompson policy:   argmax: ({}, {})",
-          j, node.num_trials[j]);
+      println!("DEBUG: thompson policy:   argmax: ({}, {}, {:.4})",
+          j, node.num_trials[j], node.values[j]);
       println!("DEBUG: thompson policy:   trials: {:?}",
           node.num_trials);
       println!("DEBUG: thompson policy:   values: {:?}",
@@ -377,11 +451,15 @@ pub trait RolloutPolicy {
     unimplemented!();
   }
 
-  fn read_policy(&mut self, batch_size: usize) -> &[f32] {
+  fn read_policy(&mut self, batch_idx: usize) -> &[f32] {
     unimplemented!();
   }
 
-  fn read_policy_cdfs(&mut self, batch_size: usize) -> &[f32] {
+  fn read_policy_cdfs(&mut self, batch_idx: usize) -> &[f32] {
+    unimplemented!();
+  }
+
+  fn read_policy_argmax(&mut self, batch_idx: usize) -> i32 {
     unimplemented!();
   }
 }
@@ -502,14 +580,14 @@ impl ConvNetBatchRolloutPolicy {
     };
     let loss_layer_cfg = SoftmaxLossLayerConfig{
       num_categories: 361,
-      // FIXME(20151023): masking.
-      do_mask: false,
-      //do_mask: true,
+      do_mask: true,
     };
     let data_layer = DataLayer::new(0, data_layer_cfg, batch_size);
     let conv1_layer = Conv2dLayer::new(0, conv1_layer_cfg, batch_size, Some(&data_layer), &ctx);
     let conv2_layer = Conv2dLayer::new(0, conv2_layer_cfg, batch_size, Some(&conv1_layer), &ctx);
     let softmax_layer = SoftmaxLossLayer::new(0, loss_layer_cfg, batch_size, Some(&conv2_layer));
+
+    // XXX(20151028): The rollout convnet params minimize bias.
     let mut arch = LinearNetArch::new(
         PathBuf::from("experiments/models/convnet_19x19x4_conv_9x9x16R_conv_3x3x1"),
         batch_size,
@@ -530,11 +608,13 @@ impl ConvNetBatchRolloutPolicy {
 }
 
 impl RolloutPolicy for ConvNetBatchRolloutPolicy {
-  fn batch_size(&self) -> usize { 1 }
-  //fn batch_size(&self) -> usize { self.arch.batch_size() }
+  //fn batch_size(&self) -> usize { 1 }
+  fn batch_size(&self) -> usize { self.arch.batch_size() }
   fn execution_behavior(&self) -> ExecutionBehavior { ExecutionBehavior::DiscreteDist }
-  fn rollout_behavior(&self) -> RolloutBehavior { RolloutBehavior::SelectUniform }
+  //fn rollout_behavior(&self) -> RolloutBehavior { RolloutBehavior::SelectUniform }
+  fn rollout_behavior(&self) -> RolloutBehavior { RolloutBehavior::SelectEpsGreedy{eps: 0.05} }
   //fn rollout_behavior(&self) -> RolloutBehavior { RolloutBehavior::SelectKGreedy{top_k: 20} }
+  //fn rollout_behavior(&self) -> RolloutBehavior { RolloutBehavior::SampleDiscrete }
 
   fn preload_batch_state(&mut self, batch_idx: usize, state: &FastBoard) {
     let &mut ConvNetBatchRolloutPolicy{ref ctx, ref mut arch, ..} = self;
@@ -543,19 +623,19 @@ impl RolloutPolicy for ConvNetBatchRolloutPolicy {
     // the net must be relatively arranged. Do this by performing a special
     // permutation of the feature planes.
     arch.data_layer().preload_frame_permute(batch_idx, state.extract_features(), turn.offset(), ctx);
-    //arch.loss_layer().preload_mask(batch_idx, state.extract_mask(turn), ctx);
+    arch.loss_layer().preload_mask(batch_idx, state.extract_mask(turn), ctx);
   }
 
   fn execute_batch(&mut self, batch_size: usize) {
     let &mut ConvNetBatchRolloutPolicy{
       ref ctx, ref mut arch, ..} = self;
     arch.data_layer().load_frames(batch_size, ctx);
-    //arch.loss_layer().load_masks(batch_size, ctx);
+    arch.loss_layer().load_masks(batch_size, ctx);
     arch.evaluate(ctx);
     arch.loss_layer().store_labels(batch_size, &self.ctx);
     arch.loss_layer().store_cdfs(batch_size, &self.ctx);
     arch.loss_layer().store_probs(batch_size, &self.ctx);
-    let labels = arch.loss_layer().predict_labels(batch_size, &self.ctx);
+    //let labels = arch.loss_layer().predict_labels(batch_size, &self.ctx);
     //println!("DEBUG: convnet policy: labels: {:?}", labels);
   }
 
@@ -571,5 +651,11 @@ impl RolloutPolicy for ConvNetBatchRolloutPolicy {
     let batch_cdfs = &self.arch.loss_layer().predict_cdfs(batch_size, &self.ctx)
       .as_slice()[batch_idx * FastBoard::BOARD_SIZE .. (batch_idx + 1) * FastBoard::BOARD_SIZE];
     batch_cdfs
+  }
+
+  fn read_policy_argmax(&mut self, batch_idx: usize) -> i32 {
+    let batch_size = self.arch.batch_size();
+    let labels = self.arch.loss_layer().predict_labels(batch_size, &self.ctx)[batch_idx];
+    labels
   }
 }

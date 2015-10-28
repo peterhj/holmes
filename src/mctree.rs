@@ -1,5 +1,5 @@
 use fastboard::{PosExt, Pos, Action, Stone, FastBoard, FastBoardAux, FastBoardWork};
-use policy::{SearchPolicy, RolloutPolicy};
+use policy::{PriorPolicy, SearchPolicy, RolloutPolicy};
 use random::{XorShift128PlusRng, arg_choose, choose_without_replace};
 
 use statistics_avx2::array::{array_prefix_sum};
@@ -8,6 +8,7 @@ use statistics_avx2::random::{StreamRng};
 use bit_set::{BitSet};
 use rand::{Rng, SeedableRng, thread_rng};
 use std::cell::{RefCell};
+use std::cmp::{max, min};
 use std::collections::{HashMap};
 use std::iter::{repeat};
 use std::rc::{Rc, Weak};
@@ -15,6 +16,7 @@ use std::rc::{Rc, Weak};
 #[derive(Clone, Copy, Debug)]
 pub enum RolloutBehavior {
   SelectUniform,
+  SelectEpsGreedy{eps: f32},
   SelectKGreedy{top_k: usize},
   SampleDiscrete,
 }
@@ -295,6 +297,7 @@ pub struct McSearchProblem<'a> {
   rng:  XorShift128PlusRng,
   max_playouts:   usize,
   batch_size:     usize,
+  prior_policy:   &'a mut PriorPolicy,
   search_policy:  &'a mut SearchPolicy,
   rollout_policy: &'a mut RolloutPolicy,
   tree:           &'a mut McSearchTree,
@@ -302,7 +305,7 @@ pub struct McSearchProblem<'a> {
 }
 
 impl<'a> McSearchProblem<'a> {
-  pub fn new(max_playouts: usize, search_policy: &'a mut SearchPolicy, rollout_policy: &'a mut RolloutPolicy, tree: &'a mut McSearchTree) -> McSearchProblem<'a> {
+  pub fn new(max_playouts: usize, prior_policy: &'a mut PriorPolicy, search_policy: &'a mut SearchPolicy, rollout_policy: &'a mut RolloutPolicy, tree: &'a mut McSearchTree) -> McSearchProblem<'a> {
     let batch_size = rollout_policy.batch_size();
     let mut trajs = Vec::with_capacity(batch_size);
     for _ in (0 .. batch_size) {
@@ -312,6 +315,7 @@ impl<'a> McSearchProblem<'a> {
       rng:  XorShift128PlusRng::from_seed([thread_rng().next_u64(), thread_rng().next_u64()]),
       max_playouts:   max_playouts,
       batch_size:     batch_size,
+      prior_policy:   prior_policy,
       search_policy:  search_policy,
       rollout_policy: rollout_policy,
       tree:           tree,
@@ -326,16 +330,23 @@ impl<'a> McSearchProblem<'a> {
     println!("DEBUG: mc search problem: num batches: {} batch size: {} behavior: {:?}",
         num_batches, batch_size, behavior);
 
+    let mut work = FastBoardWork::new();
     let mut scores: HashMap<i32, usize> = HashMap::new();
+
+    // TODO(20151028): If equipped with a batch prior, initialize the root.
+    //self.prior_policy.preload_batch_state(0, 
+
     for batch in (0 .. num_batches) {
       for batch_idx in (0 .. batch_size) {
         self.tree.walk(self.search_policy, &mut self.trajs[batch_idx]);
       }
 
+      // TODO(20151028): If equipped with a batch prior, initialize new leaf
+      // nodes.
+
       match behavior {
         RolloutBehavior::SelectUniform => {
           // TODO(20151024)
-          let mut work = FastBoardWork::new();
           for batch_idx in (0 .. batch_size) {
             let mut valid_moves = self.trajs[batch_idx].leaf_node.as_ref().unwrap().borrow()
                 .valid_moves.clone();
@@ -364,7 +375,9 @@ impl<'a> McSearchProblem<'a> {
                 break;
               }
               depth += 1;
-              if depth >= 210 {
+              //if depth >= 210 {
+              //if depth >= 240 {
+              if depth >= 360 {
                 break;
               }
             }
@@ -374,18 +387,77 @@ impl<'a> McSearchProblem<'a> {
           }
         }
 
-        RolloutBehavior::SelectKGreedy{top_k} => {
+        RolloutBehavior::SelectEpsGreedy{eps} => {
+          let mut valid_moves = Vec::new();
+          let mut min_valid_moves_len = 1000;
+          for batch_idx in (0 .. batch_size) {
+            valid_moves.push(self.trajs[batch_idx].leaf_node.as_ref().unwrap().borrow()
+              .valid_moves.clone());
+            min_valid_moves_len = min(min_valid_moves_len, valid_moves[batch_idx].len());
+          }
+          let mut valid_plays = 0;
+          let mut total_plays = 0;
+          let mut num_term = 0;
+          let mut depth = 0;
           loop {
-            // TODO: prepare states.
+            // TODO(20151028): epsilon-greedy part.
             for batch_idx in (0 .. batch_size) {
+              self.rollout_policy.preload_batch_state(batch_idx, &self.trajs[batch_idx].state);
             }
-
-            // TODO: execute rollout policy.
-
-            // TODO: transition states.
+            self.rollout_policy.execute_batch(batch_size);
+            //let mut greedy_moves = Vec::new();
+            //let mut greedy_stones =Vec::new();
+            num_term = 0;
             for batch_idx in (0 .. batch_size) {
+              if valid_moves[batch_idx].is_empty() {
+                num_term += 1;
+                continue;
+              }
+              let greedy_pos = self.rollout_policy.read_policy_argmax(batch_idx) as Pos;
+              //greedy_moves.push(greedy_pos);
+              //greedy_stones.push(self.trajs[batch_idx].state.get_stone(greedy_pos));
+              let turn = self.trajs[batch_idx].state.current_turn();
+              if self.trajs[batch_idx].state.is_legal_move_fast(turn, greedy_pos) {
+                self.trajs[batch_idx].state.play(turn, Action::Place{pos: greedy_pos}, &mut work, &mut None, false);
+                self.trajs[batch_idx].rollout_moves.push((turn, greedy_pos));
+                valid_plays += 1;
+              } else {
+                while !valid_moves[batch_idx].is_empty() {
+                  let pos = choose_without_replace(&mut valid_moves[batch_idx], &mut self.rng);
+                  if let Some(pos) = pos {
+                    if self.trajs[batch_idx].state.is_legal_move_fast(turn, pos) {
+                      self.trajs[batch_idx].state.play(turn, Action::Place{pos: pos}, &mut work, &mut None, false);
+                      self.trajs[batch_idx].rollout_moves.push((turn, pos));
+                      break;
+                    }
+                  }
+                }
+              }
+              total_plays += 1;
+            }
+            /*println!("DEBUG: mc search: rollout step: {} greedy moves: {:?}",
+                depth, &greedy_moves);
+            println!("DEBUG: mc search: rollout step: {} greedy stones: {:?}",
+                depth, &greedy_stones);*/
+            depth += 1;
+            if depth >= 360 {
+              break;
+            }
+            if num_term >= max((batch_size + 1) / 2, batch_size - 4) {
+              break;
             }
           }
+          println!("DEBUG: mc search: rollout: batch {}/{} depth {} min val moves: {} valid plays {}/{} num term: {}",
+              batch, num_batches, depth, min_valid_moves_len, valid_plays, total_plays, num_term);
+          for batch_idx in (0 .. batch_size) {
+            let score = self.trajs[batch_idx].state.score_fast(0.5);
+            self.trajs[batch_idx].score = Some(score);
+          }
+        }
+
+        RolloutBehavior::SelectKGreedy{top_k} => {
+          // TODO(20151024)
+          unimplemented!();
         }
 
         RolloutBehavior::SampleDiscrete => {

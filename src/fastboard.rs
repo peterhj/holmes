@@ -497,7 +497,7 @@ impl FastBoardAux {
         }
 
         // Position is an opponent's eye.
-        if board.is_eye1(stone, pos) {
+        if board.is_opponent_eye1(stone, pos) {
           if verbose {
             println!("DEBUG: illegal move: playing in opponent's 1-eye");
           }
@@ -881,7 +881,7 @@ impl FastBoard {
   #[inline]
   pub fn is_occupied(&self, pos: Pos) -> bool {
     // Position is not occupied.
-    if self.stones[pos.idx()] != Stone::Empty {
+    if self.stones[pos.idx()] == Stone::Empty {
       false
     } else {
       true
@@ -916,7 +916,7 @@ impl FastBoard {
   }
 
   #[inline]
-  pub fn is_eye1(&self, stone: Stone, pos: Pos) -> bool {
+  pub fn is_opponent_eye1(&self, stone: Stone, pos: Pos) -> bool {
     // Approximate definition of an eye:
     // 1. surrounded on all sides by the opponent's chains;
     // 2. the surrounding chains each have at least 2 liberties.
@@ -955,8 +955,11 @@ impl FastBoard {
     if self.is_occupied(pos) {
       return false;
     }
-    //if self.is_single_eye(stone, pos) {
-    if self.is_eyelike(stone, pos) {
+    //if self.is_eyelike(stone, pos) {
+    if self.is_opponent_eye1(stone, pos) {
+      return false;
+    }
+    if self.is_opponent_eye1(stone.opponent(), pos) {
       return false;
     }
     // FIXME(20151009): ko rule.

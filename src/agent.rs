@@ -4,6 +4,7 @@ use fasttree::{FastSearchTree, SearchResult, Trajectory};
 use gtp_board::{Player, Coord, Vertex, RuleSystem, TimeSystem, MoveResult, UndoResult};
 use mctree::{McSearchTree, McSearchProblem};
 use policy::{
+  PriorPolicy, NoPriorPolicy, ConvNetBatchPriorPolicy,
   SearchPolicy, UctSearchPolicy, ThompsonRaveSearchPolicy,
   RolloutPolicy, QuasiUniformRolloutPolicy, ConvNetBatchRolloutPolicy,
 };
@@ -143,6 +144,8 @@ pub struct Agent {
   valid:          bool,
   config:         AgentConfig,
 
+  prior_policy:   NoPriorPolicy,
+  //prior_policy:   ConvNetBatchPriorPolicy,
   search_policy:  ThompsonRaveSearchPolicy,
   //rollout_policy: QuasiUniformRolloutPolicy,
   rollout_policy: ConvNetBatchRolloutPolicy,
@@ -166,6 +169,8 @@ impl Agent {
       valid:          false,
       config:         Default::default(),
 
+      prior_policy:   NoPriorPolicy,
+      //prior_policy:   ConvNetBatchPriorPolicy::new(),
       //search_policy:  UctSearchPolicy{c: 0.5},
       search_policy:  ThompsonRaveSearchPolicy::new(),
       //rollout_policy: QuasiUniformRolloutPolicy::new(),
@@ -214,8 +219,12 @@ impl Agent {
 
   pub fn begin_search<'a>(&'a mut self) -> McSearchProblem<'a> {
     // TODO(20151024)
-    let &mut Agent{ref mut search_policy, ref mut rollout_policy, ref mut tree, ..} = self;
-    McSearchProblem::new(50000, search_policy, rollout_policy, tree)
+    let &mut Agent{
+      ref mut prior_policy,
+      ref mut search_policy,
+      ref mut rollout_policy,
+      ref mut tree, ..} = self;
+    McSearchProblem::new(10000, prior_policy, search_policy, rollout_policy, tree)
 
     /*let mut tree = FastSearchTree::new();
     //tree.reset(&self.current_state, &self.current_aux, self.current_ply as i32, 0.0);
