@@ -460,10 +460,8 @@ impl FastBoardAux {
         }
 
         // Check the play is not at the ko point.
-        if let Some(ko) = board.ko {
-          if ko == pos {
-            return Some(ActionStatus::IllegalKo);
-          }
+        if board.is_simple_ko(stone, pos) {
+          return Some(ActionStatus::IllegalKo);
         }
 
         // Check more complex scenarios (captures, mostly) by playing out the move.
@@ -949,6 +947,44 @@ impl FastBoard {
     }
   }
 
+  #[inline]
+  pub fn is_simple_ko(&self, stone: Stone, pos: Pos) -> bool {
+    if let Some(ko) = self.ko {
+      if ko != pos {
+        return false;
+      }
+      // XXX(20151030): more sophisticated ko check:
+      // - of the opponent points surrounding the ko point, one of them is the
+      //   last placed point
+      // - of the opponent points surrounding the ko point, the last placed
+      //   point is size 1 and is the one and only one in atari
+      if let Some(last_pos) = self.last_pos {
+        let oppo_stone = stone.opponent();
+        let mut min_nonlast_libs = 2;
+        let mut last_libs = 0;
+        let mut last_size = 0;
+        FastBoard::for_each_adjacent(ko, |adj_pos| {
+          if self.stones[adj_pos.idx()] == oppo_stone {
+            let adj_head = self.traverse_chain_slow(adj_pos);
+            assert!(adj_head != TOMBSTONE);
+            let adj_chain = self.get_chain(adj_head);
+            let adj_libs = adj_chain.approx_count_liberties();
+            if last_pos == adj_pos {
+              last_libs = adj_libs;
+              last_size = self.ch_sizes[adj_head.idx()];
+            } else {
+              min_nonlast_libs = min(min_nonlast_libs, adj_libs);
+            }
+          }
+        });
+        if min_nonlast_libs == 2 && last_libs == 1 && last_size == 1 {
+          return true;
+        }
+      }
+    }
+    false
+  }
+
   pub fn is_legal_move_fast(&self, stone: Stone, pos: Pos) -> bool {
     // Check the point is not occupied.
     if self.is_occupied(pos) {
@@ -961,10 +997,8 @@ impl FastBoard {
     }
 
     // Check we do not place at the ko point.
-    if let Some(ko) = self.ko {
-      if ko == pos {
-        return false;
-      }
+    if self.is_simple_ko(stone, pos) {
+      return false;
     }
 
     // XXX(20151029): This next rule (avoid filling our own eyes) is less of a
