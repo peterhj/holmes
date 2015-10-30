@@ -50,12 +50,14 @@ pub fn choose_without_replace<T: Copy, R: Rng>(xs: &mut Vec<T>, rng: &mut R) -> 
   }
 }
 
-pub fn sample_discrete_cdf<R>(cdf: &[f32], rng: &mut R) -> usize where R: StreamRng {
-  let mut u = [0.0f32];
-  rng.sample_uniform_f32(&mut u);
-  let j = array_binary_search(cdf, u[0]);
+pub fn sample_discrete_cdf<R>(cdf: &[f32], rng: &mut R) -> usize where R: Rng {
+  let u: f32 = rng.gen_range(0.0, 1.0);
+  let j = array_binary_search(cdf, u);
   assert!(j < cdf.len());
-  assert!(cdf[j] <= u[0]);
+  assert!(cdf[j] <= u);
+  if j < cdf.len() - 1 {
+    assert!(u < cdf[j+1]);
+  }
   j
 }
 
@@ -66,6 +68,9 @@ pub fn sample_discrete_cdf_scaled<R>(cdf: &[f32], rng: &mut R) -> usize where R:
   let j = array_binary_search(cdf, scale * u[0]);
   assert!(j < cdf.len());
   assert!(cdf[j] <= u[0]);
+  if j < cdf.len() - 1 {
+    assert!(u[0] < cdf[j+1]);
+  }
   j
 }
 
@@ -110,6 +115,11 @@ impl<'a> SeedableRng<&'a [u64]> for XorShift128PlusRng {
     assert!(seed.len() >= 1);
     for p in (0 .. min(2usize, seed.len())) {
       self.state[p] = seed[p];
+    }
+    // XXX: This increases the initial state entropy (many zeros to half zeros).
+    // See Figure 4 in <http://arxiv.org/abs/1404.0390> for details.
+    for _ in (0 .. 20) {
+      let _ = self.next_u64();
     }
   }
 

@@ -1,5 +1,5 @@
 use fastboard::{PosExt, Pos, Action, Stone, FastBoard, FastBoardAux, FastBoardWork};
-use fasttree::{ExecutionBehavior, Trajectory, NodeId, FastSearchNode, FastSearchTree};
+//use fasttree::{ExecutionBehavior, Trajectory, NodeId, FastSearchNode, FastSearchTree};
 use mctree::{RolloutBehavior, McTrajectory, McNode, McSearchTree};
 use random::{XorShift128PlusRng, choose_without_replace, sample_discrete_cdf};
 
@@ -24,6 +24,18 @@ use std::path::{PathBuf};
 
 pub trait PriorPolicy {
   fn batch_size(&self) -> usize;
+
+  fn preload_batch_state(&mut self, batch_idx: usize, state: &FastBoard, aux_state: &FastBoardAux) {
+    unimplemented!();
+  }
+
+  fn execute_batch(&mut self, batch_size: usize) {
+    unimplemented!();
+  }
+
+  fn read_policy(&mut self, batch_idx: usize) -> &[f32] {
+    unimplemented!();
+  }
 }
 
 pub struct NoPriorPolicy;
@@ -32,13 +44,13 @@ impl PriorPolicy for NoPriorPolicy {
   fn batch_size(&self) -> usize { 1 }
 }
 
-pub struct ConvNetBatchPriorPolicy {
+pub struct ConvNetPriorPolicy {
   ctx:    DeviceContext,
   arch:   LinearNetArch,
 }
 
-impl ConvNetBatchPriorPolicy {
-  pub fn new() -> ConvNetBatchPriorPolicy {
+impl ConvNetPriorPolicy {
+  pub fn new() -> ConvNetPriorPolicy {
     let ctx = DeviceContext::new(0);
     let batch_size = 256;
     let num_hidden = 16;
@@ -64,8 +76,8 @@ impl ConvNetBatchPriorPolicy {
     let loss_layer_cfg = SoftmaxLossLayerConfig{
       num_categories: 361,
       // FIXME(20151023): masking.
-      do_mask: false,
-      //do_mask: true,
+      //do_mask: false,
+      do_mask: true,
     };
     let data_layer = DataLayer::new(0, data_layer_cfg, batch_size);
     let conv1_layer = Conv2dLayer::new(0, conv1_layer_cfg, batch_size, Some(&data_layer), &ctx);
@@ -85,22 +97,51 @@ impl ConvNetBatchPriorPolicy {
     );
     arch.load_layer_params(None, &ctx);
 
-    ConvNetBatchPriorPolicy {
+    ConvNetPriorPolicy {
       ctx:  ctx,
       arch: arch,
     }
   }
 }
 
-impl PriorPolicy for ConvNetBatchPriorPolicy {
+impl PriorPolicy for ConvNetPriorPolicy {
   //fn batch_size(&self) -> usize { 256 }
   fn batch_size(&self) -> usize { self.arch.batch_size() }
+
+  fn preload_batch_state(&mut self, batch_idx: usize, state: &FastBoard, aux_state: &FastBoardAux) {
+    let &mut ConvNetPriorPolicy{ref ctx, ref mut arch} = self;
+    let turn = state.current_turn();
+    // XXX: FastBoard features are absolutely arranged; the features we feed to
+    // the net must be relatively arranged. Do this by performing a special
+    // permutation of the feature planes.
+    arch.data_layer().preload_frame_permute(batch_idx, state.extract_features(), turn.offset(), ctx);
+    // TODO(20151029): preload mask using aux state legal moves mask.
+    arch.loss_layer().preload_mask(batch_idx, state.extract_legal_mask(turn), ctx);
+  }
+
+  fn execute_batch(&mut self, batch_size: usize) {
+    let &mut ConvNetPriorPolicy{ref ctx, ref mut arch} = self;
+    arch.data_layer().load_frames(batch_size, ctx);
+    arch.loss_layer().load_masks(batch_size, ctx);
+    arch.evaluate(ctx);
+    arch.loss_layer().store_labels(batch_size, &self.ctx);
+    arch.loss_layer().store_probs(batch_size, &self.ctx);
+    arch.loss_layer().store_cdfs(batch_size, &self.ctx);
+    //println!("DEBUG: convnet policy: labels: {:?}", labels);
+  }
+
+  fn read_policy(&mut self, batch_idx: usize) -> &[f32] {
+    let batch_size = self.arch.batch_size();
+    let batch_probs = &self.arch.loss_layer().predict_probs(batch_size, &self.ctx)
+      .as_slice()[batch_idx * FastBoard::BOARD_SIZE .. (batch_idx + 1) * FastBoard::BOARD_SIZE];
+    batch_probs
+  }
 }
 
 pub trait SearchPolicy {
-  fn backup(&self, tree: &mut FastSearchTree, traj: &Trajectory) -> usize { unimplemented!(); }
+  /*fn backup(&self, tree: &mut FastSearchTree, traj: &Trajectory) -> usize { unimplemented!(); }
   fn execute_search(&self, node: &FastSearchNode) -> Action { unimplemented!(); }
-  fn execute_best(&self, node: &FastSearchNode) -> Action { unimplemented!(); }
+  fn execute_best(&self, node: &FastSearchNode) -> Action { unimplemented!(); }*/
 
   fn backup_new(&mut self, traj: &mut McTrajectory) { unimplemented!(); }
   fn execute_search_new(&mut self, node: &McNode) -> Option<(Pos, usize)> { unimplemented!(); }
@@ -303,23 +344,27 @@ impl ThompsonRaveSearchPolicy {
   }*/
 
   fn backup_node_new(node: &mut McNode) {
-    let equiv_n = 1000.0;
-    //let beta = (0.5 * equiv_n / (node.total_visits + equiv_n)).sqrt();
+    let equiv_rn = 3000.0;
+    let equiv_bias = 1000.0;
     for j in (0 .. node.values.len()) {
       let n = node.num_trials[j];
       let s = node.num_succs[j];
-      let pn = node.num_trials_prior[j];
-      let ps = node.num_succs_prior[j];
       let rn = node.num_trials_rave[j];
       let rs = node.num_succs_rave[j];
-      let val_mc = (s + ps) / (n + pn);
+      let val_mc = 1.0e-4f32.max(s / n);
+      let val_bias = node.bias_values[j];
+      // FIXME(20151029): if this sqrt() turns out to be slow, can transform
+      // into an invsqrt approx.
+      let beta_bias = (equiv_bias / (equiv_bias + n)).sqrt();
       if rn == 0.0 {
-        node.values[j] = val_mc
+        node.values[j] = val_mc + beta_bias * val_bias;
       } else {
-        // XXX(20151027): This version of the RAVE beta is from michi.
-        let beta = rn / (rn + (n + pn) + (n + pn) * rn / equiv_n);
+        // XXX(20151027): This version of the RAVE beta is due to Silver:
+        // <http://www.yss-aya.com/rave.pdf>.
+        //let beta = rn / (rn + (n + pn) + (n + pn) * rn / equiv_rn);
+        let beta_rave = rn / (rn + n + n * rn / equiv_rn);
         let val_rave = rs / rn;
-        node.values[j] = (1.0 - beta) * val_mc + beta * val_rave;
+        node.values[j] = (1.0 - beta_rave) * val_mc + beta_rave * val_rave + beta_bias * val_bias;
       }
     }
   }
@@ -347,7 +392,7 @@ impl SearchPolicy for ThompsonRaveSearchPolicy {
           }
         }
         if update_j.is_none() {
-          println!("WARNING: uct policy: backup: leaf node is missing first rollout move!");
+          println!("WARNING: thompson policy: backup: leaf node is missing first rollout move!");
           return;
         }
         let mut leaf_node = leaf_node.borrow_mut();
@@ -440,7 +485,6 @@ pub trait RolloutPolicy {
   }*/
 
   fn batch_size(&self) -> usize;
-  fn execution_behavior(&self) -> ExecutionBehavior;
   fn rollout_behavior(&self) -> RolloutBehavior;
 
   fn preload_batch_state(&mut self, batch_idx: usize, state: &FastBoard) {
@@ -455,7 +499,7 @@ pub trait RolloutPolicy {
     unimplemented!();
   }
 
-  fn read_policy_cdfs(&mut self, batch_idx: usize) -> &[f32] {
+  fn read_policy_cdf(&mut self, batch_idx: usize) -> &[f32] {
     unimplemented!();
   }
 
@@ -536,7 +580,6 @@ impl QuasiUniformRolloutPolicy {
 
 impl RolloutPolicy for QuasiUniformRolloutPolicy {
   fn batch_size(&self) -> usize { 1 }
-  fn execution_behavior(&self) -> ExecutionBehavior { ExecutionBehavior::Uniform }
   fn rollout_behavior(&self) -> RolloutBehavior { RolloutBehavior::SelectUniform }
 
   fn preload_batch_state(&mut self, batch_idx: usize, state: &FastBoard) {
@@ -580,6 +623,8 @@ impl ConvNetBatchRolloutPolicy {
     };
     let loss_layer_cfg = SoftmaxLossLayerConfig{
       num_categories: 361,
+      // FIXME(20151028): To mask or not to mask?
+      //do_mask: false,
       do_mask: true,
     };
     let data_layer = DataLayer::new(0, data_layer_cfg, batch_size);
@@ -610,9 +655,8 @@ impl ConvNetBatchRolloutPolicy {
 impl RolloutPolicy for ConvNetBatchRolloutPolicy {
   //fn batch_size(&self) -> usize { 1 }
   fn batch_size(&self) -> usize { self.arch.batch_size() }
-  fn execution_behavior(&self) -> ExecutionBehavior { ExecutionBehavior::DiscreteDist }
   //fn rollout_behavior(&self) -> RolloutBehavior { RolloutBehavior::SelectUniform }
-  fn rollout_behavior(&self) -> RolloutBehavior { RolloutBehavior::SelectEpsGreedy{eps: 0.05} }
+  fn rollout_behavior(&self) -> RolloutBehavior { RolloutBehavior::SelectGreedy }
   //fn rollout_behavior(&self) -> RolloutBehavior { RolloutBehavior::SelectKGreedy{top_k: 20} }
   //fn rollout_behavior(&self) -> RolloutBehavior { RolloutBehavior::SampleDiscrete }
 
@@ -623,7 +667,7 @@ impl RolloutPolicy for ConvNetBatchRolloutPolicy {
     // the net must be relatively arranged. Do this by performing a special
     // permutation of the feature planes.
     arch.data_layer().preload_frame_permute(batch_idx, state.extract_features(), turn.offset(), ctx);
-    arch.loss_layer().preload_mask(batch_idx, state.extract_mask(turn), ctx);
+    arch.loss_layer().preload_mask(batch_idx, state.extract_legal_mask(turn), ctx);
   }
 
   fn execute_batch(&mut self, batch_size: usize) {
@@ -633,9 +677,8 @@ impl RolloutPolicy for ConvNetBatchRolloutPolicy {
     arch.loss_layer().load_masks(batch_size, ctx);
     arch.evaluate(ctx);
     arch.loss_layer().store_labels(batch_size, &self.ctx);
-    arch.loss_layer().store_cdfs(batch_size, &self.ctx);
     arch.loss_layer().store_probs(batch_size, &self.ctx);
-    //let labels = arch.loss_layer().predict_labels(batch_size, &self.ctx);
+    arch.loss_layer().store_cdfs(batch_size, &self.ctx);
     //println!("DEBUG: convnet policy: labels: {:?}", labels);
   }
 
@@ -646,16 +689,16 @@ impl RolloutPolicy for ConvNetBatchRolloutPolicy {
     batch_probs
   }
 
-  fn read_policy_cdfs(&mut self, batch_idx: usize) -> &[f32] {
+  fn read_policy_cdf(&mut self, batch_idx: usize) -> &[f32] {
     let batch_size = self.arch.batch_size();
-    let batch_cdfs = &self.arch.loss_layer().predict_cdfs(batch_size, &self.ctx)
+    let batch_cdf = &self.arch.loss_layer().predict_cdfs(batch_size, &self.ctx)
       .as_slice()[batch_idx * FastBoard::BOARD_SIZE .. (batch_idx + 1) * FastBoard::BOARD_SIZE];
-    batch_cdfs
+    batch_cdf
   }
 
   fn read_policy_argmax(&mut self, batch_idx: usize) -> i32 {
     let batch_size = self.arch.batch_size();
-    let labels = self.arch.loss_layer().predict_labels(batch_size, &self.ctx)[batch_idx];
-    labels
+    let label = self.arch.loss_layer().predict_labels(batch_size, &self.ctx)[batch_idx];
+    label
   }
 }

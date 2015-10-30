@@ -1,15 +1,15 @@
 use book::{OpeningBook};
 use fastboard::{PosExt, Pos, Stone, Action, ActionStatus, FastBoard, FastBoardAux, FastBoardWork};
-use fasttree::{FastSearchTree, SearchResult, Trajectory};
+//use fasttree::{FastSearchTree, SearchResult, Trajectory};
 use gtp_board::{Player, Coord, Vertex, RuleSystem, TimeSystem, MoveResult, UndoResult};
 use mctree::{McSearchTree, McSearchProblem};
 use policy::{
-  PriorPolicy, NoPriorPolicy, ConvNetBatchPriorPolicy,
+  PriorPolicy, NoPriorPolicy, ConvNetPriorPolicy,
   SearchPolicy, UctSearchPolicy, ThompsonRaveSearchPolicy,
   RolloutPolicy, QuasiUniformRolloutPolicy, ConvNetBatchRolloutPolicy,
 };
 use random::{random_shuffle};
-use search::{SearchProblem, BatchSearchProblem};
+//use search::{SearchProblem, BatchSearchProblem};
 
 use statistics_avx2::random::{StreamRng, XorShift128PlusStreamRng};
 
@@ -145,7 +145,7 @@ pub struct Agent {
   config:         AgentConfig,
 
   prior_policy:   NoPriorPolicy,
-  //prior_policy:   ConvNetBatchPriorPolicy,
+  //prior_policy:   ConvNetPriorPolicy,
   search_policy:  ThompsonRaveSearchPolicy,
   //rollout_policy: QuasiUniformRolloutPolicy,
   rollout_policy: ConvNetBatchRolloutPolicy,
@@ -170,7 +170,7 @@ impl Agent {
       config:         Default::default(),
 
       prior_policy:   NoPriorPolicy,
-      //prior_policy:   ConvNetBatchPriorPolicy::new(),
+      //prior_policy:   ConvNetPriorPolicy::new(),
       //search_policy:  UctSearchPolicy{c: 0.5},
       search_policy:  ThompsonRaveSearchPolicy::new(),
       //rollout_policy: QuasiUniformRolloutPolicy::new(),
@@ -269,7 +269,7 @@ impl Agent {
         self.state_history.push((current_state.clone(), current_aux.clone()));
         self.action_history.push((turn, action));
         current_state.play(turn, action, work, &mut Some(current_aux), true);
-        current_aux.update(turn, &current_state, work, tmp_board, tmp_aux);
+        current_aux.update(turn, current_state, work, tmp_board, tmp_aux);
         if let Action::Place{pos} = action {
           // FIXME(20151026): drop the tree?
           self.tree = McSearchTree::new_with_root(current_state.clone(), current_aux.clone());

@@ -3,7 +3,7 @@ set -e
 set -u
 
 #GNUGO_FLAGS="--level 8"
-GNUGO_FLAGS="--level 1 --positional-superko"
+GNUGO_FLAGS="--level 0 --chinese-rules --positional-superko"
 GNUGO="../bin/gnugo ${GNUGO_FLAGS} --mode gtp --gtp-connect 127.0.0.1:6061"
 
 HOLMES_PRELUDE=
