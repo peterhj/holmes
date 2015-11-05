@@ -69,12 +69,14 @@ pub struct McNode {
   pub total_visits:     f32,
   pub num_trials:       Vec<f32>,
   pub num_succs:        Vec<f32>,
+  pub num_trials_prior: Vec<f32>,
+  pub num_succs_prior:  Vec<f32>,
   pub num_trials_rave:  Vec<f32>,
   pub num_succs_rave:   Vec<f32>,
   // TODO(20151028): Bias should be initialized with prior like the following:
   // <http://computer-go.org/pipermail/computer-go/2014-November/006956.html>
   // <http://computer-go.org/pipermail/computer-go/2015-September/007910.html>
-  pub bias_values:      Vec<f32>,
+  //pub bias_values:      Vec<f32>,
   pub values:           Vec<f32>,
 }
 
@@ -98,7 +100,7 @@ impl McNode {
           .iter()
           .map(|p| p as Pos)
           .collect();
-    rng.shuffle(&mut valid_moves);
+    //rng.shuffle(&mut valid_moves);
     let num_moves = valid_moves.len();
     McNode{
       parent_node:  parent.map(|ref node| Rc::downgrade(node)),
@@ -109,9 +111,11 @@ impl McNode {
       total_visits:     0.0,
       num_trials:       repeat(0.0).take(num_moves).collect(),
       num_succs:        repeat(0.0).take(num_moves).collect(),
+      num_trials_prior: repeat(0.0).take(num_moves).collect(),
+      num_succs_prior:  repeat(0.0).take(num_moves).collect(),
       num_trials_rave:  repeat(0.0).take(num_moves).collect(),
       num_succs_rave:   repeat(0.0).take(num_moves).collect(),
-      bias_values:      repeat(0.0).take(num_moves).collect(),
+      //bias_values:      repeat(0.0).take(num_moves).collect(),
       values:           repeat(0.0).take(num_moves).collect(),
     }
   }
@@ -153,6 +157,19 @@ impl McNode {
     reward
   }
 
+  pub fn initialize_bias(&mut self, prior_pdf: &[f32]) {
+    let &mut McNode{ref valid_moves,
+      //ref mut bias_values,
+      ref mut num_trials_prior, ref mut num_succs_prior,
+      ..} = self;
+    let equiv_prior = 25.0;
+    for (j, &mov) in valid_moves.iter().enumerate() {
+      //bias_values[j] = 0.01 * (1.0 + 1.0f32.max(1000.0 * prior_pdf[mov.idx()])).ln();
+      num_trials_prior[j] = equiv_prior;
+      num_succs_prior[j] = 0.0f32.max(prior_pdf[mov.idx()] * equiv_prior);
+    }
+  }
+
   pub fn credit_arm(&mut self, j: usize, expected_move: Pos, outcome: f32) {
     if self.valid_moves[j] != expected_move {
       println!("WARNING: thompson policy: node valid mov index {} is not {:?}!",
@@ -169,11 +186,41 @@ impl McNode {
     let turn_off = turn.offset();
     let reward = self.get_relative_reward(outcome);
     let &mut McNode{ref valid_moves,
-      ref mut num_trials_rave, ref mut num_succs_rave, ..} = self;
+      ref mut num_trials_rave, ref mut num_succs_rave,
+      ..} = self;
     for (j, &mov) in valid_moves.iter().enumerate() {
       if rave_mask[turn_off].contains(&mov.idx()) {
         num_trials_rave[j] += 1.0;
         num_succs_rave[j] += reward;
+      }
+    }
+  }
+
+  pub fn evaluate(&mut self) {
+    let equiv_rn = 3000.0;
+    //let equiv_bias = 1000.0;
+    for j in (0 .. self.values.len()) {
+      let n = self.num_trials[j];
+      let s = self.num_succs[j];
+      let pn = self.num_trials_prior[j];
+      let ps = self.num_succs_prior[j];
+      let rn = self.num_trials_rave[j];
+      let rs = self.num_succs_rave[j];
+      let val_mc = 0.0f32.max((s + ps) / (n + pn));
+      //let val_bias = self.bias_values[j];
+      // FIXME(20151029): if this sqrt() turns out to be slow, can transform
+      // into an invsqrt approx.
+      //let beta_bias = (equiv_bias / (equiv_bias + n)).sqrt();
+      if rn == 0.0 {
+        //self.values[j] = val_mc + beta_bias * val_bias;
+        self.values[j] = val_mc;
+      } else {
+        // XXX(20151027): This version of the RAVE beta is due to Silver:
+        // <http://www.yss-aya.com/rave.pdf>.
+        let beta_rave = rn / (rn + (n + pn) + (n + pn) * rn / equiv_rn);
+        let val_rave = rs / rn;
+        //self.values[j] = (1.0 - beta_rave) * val_mc + beta_rave * val_rave + beta_bias * val_bias;
+        self.values[j] = (1.0 - beta_rave) * val_mc + beta_rave * val_rave;
       }
     }
   }
@@ -333,6 +380,7 @@ impl<'a> McSearchProblem<'a> {
 
     let &mut McSearchProblem{
       ref mut rng,
+      ref mut prior_policy,
       ref mut rollout_policy,
       ..} = self;
 
@@ -340,11 +388,20 @@ impl<'a> McSearchProblem<'a> {
     let mut scores: HashMap<i32, usize> = HashMap::new();
 
     // TODO(20151028): If equipped with a batch prior, initialize the root.
-    //self.prior_policy.preload_batch_state(0, 
+    prior_policy.evaluate(&self.tree.root_node.borrow().state);
+    self.tree.root_node.borrow_mut().initialize_bias(prior_policy.read_prior());
+    self.tree.root_node.borrow_mut().evaluate();
+    println!("DEBUG: mc search: root prior values: {:?}",
+        self.tree.root_node.borrow().values);
 
     for batch in (0 .. num_batches) {
       for batch_idx in (0 .. batch_size) {
         self.tree.walk(self.search_policy, &mut self.trajs[batch_idx]);
+        if let Some(ref mut leaf_node) = self.trajs[batch_idx].leaf_node {
+          prior_policy.evaluate(&leaf_node.borrow().state);
+          leaf_node.borrow_mut().initialize_bias(prior_policy.read_prior());
+          leaf_node.borrow_mut().evaluate();
+        }
       }
 
       // TODO(20151028): If equipped with a batch prior, initialize new leaf
@@ -352,16 +409,28 @@ impl<'a> McSearchProblem<'a> {
 
       match behavior {
         RolloutBehavior::SelectUniform => {
-          // TODO(20151024)
           for batch_idx in (0 .. batch_size) {
-            let mut valid_moves = self.trajs[batch_idx].leaf_node.as_ref().unwrap().borrow()
-                .valid_moves.clone();
+            let movs_0: Vec<_> = self.trajs[batch_idx].leaf_node.as_ref().unwrap().borrow()
+              .aux_state.get_legal_positions(Stone::Black)
+                .iter()
+                .map(|p| p as Pos)
+                .collect();
+            let movs_1: Vec<_> = self.trajs[batch_idx].leaf_node.as_ref().unwrap().borrow()
+              .aux_state.get_legal_positions(Stone::White)
+                .iter()
+                .map(|p| p as Pos)
+                .collect();
+            let mut valid_moves = Vec::with_capacity(2);
+            valid_moves.push(movs_0);
+            valid_moves.push(movs_1);
+            let mut passes = vec![false, false];
             let mut depth = 0;
             loop {
+              let turn = self.trajs[batch_idx].state.current_turn();
+              let turn_off = turn.offset();
               let mut did_play = false;
               while !valid_moves.is_empty() {
-                let turn = self.trajs[batch_idx].state.current_turn();
-                let pos = choose_without_replace(&mut valid_moves, rng);
+                let pos = choose_without_replace(&mut valid_moves[turn_off], rng);
                 if let Some(pos) = pos {
                   if self.trajs[batch_idx].state.is_legal_move_fast(turn, pos) {
                     self.trajs[batch_idx].state.play(turn, Action::Place{pos: pos}, &mut work, &mut None, false);
@@ -371,35 +440,58 @@ impl<'a> McSearchProblem<'a> {
                   }
                 }
               }
-              if did_play {
+              /*if did_play {
                 // XXX(20151026): Not playing "under the stones"; although maybe
                 // some plays which were not previously valid (due to liberties)
                 // may become valid.
                 //valid_moves.extend(self.trajs[batch_idx].state.last_captures().iter());
-              }
-              if valid_moves.is_empty() {
-                break;
-              }
+              }*/
               depth += 1;
-              //if depth >= 210 {
-              //if depth >= 240 {
-              if depth >= 360 {
+              if depth >= 361 {
                 break;
               }
+              if !did_play {
+                self.trajs[batch_idx].state.play(turn, Action::Pass, &mut work, &mut None, false);
+                passes[turn_off] = true;
+                if passes[0] && passes[1] {
+                  break;
+                } else {
+                  continue;
+                }
+              }
+              /*if valid_moves[turn_off].is_empty() {
+              }*/
             }
             // FIXME(20151026): when scoring, what komi to use?
-            let score = self.trajs[batch_idx].state.score_fast(0.5);
+            let score = self.trajs[batch_idx].state.score_fast(6.5);
             self.trajs[batch_idx].score = Some(score);
           }
         }
 
         RolloutBehavior::SelectGreedy => {
-          let mut valid_moves = Vec::new();
+          // FIXME(20151030): maintain two sets of valid moves for both colors.
+          let mut valid_moves = vec![
+            Vec::with_capacity(batch_size),
+            Vec::with_capacity(batch_size),
+          ];
           let mut min_valid_moves_len = FastBoard::BOARD_SIZE;
           for batch_idx in (0 .. batch_size) {
-            valid_moves.push(self.trajs[batch_idx].leaf_node.as_ref().unwrap().borrow()
-              .valid_moves.clone());
-            min_valid_moves_len = min(min_valid_moves_len, valid_moves[batch_idx].len());
+            /*let movs = self.trajs[batch_idx].leaf_node.as_ref().unwrap().borrow()
+              .valid_moves.clone();*/
+            let movs_0: Vec<_> = self.trajs[batch_idx].leaf_node.as_ref().unwrap().borrow()
+              .aux_state.get_legal_positions(Stone::Black)
+                .iter()
+                .map(|p| p as Pos)
+                .collect();
+            let movs_1: Vec<_> = self.trajs[batch_idx].leaf_node.as_ref().unwrap().borrow()
+              .aux_state.get_legal_positions(Stone::White)
+                .iter()
+                .map(|p| p as Pos)
+                .collect();
+            min_valid_moves_len = min(min_valid_moves_len, movs_0.len());
+            min_valid_moves_len = min(min_valid_moves_len, movs_1.len());
+            valid_moves[0].push(movs_0);
+            valid_moves[1].push(movs_1);
           }
           let mut valid_plays = 0;
           let mut total_plays = 0;
@@ -410,51 +502,45 @@ impl<'a> McSearchProblem<'a> {
               rollout_policy.preload_batch_state(batch_idx, &self.trajs[batch_idx].state);
             }
             rollout_policy.execute_batch(batch_size);
-            //let mut greedy_moves = Vec::new();
-            //let mut greedy_stones =Vec::new();
             num_term = 0;
             for batch_idx in (0 .. batch_size) {
-              if valid_moves[batch_idx].is_empty() {
+              let turn = self.trajs[batch_idx].state.current_turn();
+              let turn_off = turn.offset();
+              if valid_moves[turn_off][batch_idx].is_empty() {
                 num_term += 1;
                 continue;
               }
               let greedy_pos = rollout_policy.read_policy_argmax(batch_idx) as Pos;
-              //greedy_moves.push(greedy_pos);
-              //greedy_stones.push(self.trajs[batch_idx].state.get_stone(greedy_pos));
-              let turn = self.trajs[batch_idx].state.current_turn();
+              self.trajs[batch_idx].state.set_legal_mask(turn, greedy_pos, false);
               if self.trajs[batch_idx].state.is_legal_move_fast(turn, greedy_pos) {
+                for j in (0 .. valid_moves[turn_off][batch_idx].len()) {
+                  if greedy_pos == valid_moves[turn_off][batch_idx][j] {
+                    valid_moves[turn_off][batch_idx].swap_remove(j);
+                    break;
+                  }
+                }
                 self.trajs[batch_idx].state.play(turn, Action::Place{pos: greedy_pos}, &mut work, &mut None, false);
                 self.trajs[batch_idx].rollout_moves.push((turn, greedy_pos));
                 valid_plays += 1;
               } else {
-                self.trajs[batch_idx].state.set_legal_mask(turn, greedy_pos, false);
-                while !valid_moves[batch_idx].is_empty() {
-                  let pos = choose_without_replace(&mut valid_moves[batch_idx], rng);
+                while !valid_moves[turn_off][batch_idx].is_empty() {
+                  let pos = choose_without_replace(&mut valid_moves[turn_off][batch_idx], rng);
                   if let Some(pos) = pos {
+                    self.trajs[batch_idx].state.set_legal_mask(turn, pos, false);
                     if self.trajs[batch_idx].state.is_legal_move_fast(turn, pos) {
                       self.trajs[batch_idx].state.play(turn, Action::Place{pos: pos}, &mut work, &mut None, false);
                       self.trajs[batch_idx].rollout_moves.push((turn, pos));
                       break;
-                    } else {
-                      self.trajs[batch_idx].state.set_legal_mask(turn, pos, false);
                     }
                   }
                 }
               }
               total_plays += 1;
             }
-            /*println!("DEBUG: mc search: rollout step: {} greedy moves: {:?}",
-                depth, &greedy_moves);
-            println!("DEBUG: mc search: rollout step: {} greedy stones: {:?}",
-                depth, &greedy_stones);*/
             depth += 1;
             if depth >= 361 {
               break;
             }
-            // FIXME(20151028): the below was an attempt to limit the number of
-            // steps when most of the rollouts terminated early, but it does not
-            // have much of an effect.
-            //if num_term >= max((batch_size + 1) / 2, batch_size - 4) {
             if num_term >= batch_size {
               break;
             }
@@ -462,7 +548,7 @@ impl<'a> McSearchProblem<'a> {
           println!("DEBUG: mc search: rollout: batch {}/{} depth {} min val moves: {} valid plays {}/{} num term: {}",
               batch, num_batches, depth, min_valid_moves_len, valid_plays, total_plays, num_term);
           for batch_idx in (0 .. batch_size) {
-            let score = self.trajs[batch_idx].state.score_fast(0.5);
+            let score = self.trajs[batch_idx].state.score_fast(6.5);
             self.trajs[batch_idx].score = Some(score);
           }
         }
@@ -485,13 +571,14 @@ impl<'a> McSearchProblem<'a> {
           }
           let mut valid_plays = 0;
           let mut total_plays = 0;
+          let mut num_term = 0;
           let mut depth = 0;
           loop {
             for batch_idx in (0 .. batch_size) {
               rollout_policy.preload_batch_state(batch_idx, &self.trajs[batch_idx].state);
             }
             rollout_policy.execute_batch(batch_size);
-            let mut num_term = 0;
+            num_term = 0;
             for batch_idx in (0 .. batch_size) {
               if valid_moves[batch_idx].is_empty() {
                 num_term += 1;

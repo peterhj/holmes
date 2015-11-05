@@ -1,5 +1,6 @@
 #![feature(associated_consts)]
 #![feature(clone_from_slice)]
+#![feature(slice_bytes)]
 #![feature(wrapping)]
 
 extern crate array;

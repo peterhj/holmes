@@ -4,15 +4,17 @@ use array::{Array2d, Array3d};
 
 use bit_set::{BitSet};
 use bit_vec::{BitVec};
-use std::cmp::{min};
+use std::cmp::{max, min};
 use std::collections::{HashSet};
 use std::iter::{repeat};
 use std::ops::{Range};
+use std::slice::bytes::{copy_memory};
 use std::str::{from_utf8};
 
 const TOMBSTONE: Pos = -1;
 
 // XXX: Absolute feature representation.
+const NUM_PLANES:         usize = 4;
 // Current board position.
 const BLACK_PLANE:        usize = 0;
 const WHITE_PLANE:        usize = FastBoard::BOARD_SIZE;
@@ -20,14 +22,12 @@ const WHITE_PLANE:        usize = FastBoard::BOARD_SIZE;
 const PREV_BLACK_PLANE:   usize = FastBoard::BOARD_SIZE * 2;
 const PREV_WHITE_PLANE:   usize = FastBoard::BOARD_SIZE * 3;
 // Atari/liveness status.
-const BLACK_ATARI_PLANE:  usize = FastBoard::BOARD_SIZE * 4;
-const BLACK_LIVE_2_PLANE: usize = FastBoard::BOARD_SIZE * 5;
-const BLACK_LIVE_3_PLANE: usize = FastBoard::BOARD_SIZE * 6;
-const WHITE_ATARI_PLANE:  usize = FastBoard::BOARD_SIZE * 7;
-const WHITE_LIVE_2_PLANE: usize = FastBoard::BOARD_SIZE * 8;
-const WHITE_LIVE_3_PLANE: usize = FastBoard::BOARD_SIZE * 9;
-//const NUM_PLANES:         usize = 4;
-const NUM_PLANES:         usize = 10;
+/*const BLACK_ATARI_PLANE:  usize = FastBoard::BOARD_SIZE * 4;
+const WHITE_ATARI_PLANE:  usize = FastBoard::BOARD_SIZE * 5;
+const BLACK_LIVE_2_PLANE: usize = FastBoard::BOARD_SIZE * 6;
+const WHITE_LIVE_2_PLANE: usize = FastBoard::BOARD_SIZE * 7;
+const BLACK_LIVE_3_PLANE: usize = FastBoard::BOARD_SIZE * 8;
+const WHITE_LIVE_3_PLANE: usize = FastBoard::BOARD_SIZE * 9;*/
 
 pub trait PosExt {
   fn iter_trans() -> Range<u8>;
@@ -294,10 +294,16 @@ impl Chain {
   }
 
   // XXX(20151029): These liberties include seki.
-  pub fn approx_count_liberties_3(&self) -> usize {
+  pub fn approx_count_liberties_3(&self, ko_point: Option<Pos>) -> usize {
+    let mut ko_libs = 0;
     let mut prev_lib = None;
     let mut prev_lib_2 = None;
     for &lib in self.ps_libs.iter() {
+      if let Some(ko_point) = ko_point {
+        if ko_point == lib {
+          ko_libs = 2;
+        }
+      }
       match prev_lib {
         None    => prev_lib = Some(lib),
         Some(p) => if p != lib {
@@ -311,9 +317,9 @@ impl Chain {
       }
     }
     match (prev_lib, prev_lib_2) {
-      (None, None)        => return 0,
-      (Some(_), None)     => return 1,
-      (Some(_), Some(_))  => return 2,
+      (None, None)        => return max(ko_libs, 0),
+      (Some(_), None)     => return max(ko_libs, 1),
+      (Some(_), Some(_))  => return max(ko_libs, 2),
       _ => unreachable!(),
     }
   }
@@ -325,19 +331,28 @@ pub struct FastBoardWork {
   // allocations.
   merge_adj_heads:  Vec<Pos>,
   check_pos:        BitVec,
+  //touched_pos:      Vec<Pos>,
+  cap_adj_heads:    BitSet,
+  last_touched_libs:  Vec<u16>, // "touched" position chain liberties.
 }
 
 impl FastBoardWork {
   pub fn new() -> FastBoardWork {
     FastBoardWork{
-      merge_adj_heads:      Vec::with_capacity(4),
-      check_pos:            BitVec::from_elem(FastBoard::BOARD_SIZE, false),
+      merge_adj_heads:  Vec::with_capacity(4),
+      check_pos:        BitVec::from_elem(FastBoard::BOARD_SIZE, false),
+      //touched_pos:      Vec::with_capacity(4),
+      cap_adj_heads:    BitSet::with_capacity(FastBoard::BOARD_SIZE),
+      last_touched_libs:  Vec::with_capacity(4),
     }
   }
 
   #[inline]
   pub fn reset(&mut self) {
     self.merge_adj_heads.clear();
+    //self.touched_pos.clear();
+    self.cap_adj_heads.clear();
+    self.last_touched_libs.clear();
   }
 
   /*pub fn txn_reset(&mut self) {
@@ -452,7 +467,7 @@ impl FastBoardAux {
         }
 
         // Check the position is not an opponent's eye.
-        if board.is_opponent_eye1(stone, pos) {
+        if board.is_eyelike(stone.opponent(), pos) {
           if verbose {
             println!("DEBUG: illegal move: playing in opponent's 1-eye");
           }
@@ -555,7 +570,7 @@ impl FastBoardAux {
     // - last pos killed a chain:
     //   easy way out is to redo the whole board; otherwise need to propagate
     //   affected chains and update affected liberties
-    if let Some(last_pos) = board.last_pos {
+    if let Some(prev_pos) = board.prev_pos {
       // FIXME(20151029): could move legal_points and illegal_points into work.
       let mut legal_points = HashSet::with_capacity(FastBoard::BOARD_SIZE);
       let mut illegal_points = HashSet::with_capacity(FastBoard::BOARD_SIZE);
@@ -592,7 +607,7 @@ impl FastBoardAux {
           }
 
           // Check the points adjacent to the last played point.
-          FastBoard::for_each_adjacent(last_pos, |adj_pos| {
+          FastBoard::for_each_adjacent(prev_pos, |adj_pos| {
             if !work.check_pos.get(adj_pos.idx()).unwrap() {
               match self.check_move(turn, Action::Place{pos: adj_pos}, board, work, tmp_board, tmp_aux, false) {
                 ActionStatus::Legal => { legal_points.insert(adj_pos); }
@@ -602,9 +617,9 @@ impl FastBoardAux {
           });
 
           // Check the last played point.
-          match self.check_move(turn, Action::Place{pos: last_pos}, board, work, tmp_board, tmp_aux, false) {
-            ActionStatus::Legal => { legal_points.insert(last_pos); }
-            _ => { illegal_points.insert(last_pos); }
+          match self.check_move(turn, Action::Place{pos: prev_pos}, board, work, tmp_board, tmp_aux, false) {
+            ActionStatus::Legal => { legal_points.insert(prev_pos); }
+            _ => { illegal_points.insert(prev_pos); }
           }
         }
 
@@ -641,6 +656,8 @@ pub struct FastBoard {
 
   // Current board structure.
   turn:       Stone,          // whose turn it is to move.
+  prev_turn:  Option<Stone>,  // the previously played turn.
+  prev_pos:   Option<Pos>,    // the previously played position.
   stones:     Vec<Stone>,     // the stone configuration on the board.
   //ko_pos:     Option<Pos>,    // the ko point, if any.
   // TODO(20151009): rework ko point code.
@@ -648,13 +665,16 @@ pub struct FastBoard {
   ko:         Option<Pos>,
 
   // Previous board structures.
-  last_turn:  Option<Stone>,  // the previously played turn.
-  last_pos:   Option<Pos>,    // the previously played position.
   last_clob:  bool,           // previous move clobbered a stone.
   last_caps:  Vec<Pos>,       // previously captured positions.
   last_suics: Vec<Pos>,       // previously suicided chains.
   //last_toucs: Vec<Pos>,       // previously "touched" positions.
-  //last_touched: Vec<Pos>,
+  //last_cap_heads: Vec<Pos>,
+  last_cap_adj_heads: Vec<Pos>, // the heads of chains adjacent to captured chain.
+  last_touched:       Vec<Pos>, // "touched" positions:
+                                // - the last placed stone and chain
+                                // - chains directly adjacent to the placed stone
+                                // - chains directly adjacent to a captured chain
 
   // Chain data structures. Namely, this implements a linked quick-union for
   // finding and iterating over connected components, as well as a list of
@@ -735,12 +755,15 @@ impl FastBoard {
       turn:       Stone::Black,
       stones:     Vec::with_capacity(Self::BOARD_SIZE),
       ko:         None,
-      last_turn:  None,
-      last_pos:   None,
+      prev_turn:  None,
+      prev_pos:   None,
       last_clob:  false,
       last_caps:  Vec::with_capacity(4),
       last_suics: Vec::with_capacity(4),
       //last_toucs: Vec::with_capacity(4),
+      //last_cap_heads:     Vec::with_capacity(4),
+      last_cap_adj_heads: Vec::with_capacity(4),
+      last_touched:       Vec::with_capacity(4),
       chains:     Vec::with_capacity(Self::BOARD_SIZE),
       ch_roots:   Vec::with_capacity(Self::BOARD_SIZE),
       ch_links:   Vec::with_capacity(Self::BOARD_SIZE),
@@ -753,7 +776,7 @@ impl FastBoard {
   }
 
   pub fn last_position(&self) -> Option<Pos> {
-    self.last_pos
+    self.prev_pos
   }
 
   pub fn last_captures(&self) -> &[Pos] {
@@ -804,8 +827,83 @@ impl FastBoard {
     digest
   }
 
-  pub fn extract_features(&self) -> &Array3d<u8> {
+  pub fn extract_absolute_features(&self) -> &Array3d<u8> {
     &self.features
+  }
+
+  pub fn extract_relative_features(&self, turn: Stone) -> Array3d<u8> {
+    let mut permuted_frame = Array3d::with_zeros((Self::BOARD_DIM as usize, Self::BOARD_DIM as usize, NUM_PLANES));
+    {
+      let frame = self.features.as_slice();
+      let mut permuted_frame = permuted_frame.as_mut_slice();
+      assert_eq!(frame.len(), permuted_frame.len());
+      let permute_idx = turn.offset();
+      if permute_idx == 0 {
+        copy_memory(frame, permuted_frame);
+      } else if permute_idx == 1 {
+        let plane_len = Self::BOARD_SIZE;
+        for c in (0 .. NUM_PLANES) {
+          let c_offset = match (c % 2) {
+            0 => c + 1,
+            1 => c - 1,
+            _ => unreachable!(),
+          };
+          copy_memory(
+              &frame[c * plane_len .. (c + 1) * plane_len],
+              &mut permuted_frame[c_offset * plane_len .. (c_offset + 1) * plane_len],
+          );
+        }
+      } else {
+        unreachable!();
+      }
+    }
+    permuted_frame
+  }
+
+  pub fn extract_relative_features_from_scratch(&self, turn: Stone, prev_state: &Option<FastBoard>) -> Array3d<u8> {
+    let mut x: Vec<_> = repeat(0).take(FastBoard::BOARD_SIZE * NUM_PLANES).collect();
+    for p in (0 .. FastBoard::BOARD_SIZE) {
+      let stone = self.get_stone(p as Pos);
+      if stone == turn {
+        x[BLACK_PLANE + p] = 1;
+      } else if stone == turn.opponent() {
+        x[WHITE_PLANE + p] = 1;
+      }
+      /*{
+        let head = self.traverse_chain_slow(p as Pos);
+        if stone != Stone::Empty {
+          assert!(TOMBSTONE != head);
+          let chain = self.get_chain(head);
+          let libs = chain.approx_count_liberties_3(self.ko);
+          if stone == turn {
+            match libs {
+              1 => x[BLACK_ATARI_PLANE + p] = 1,
+              2 => x[BLACK_LIVE_2_PLANE + p] = 1,
+              3 => x[BLACK_LIVE_3_PLANE + p] = 1,
+              _ => unreachable!(),
+            }
+          } else if stone == turn.opponent() {
+            match libs {
+              1 => x[WHITE_ATARI_PLANE + p] = 1,
+              2 => x[WHITE_LIVE_2_PLANE + p] = 1,
+              3 => x[WHITE_LIVE_3_PLANE + p] = 1,
+              _ => unreachable!(),
+            }
+          }
+        }
+      }*/
+    }
+    if let &Some(ref prev_state) = prev_state {
+      for p in (0 .. FastBoard::BOARD_SIZE) {
+        let stone = prev_state.get_stone(p as Pos);
+        if stone == turn {
+          x[PREV_BLACK_PLANE + p] = 1;
+        } else if stone == turn.opponent() {
+          x[PREV_WHITE_PLANE + p] = 1;
+        }
+      }
+    }
+    Array3d::with_data(x, (FastBoard::BOARD_DIM as usize, FastBoard::BOARD_DIM as usize, NUM_PLANES))
   }
 
   pub fn extract_legal_mask(&self, stone: Stone) -> &Array2d<f32> {
@@ -847,12 +945,15 @@ impl FastBoard {
     //self.ko_pos = None;
     self.ko = None;
 
-    self.last_pos = None;
-    self.last_turn = None;
+    self.prev_pos = None;
+    self.prev_turn = None;
     self.last_clob = false;
     self.last_caps.clear();
     self.last_suics.clear();
     //self.last_toucs.clear();
+    //self.last_cap_heads.clear();
+    self.last_cap_adj_heads.clear();
+    self.last_touched.clear();
 
     self.chains.clear();
     self.chains.extend(repeat(None).take(Self::BOARD_SIZE));
@@ -885,10 +986,9 @@ impl FastBoard {
 
   #[inline]
   pub fn is_eyeish(&self, stone: Stone, pos: Pos) -> bool {
-    let opp_stone = stone.opponent();
     let mut eyeish = true;
     FastBoard::for_each_adjacent(pos, |adj_pos| {
-      if self.stones[adj_pos.idx()] != opp_stone {
+      if self.stones[adj_pos.idx()] != stone {
         eyeish = false;
       }
     });
@@ -897,16 +997,16 @@ impl FastBoard {
 
   #[inline]
   pub fn is_eyelike(&self, stone: Stone, pos: Pos) -> bool {
-    // This definition has shown up in the michi source as well as the following
-    // [computer-go] post:
+    // This definition is known as the "2/4 rule" and has shown up in the michi
+    // source as well as the following [computer-go] posts:
     // <http://computer-go.org/pipermail/computer-go/2013-February/005735.html>
-    let opp_stone = stone.opponent();
+    // <http://computer-go.org/pipermail/computer-go/2014-March/006575.html>
     if !self.is_eyeish(stone, pos) {
       return false;
     }
     let mut false_count = if pos.is_edge() { 1 } else { 0 };
     FastBoard::for_each_diagonal(pos, |diag_pos| {
-      if self.stones[diag_pos.idx()] == opp_stone {
+      if self.stones[diag_pos.idx()] == stone {
         false_count += 1;
       }
     });
@@ -935,6 +1035,7 @@ impl FastBoard {
         let adj_head = self.traverse_chain_slow(adj_pos);
         assert!(adj_head != TOMBSTONE);
         let adj_chain = self.get_chain(adj_head);
+        // FIXME(20151104): use ko-aware approx liberties?
         eye_adj_libs = min(eye_adj_libs, adj_chain.approx_count_liberties());
       });
       if eye_adj_libs >= 2 {
@@ -958,7 +1059,7 @@ impl FastBoard {
       //   last placed point
       // - of the opponent points surrounding the ko point, the last placed
       //   point is size 1 and is the one and only one in atari
-      if let Some(last_pos) = self.last_pos {
+      if let Some(prev_pos) = self.prev_pos {
         let oppo_stone = stone.opponent();
         let mut min_nonlast_libs = 2;
         let mut last_libs = 0;
@@ -969,7 +1070,7 @@ impl FastBoard {
             assert!(adj_head != TOMBSTONE);
             let adj_chain = self.get_chain(adj_head);
             let adj_libs = adj_chain.approx_count_liberties();
-            if last_pos == adj_pos {
+            if prev_pos == adj_pos {
               last_libs = adj_libs;
               last_size = self.ch_sizes[adj_head.idx()];
             } else {
@@ -992,7 +1093,7 @@ impl FastBoard {
     }
 
     // Check we do not place a stone in the opponent's eye (suicide).
-    if self.is_opponent_eye1(stone, pos) {
+    if self.is_eyelike(stone.opponent(), pos) {
       return false;
     }
 
@@ -1003,7 +1104,7 @@ impl FastBoard {
 
     // XXX(20151029): This next rule (avoid filling our own eyes) is less of a
     // "rule" and more to avoid pointless playouts.
-    if self.is_opponent_eye1(stone.opponent(), pos) {
+    if self.is_eyelike(stone, pos) {
       return false;
     }
 
@@ -1041,18 +1142,20 @@ impl FastBoard {
     w_score - b_score + komi
   }
 
-  pub fn play(&mut self, stone: Stone, action: Action, work: &mut FastBoardWork, aux: &mut Option<&mut FastBoardAux>, verbose: bool) -> PlayResult {
+  pub fn play(&mut self, turn: Stone, action: Action, work: &mut FastBoardWork, aux: &mut Option<&mut FastBoardAux>, verbose: bool) -> PlayResult {
     // FIXME(20151008): ko point logic is seriously messed up.
     //println!("DEBUG: play: {:?} {:?}", stone, action);
     //assert!(!self.in_txn);
     let mut result = PlayResult::Okay;
     work.reset();
-    self.turn = stone;
+    self.turn = turn;
     self.ko = None;
     self.last_clob = false;
     self.last_caps.clear();
     self.last_suics.clear();
     //self.last_toucs.clear();
+    self.last_touched.clear();
+    //self.last_touched_libs.clear();
     aux.as_mut().map(|aux| {
       aux.last_adj_chs.clear();
       aux.last_cap_chs.clear();
@@ -1060,11 +1163,13 @@ impl FastBoard {
 
     match action {
       Action::Resign | Action::Pass => {
-        self.last_pos = None;
+        self.prev_pos = None;
       }
       Action::Place{pos} => {
-        self.place_stone(stone, pos, aux);
-        let opp_stone = stone.opponent();
+        self.place_stone(turn, pos, aux);
+        let opp_stone = turn.opponent();
+
+        // XXX: Capture opponent chains.
         let mut num_captured = 0;
         Self::for_each_adjacent(pos, |adj_pos| {
           if let PlayResult::FatalError = result {
@@ -1075,13 +1180,23 @@ impl FastBoard {
               println!("DEBUG: adjacent to {}: {}", pos.to_coord().to_string(), adj_pos.to_coord().to_string());
             }
             let adj_head = self.traverse_chain(adj_pos);
-            //assert!(adj_head != TOMBSTONE);
             if adj_head == TOMBSTONE {
               println!("WARNING: play: adj head is TOMBSTONE!");
               result = PlayResult::FatalError;
               return;
             }
             //self.last_toucs.extend(self.get_chain(adj_head).ps_libs.iter());
+            {
+              let mut next_pos = adj_head;
+              loop {
+                next_pos = self.ch_links[next_pos.idx()];
+                assert!(TOMBSTONE != next_pos);
+                self.last_touched.push(next_pos);
+                if next_pos == adj_head {
+                  break;
+                }
+              }
+            }
             aux.as_mut().map(|aux| {
               aux.last_adj_chs.push(adj_head);
             });
@@ -1093,7 +1208,7 @@ impl FastBoard {
                       from_utf8(&adj_head.to_coord().to_bytestring()).unwrap(),
                       self.ch_sizes[adj_head.idx()]);
                 }
-                num_captured += self.kill_chain(adj_head, aux);
+                num_captured += self.kill_chain(adj_head, work, aux);
               }
             } else {
               if verbose {
@@ -1112,64 +1227,38 @@ impl FastBoard {
         if num_captured > 1 {
           self.ko = None;
         }
+
+        // Merge own chains.
         self.merge_chains_and_append(&work.merge_adj_heads, pos, aux, verbose);
         aux.as_mut().map(|aux| {
           for &head in aux.ch_heads.iter() {
-            if self.stones[head.idx()] == stone &&
+            if self.stones[head.idx()] == turn &&
                 self.get_chain(head).count_pseudoliberties() == 0
             {
               self.last_suics.push(head);
             }
           }
         });
-        self.last_pos = Some(pos);
+        //self.prev_pos = Some(pos);
+        for cap_adj_h in work.cap_adj_heads.iter() {
+          let cap_adj_head = cap_adj_h as Pos;
+          let mut next_pos = cap_adj_head;
+          loop {
+            next_pos = self.ch_links[next_pos.idx()];
+            assert!(TOMBSTONE != next_pos);
+            self.last_touched.push(next_pos);
+            if next_pos == cap_adj_head {
+              break;
+            }
+          }
+        }
 
         // XXX(20151019): Update mask with the placed point.
         self.st_leg_mask[0].as_mut_slice()[pos.idx()] = 0.0;
         self.st_leg_mask[1].as_mut_slice()[pos.idx()] = 0.0;
 
-        // XXX(20151029): Update liberty representation features.
-        // The placed point (`pos`), the points of captured chains, and the
-        // adjacent chains of captured chains need updated liberties.
-        {
-          for &chk_pos in [pos].iter().chain(self.last_caps.iter()) {
-            let head = self.traverse_chain_slow(chk_pos);
-            assert!(head != TOMBSTONE);
-            let libs = self.get_chain(head).approx_count_liberties_3();
-            let mut features = self.features.as_mut_slice();
-            match (stone, libs) {
-              (Stone::Black, 1) => {
-                features[BLACK_ATARI_PLANE + pos.idx()] = 1;
-                features[WHITE_ATARI_PLANE + pos.idx()] = 0;
-              }
-              (Stone::White, 1) => {
-                features[BLACK_ATARI_PLANE + pos.idx()] = 0;
-                features[WHITE_ATARI_PLANE + pos.idx()] = 1;
-              }
-              (Stone::Black, 2) => {
-                features[BLACK_LIVE_2_PLANE + pos.idx()] = 1;
-                features[WHITE_LIVE_2_PLANE + pos.idx()] = 0;
-              }
-              (Stone::White, 2) => {
-                features[BLACK_LIVE_2_PLANE + pos.idx()] = 0;
-                features[WHITE_LIVE_2_PLANE + pos.idx()] = 1;
-              }
-              (Stone::Black, 3) => {
-                features[BLACK_LIVE_3_PLANE + pos.idx()] = 1;
-                features[WHITE_LIVE_3_PLANE + pos.idx()] = 0;
-              }
-              (Stone::White, 3) => {
-                features[BLACK_LIVE_3_PLANE + pos.idx()] = 0;
-                features[WHITE_LIVE_3_PLANE + pos.idx()] = 1;
-              }
-              _ => unreachable!(),
-            }
-          }
-        }
-
       }
     }
-    self.last_turn = Some(stone);
 
     /*{
       // XXX(20151019): Update mask with the captured points.
@@ -1179,7 +1268,113 @@ impl FastBoard {
       }
     }*/
 
-    self.turn = stone.opponent();
+    self.turn = turn.opponent();
+    self.prev_turn = Some(turn);
+    if let Action::Place{pos} = action {
+      self.prev_pos = Some(pos);
+    } else {
+      self.prev_pos = None;
+    }
+
+    // XXX: Check that the ko point is actually a ko point, and if not, unset it.
+    if let Some(ko) = self.ko {
+      if !self.is_simple_ko(self.turn, ko) {
+        self.ko = None;
+      }
+    }
+
+    // XXX(20151029): Update liberty representation features.
+    // "Touched" positions require liberty updates.
+    /*{
+      {
+        // FIXME(20151104): updating last_touched_libs here b/c of borrowing
+        // issues; placing chains in their own data structure should fix it.
+        let &mut FastBoard{
+          ref last_touched,
+          ..} = self;
+        for &chk_pos in last_touched.iter() {
+          let libs = match self.stones[chk_pos.idx()] {
+            Stone::Empty => 0,
+            _ => {
+              let head = self.traverse_chain_slow(chk_pos);
+              assert!(head != TOMBSTONE);
+              // XXX(20151104): liberty counting accounts for correct ko point.
+              self.get_chain(head).approx_count_liberties_3(self.ko) as u16
+            }
+          };
+          work.last_touched_libs.push(libs);
+        }
+      }
+      let &mut FastBoard{
+        ref last_touched,
+        ref mut features,
+        ..} = self;
+      for (&chk_pos, &libs) in last_touched.iter().zip(work.last_touched_libs.iter()) {
+        let chk_p = chk_pos.idx();
+        let stone = self.stones[chk_p];
+        let mut features = features.as_mut_slice();
+        match (stone, libs) {
+          (Stone::Black, 1) => {
+            features[BLACK_ATARI_PLANE + chk_p] = 1;
+            features[WHITE_ATARI_PLANE + chk_p] = 0;
+            features[BLACK_LIVE_2_PLANE + chk_p] = 0;
+            features[WHITE_LIVE_2_PLANE + chk_p] = 0;
+            features[BLACK_LIVE_3_PLANE + chk_p] = 0;
+            features[WHITE_LIVE_3_PLANE + chk_p] = 0;
+          }
+          (Stone::White, 1) => {
+            features[BLACK_ATARI_PLANE + chk_p] = 0;
+            features[WHITE_ATARI_PLANE + chk_p] = 1;
+            features[BLACK_LIVE_2_PLANE + chk_p] = 0;
+            features[WHITE_LIVE_2_PLANE + chk_p] = 0;
+            features[BLACK_LIVE_3_PLANE + chk_p] = 0;
+            features[WHITE_LIVE_3_PLANE + chk_p] = 0;
+          }
+          (Stone::Black, 2) => {
+            features[BLACK_ATARI_PLANE + chk_p] = 0;
+            features[WHITE_ATARI_PLANE + chk_p] = 0;
+            features[BLACK_LIVE_2_PLANE + chk_p] = 1;
+            features[WHITE_LIVE_2_PLANE + chk_p] = 0;
+            features[BLACK_LIVE_3_PLANE + chk_p] = 0;
+            features[WHITE_LIVE_3_PLANE + chk_p] = 0;
+          }
+          (Stone::White, 2) => {
+            features[BLACK_ATARI_PLANE + chk_p] = 0;
+            features[WHITE_ATARI_PLANE + chk_p] = 0;
+            features[BLACK_LIVE_2_PLANE + chk_p] = 0;
+            features[WHITE_LIVE_2_PLANE + chk_p] = 1;
+            features[BLACK_LIVE_3_PLANE + chk_p] = 0;
+            features[WHITE_LIVE_3_PLANE + chk_p] = 0;
+          }
+          (Stone::Black, 3) => {
+            features[BLACK_ATARI_PLANE + chk_p] = 0;
+            features[WHITE_ATARI_PLANE + chk_p] = 0;
+            features[BLACK_LIVE_2_PLANE + chk_p] = 0;
+            features[WHITE_LIVE_2_PLANE + chk_p] = 0;
+            features[BLACK_LIVE_3_PLANE + chk_p] = 1;
+            features[WHITE_LIVE_3_PLANE + chk_p] = 0;
+          }
+          (Stone::White, 3) => {
+            features[BLACK_ATARI_PLANE + chk_p] = 0;
+            features[WHITE_ATARI_PLANE + chk_p] = 0;
+            features[BLACK_LIVE_2_PLANE + chk_p] = 0;
+            features[WHITE_LIVE_2_PLANE + chk_p] = 0;
+            features[BLACK_LIVE_3_PLANE + chk_p] = 0;
+            features[WHITE_LIVE_3_PLANE + chk_p] = 1;
+          }
+          (Stone::Empty, _) => {
+            features[BLACK_ATARI_PLANE + chk_p] = 0;
+            features[WHITE_ATARI_PLANE + chk_p] = 0;
+            features[BLACK_LIVE_2_PLANE + chk_p] = 0;
+            features[WHITE_LIVE_2_PLANE + chk_p] = 0;
+            features[BLACK_LIVE_3_PLANE + chk_p] = 0;
+            features[WHITE_LIVE_3_PLANE + chk_p] = 0;
+          }
+          _ => unreachable!(),
+        }
+      }
+    }*/
+
     result
   }
 
@@ -1191,6 +1386,7 @@ impl FastBoard {
       self.last_clob = true;
     }
     self.stones[i] = stone;
+    self.last_touched.push(pos);
     {
       let mut features = self.features.as_mut_slice();
       match stone {
@@ -1430,7 +1626,8 @@ impl FastBoard {
     }
   }
 
-  fn kill_chain(&mut self, head: Pos, aux: &mut Option<&mut FastBoardAux>) -> usize {
+  fn kill_chain(&mut self, head: Pos, work: &mut FastBoardWork, aux: &mut Option<&mut FastBoardAux>) -> usize {
+    //work.cap_adj_heads.clear();
     let mut num_captured = 0;
     let mut prev;
     let mut next = head;
@@ -1449,6 +1646,7 @@ impl FastBoard {
             let mut adj_chain = self.get_chain_mut(adj_head);
             adj_chain.add_pseudoliberty(next);
             /*adj_chain.remove_pseudoenemy(next);*/
+            work.cap_adj_heads.insert(adj_head.idx());
           }
         }
       });

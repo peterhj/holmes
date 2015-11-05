@@ -144,8 +144,8 @@ pub struct Agent {
   valid:          bool,
   config:         AgentConfig,
 
-  prior_policy:   NoPriorPolicy,
-  //prior_policy:   ConvNetPriorPolicy,
+  //prior_policy:   NoPriorPolicy,
+  prior_policy:   ConvNetPriorPolicy,
   search_policy:  ThompsonRaveSearchPolicy,
   //rollout_policy: QuasiUniformRolloutPolicy,
   rollout_policy: ConvNetBatchRolloutPolicy,
@@ -169,8 +169,8 @@ impl Agent {
       valid:          false,
       config:         Default::default(),
 
-      prior_policy:   NoPriorPolicy,
-      //prior_policy:   ConvNetPriorPolicy::new(),
+      //prior_policy:   NoPriorPolicy,
+      prior_policy:   ConvNetPriorPolicy::new(),
       //search_policy:  UctSearchPolicy{c: 0.5},
       search_policy:  ThompsonRaveSearchPolicy::new(),
       //rollout_policy: QuasiUniformRolloutPolicy::new(),

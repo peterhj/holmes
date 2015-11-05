@@ -1,5 +1,4 @@
 use fastboard::{PosExt, Pos, Action, Stone, FastBoard, FastBoardAux, FastBoardWork};
-//use fasttree::{ExecutionBehavior, Trajectory, NodeId, FastSearchNode, FastSearchTree};
 use mctree::{RolloutBehavior, McTrajectory, McNode, McSearchTree};
 use random::{XorShift128PlusRng, choose_without_replace, sample_discrete_cdf};
 
@@ -23,17 +22,11 @@ use std::iter::{repeat};
 use std::path::{PathBuf};
 
 pub trait PriorPolicy {
-  fn batch_size(&self) -> usize;
-
-  fn preload_batch_state(&mut self, batch_idx: usize, state: &FastBoard, aux_state: &FastBoardAux) {
+  fn evaluate(&mut self, state: &FastBoard) {
     unimplemented!();
   }
 
-  fn execute_batch(&mut self, batch_size: usize) {
-    unimplemented!();
-  }
-
-  fn read_policy(&mut self, batch_idx: usize) -> &[f32] {
+  fn read_prior(&mut self) -> &[f32] {
     unimplemented!();
   }
 }
@@ -41,7 +34,6 @@ pub trait PriorPolicy {
 pub struct NoPriorPolicy;
 
 impl PriorPolicy for NoPriorPolicy {
-  fn batch_size(&self) -> usize { 1 }
 }
 
 pub struct ConvNetPriorPolicy {
@@ -52,7 +44,7 @@ pub struct ConvNetPriorPolicy {
 impl ConvNetPriorPolicy {
   pub fn new() -> ConvNetPriorPolicy {
     let ctx = DeviceContext::new(0);
-    let batch_size = 256;
+    let batch_size = 1;
     let num_hidden = 16;
     let data_layer_cfg = DataLayerConfig{
       raw_width: 19, raw_height: 19,
@@ -105,36 +97,26 @@ impl ConvNetPriorPolicy {
 }
 
 impl PriorPolicy for ConvNetPriorPolicy {
-  //fn batch_size(&self) -> usize { 256 }
-  fn batch_size(&self) -> usize { self.arch.batch_size() }
-
-  fn preload_batch_state(&mut self, batch_idx: usize, state: &FastBoard, aux_state: &FastBoardAux) {
+  fn evaluate(&mut self, state: &FastBoard) {
     let &mut ConvNetPriorPolicy{ref ctx, ref mut arch} = self;
-    let turn = state.current_turn();
+    let batch_idx = 0;
+    let batch_size = 1;
     // XXX: FastBoard features are absolutely arranged; the features we feed to
     // the net must be relatively arranged. Do this by performing a special
     // permutation of the feature planes.
-    arch.data_layer().preload_frame_permute(batch_idx, state.extract_features(), turn.offset(), ctx);
-    // TODO(20151029): preload mask using aux state legal moves mask.
+    let turn = state.current_turn();
+    arch.data_layer().preload_frame_permute(batch_idx, state.extract_absolute_features(), turn.offset(), ctx);
     arch.loss_layer().preload_mask(batch_idx, state.extract_legal_mask(turn), ctx);
-  }
-
-  fn execute_batch(&mut self, batch_size: usize) {
-    let &mut ConvNetPriorPolicy{ref ctx, ref mut arch} = self;
     arch.data_layer().load_frames(batch_size, ctx);
     arch.loss_layer().load_masks(batch_size, ctx);
     arch.evaluate(ctx);
-    arch.loss_layer().store_labels(batch_size, &self.ctx);
     arch.loss_layer().store_probs(batch_size, &self.ctx);
-    arch.loss_layer().store_cdfs(batch_size, &self.ctx);
-    //println!("DEBUG: convnet policy: labels: {:?}", labels);
   }
 
-  fn read_policy(&mut self, batch_idx: usize) -> &[f32] {
-    let batch_size = self.arch.batch_size();
-    let batch_probs = &self.arch.loss_layer().predict_probs(batch_size, &self.ctx)
-      .as_slice()[batch_idx * FastBoard::BOARD_SIZE .. (batch_idx + 1) * FastBoard::BOARD_SIZE];
-    batch_probs
+  fn read_prior(&mut self) -> &[f32] {
+    let prior_pdf = &self.arch.loss_layer().predict_probs(1, &self.ctx)
+      .as_slice();
+    prior_pdf
   }
 }
 
@@ -343,7 +325,7 @@ impl ThompsonRaveSearchPolicy {
     node.credit_one_arm_rave(update_j, reward);
   }*/
 
-  fn backup_node_new(node: &mut McNode) {
+  /*fn backup_node_new(node: &mut McNode) {
     let equiv_rn = 3000.0;
     let equiv_bias = 1000.0;
     for j in (0 .. node.values.len()) {
@@ -367,7 +349,7 @@ impl ThompsonRaveSearchPolicy {
         node.values[j] = (1.0 - beta_rave) * val_mc + beta_rave * val_rave + beta_bias * val_bias;
       }
     }
-  }
+  }*/
 }
 
 impl SearchPolicy for ThompsonRaveSearchPolicy {
@@ -404,7 +386,7 @@ impl SearchPolicy for ThompsonRaveSearchPolicy {
         }
         leaf_node.credit_arms_rave(&accum_rave_mask, outcome);
 
-        Self::backup_node_new(&mut leaf_node);
+        leaf_node.evaluate();
       } else {
         println!("WARNING: thompson policy: backup: no leaf node in this trajectory!");
         return;
@@ -425,7 +407,7 @@ impl SearchPolicy for ThompsonRaveSearchPolicy {
       accum_rave_mask[turn_off].insert(update_mov.idx());
       node.credit_arms_rave(&accum_rave_mask, outcome);
 
-      Self::backup_node_new(&mut node);
+      node.evaluate();
     }
   }
 
@@ -435,10 +417,10 @@ impl SearchPolicy for ThompsonRaveSearchPolicy {
     let mut max_pos: Option<(f32, Pos, usize)> = None;
     for (j, &mov) in node.valid_moves.iter().enumerate() {
       let n = node.num_trials[j];
-      let succ_value = 0.0f32.max(node.values[j]) * n;
-      let fail_value = n - succ_value;
-      let gamma_succ = Gamma::new(succ_value as f64 + 1.0, 1.0);
-      let gamma_fail = Gamma::new(fail_value as f64 + 1.0, 1.0);
+      let succ_value = 0.0f32.max(node.values[j] * n);
+      let fail_value = 0.0f32.max(n - succ_value);
+      let gamma_succ = Gamma::new((succ_value + 1.0) as f64, 1.0);
+      let gamma_fail = Gamma::new((fail_value + 1.0) as f64, 1.0);
       let x = gamma_succ.ind_sample(&mut self.rng) as f32;
       let y = gamma_fail.ind_sample(&mut self.rng) as f32;
       let u = x / (x + y);
@@ -666,7 +648,7 @@ impl RolloutPolicy for ConvNetBatchRolloutPolicy {
     // XXX: FastBoard features are absolutely arranged; the features we feed to
     // the net must be relatively arranged. Do this by performing a special
     // permutation of the feature planes.
-    arch.data_layer().preload_frame_permute(batch_idx, state.extract_features(), turn.offset(), ctx);
+    arch.data_layer().preload_frame_permute(batch_idx, state.extract_absolute_features(), turn.offset(), ctx);
     arch.loss_layer().preload_mask(batch_idx, state.extract_legal_mask(turn), ctx);
   }
 

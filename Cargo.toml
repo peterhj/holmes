@@ -32,6 +32,10 @@ name = "bench-net"
 path = "tools/bench-net.rs"
 
 [[bin]]
+name = "compare-arraydb"
+path = "tools/compare-arraydb.rs"
+
+[[bin]]
 name = "filter-gogod-data"
 path = "tools/filter-gogod-data.rs"
 
@@ -44,8 +48,12 @@ name = "preproc-kgs-data"
 path = "tools/preproc-kgs-data.rs"
 
 [[bin]]
-name = "train-simba"
-path = "tools/train-simba.rs"
+name = "train-simba-19x19x4"
+path = "tools/train-simba-19x19x4.rs"
+
+[[bin]]
+name = "train-simba-19x19x10"
+path = "tools/train-simba-19x19x10.rs"
 
 [[bin]]
 name = "train-move"
