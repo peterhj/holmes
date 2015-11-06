@@ -1,5 +1,6 @@
 #![feature(associated_consts)]
 #![feature(clone_from_slice)]
+#![feature(drain)]
 #![feature(slice_bytes)]
 #![feature(wrapping)]
 
@@ -31,4 +32,5 @@ pub mod random;
 //pub mod search;
 pub mod sgf;
 pub mod table;
+pub mod txnboard;
 pub mod util;

@@ -1004,9 +1004,10 @@ impl FastBoard {
     if !self.is_eyeish(stone, pos) {
       return false;
     }
+    let opp_stone = stone.opponent();
     let mut false_count = if pos.is_edge() { 1 } else { 0 };
     FastBoard::for_each_diagonal(pos, |diag_pos| {
-      if self.stones[diag_pos.idx()] == stone {
+      if self.stones[diag_pos.idx()] == opp_stone {
         false_count += 1;
       }
     });
