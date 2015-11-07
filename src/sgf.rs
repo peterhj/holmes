@@ -15,9 +15,16 @@ pub struct Sgf {
   pub rules:        Option<String>,
   pub komi:         Option<f64>,
   pub moves:        Vec<(String, String)>,
+  pub black_pos:    Vec<String>,
+  pub white_pos:    Vec<String>,
 }
 
 impl Sgf {
+  pub fn from_text(text: &[u8]) -> Sgf {
+    let raw = parse_raw_sgf(text);
+    Sgf::from_raw(&raw)
+  }
+
   pub fn from_raw(raw: &RawSgf) -> Sgf {
     let mut black_player: String  = Default::default();
     let mut black_rank:   String  = Default::default();
@@ -30,6 +37,8 @@ impl Sgf {
     let mut rules:        Option<String> = Default::default();
     let mut komi:         Option<f64> = Default::default();
     let mut moves:        Vec<(String, String)> = Default::default();
+    let mut black_pos:    Vec<String> = Default::default();
+    let mut white_pos:    Vec<String> = Default::default();
     for property in raw.nodes[0].properties.iter() {
       match property {
         &Property::Root(ref root) => match root {
@@ -47,6 +56,10 @@ impl Sgf {
           &GameInfoProperty::Rules(ref x)       => rules = Some(x.clone()),
           &GameInfoProperty::GoKomi(x)          => komi = x,
           _ => {}
+        },
+        &Property::Setup(ref setup) => match setup {
+          &SetupProperty::AddBlack(ref x) => black_pos = x.iter().map(|c| c.to_string()).collect(),
+          &SetupProperty::AddWhite(ref x) => white_pos = x.iter().map(|c| c.to_string()).collect(),
         },
         _ => {}
       }
@@ -76,6 +89,8 @@ impl Sgf {
       rules:        rules,
       komi:         komi,
       moves:        moves,
+      black_pos:    black_pos,
+      white_pos:    white_pos,
     }
   }
 }

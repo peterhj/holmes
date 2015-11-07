@@ -12,6 +12,14 @@ name = "gtpctl"
 path = "tools/gtpctl.rs"
 
 [[bin]]
+name = "prepare-position-testsuite-data"
+path = "tools/prepare-position-testsuite-data.rs"
+
+[[bin]]
+name = "prepare-position-testsuite-data-p2"
+path = "tools/prepare-position-testsuite-data-p2.rs"
+
+[[bin]]
 name = "test-book"
 path = "tools/test-book.rs"
 
@@ -40,12 +48,12 @@ name = "filter-gogod-data"
 path = "tools/filter-gogod-data.rs"
 
 [[bin]]
-name = "preproc-gogod-data"
-path = "tools/preproc-gogod-data.rs"
+name = "filter-kgs-data"
+path = "tools/filter-kgs-data.rs"
 
 [[bin]]
-name = "preproc-kgs-data"
-path = "tools/preproc-kgs-data.rs"
+name = "preproc-gogod-data"
+path = "tools/preproc-gogod-data.rs"
 
 [[bin]]
 name = "train-simba-19x19x4"
@@ -69,7 +77,9 @@ bit-vec = "*"
 bufstream = "*"
 byteorder = "*"
 getopts = "*"
+leveldb-rs = "0.0.5"
 rand = "*"
+rusqlite = "=0.4.0"
 rustc-serialize = "*"
 time = "*"
 
@@ -88,6 +98,9 @@ path = "../rembrandt-project/libasync"
 [dependencies.async_cuda]
 #path = "../../rembrandt-project/libasync_cuda"
 path = "../rembrandt-project/libasync_cuda"
+
+#[dependencies.leveldb-rs]
+#path = "leveldb-rs"
 
 [dependencies.rembrandt]
 #path = "../../rembrandt-project/rembrandt_new"

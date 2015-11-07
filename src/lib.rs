@@ -18,6 +18,7 @@ extern crate rustc_serialize;
 extern crate time;
 
 pub mod agent;
+pub mod board;
 pub mod book;
 pub mod contains;
 pub mod fastboard;

@@ -10,7 +10,8 @@ use std::io::{Read, BufRead, Write, BufReader};
 use std::path::{PathBuf};
 
 fn main() {
-  let index_path = PathBuf::from("/data0/go/gogodb-preproc/index");
+  //let index_path = PathBuf::from("/data0/go/gogodb-preproc/index");
+  let index_path = PathBuf::from("/data0/go/kgs-ugo-preproc/index");
   let index_file = BufReader::new(File::open(&index_path).unwrap());
   let mut index_lines = Vec::new();
   for line in index_file.lines() {
@@ -26,7 +27,8 @@ fn main() {
     .map(|line| PathBuf::from(line)).collect();
   println!("num sgf paths: {}", sgf_paths.len());
 
-  let mut filterindex_path = PathBuf::from("/data0/go/gogodb-preproc/filtered_index");
+  //let mut filterindex_path = PathBuf::from("/data0/go/gogodb-preproc/filtered_index");
+  let mut filterindex_path = PathBuf::from("/data0/go/kgs-ugo-preproc/filtered_index");
   let mut filterindex = File::create(&filterindex_path).unwrap();
 
   let mut size19_count = 0;
@@ -164,10 +166,10 @@ fn main() {
     }
     if is_modern && is_19 && is_nohand && is_goodkomi {
       let sgf = Sgf::from_raw(&raw_sgf);
-      if let Some(game) = GameHistory::new(sgf) {
+      //if let Some(game) = GameHistory::new(sgf) {
         writeln!(filterindex, "{}", sgf_path.to_str().unwrap());
         filter_count += 1;
-      }
+      //}
     }
   }
   println!("19x19: {}", size19_count);

@@ -67,6 +67,10 @@ impl Coord {
     Coord{x: x, y: y}
   }
 
+  pub fn from_code_str(code_str: &str) -> Coord {
+    Coord::from_code(code_str.as_bytes())
+  }
+
   pub fn from_code(code: &[u8]) -> Coord {
     let raw_x = code[0];
     let x = match raw_x {
