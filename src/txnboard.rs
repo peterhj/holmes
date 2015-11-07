@@ -52,17 +52,17 @@ pub fn for_each_diagonal<F>(point: Point, mut f: F) where F: FnMut(Point) {
 
 pub type TxnResult = Result<(), TxnStatus>;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
+pub enum TxnStatus {
+  Illegal,
+  IllegalReason(TxnStatusIllegalReason),
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub enum TxnStatusIllegalReason {
   NotEmpty,
   Suicide,
   Ko,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub enum TxnStatus {
-  Illegal,
-  IllegalReason(TxnStatusIllegalReason),
 }
 
 pub trait TxnStateData {
@@ -71,10 +71,6 @@ pub trait TxnStateData {
   }
 
   fn update(&mut self, position: &TxnPosition, chains: &TxnChainsList) {
-    // Do nothing.
-  }
-
-  fn commit(&mut self) {
     // Do nothing.
   }
 
@@ -322,7 +318,7 @@ impl Chain {
       // `i` is the search head, `diff_j` is the pattern head.
       let mut i = 0;
       let mut diff_j = 0;
-      //let mut prev_lib = None;
+      let mut prev_lib = None;
       while i < ps_libs.len() {
         // Increment the pattern head to match the search head.
         while diff_j < diff_insert_ps_libs.len() && ps_libs[i] > diff_insert_ps_libs[diff_j] {
@@ -331,7 +327,7 @@ impl Chain {
         if diff_j >= diff_insert_ps_libs.len() {
           break;
         }
-        /*// Mark duplicates as "dead".
+        // Mark duplicates as "dead".
         if let Some(prev) = prev_lib {
           if prev == ps_libs[i] {
             ps_libs[i] = TOMBSTONE;
@@ -340,7 +336,7 @@ impl Chain {
           }
         } else {
           prev_lib = Some(ps_libs[i]);
-        }*/
+        }
         // Mark inserted libs as "dead".
         if ps_libs[i] == diff_insert_ps_libs[diff_j] {
           ps_libs[i] = TOMBSTONE;
@@ -529,13 +525,13 @@ impl TxnChainsList {
   }
 
   pub fn extend_chain(&mut self, head: Point, point: Point, position: &TxnPosition) {
-    println!("DEBUG: extend_chain: extend {:?} with {:?}", head, point);
+    //println!("DEBUG: extend_chain: extend {:?} with {:?}", head, point);
     let other_head = self.find_chain(point);
     if other_head == TOMBSTONE {
-      println!("DEBUG:   extend_chain: extend point");
+      //println!("DEBUG:   extend_chain: extend point");
       self.link_chain(head, point, position);
     } else if head != other_head {
-      println!("DEBUG:   extend_chain: extend union {:?} <- {:?}", other_head, head);
+      //println!("DEBUG:   extend_chain: extend union {:?} <- {:?}", other_head, head);
       self.union_chains(head, other_head);
     }
   }
@@ -771,11 +767,21 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
     }
   }
 
+  /// The "2/4" rule, a conservative estimate of whether a point is an eye.
+  /// Some true eyes (c.f., "two headed dragon") will not be detected by this
+  /// rule.
   pub fn is_eyelike(&self, stone: Stone, point: Point) -> bool {
     let mut eyeish = true;
     for_each_adjacent(point, |adj_point| {
       if self.position.stones[adj_point.idx()] != stone {
         eyeish = false;
+      } else {
+        let adj_head = self.chains.find_chain(adj_point);
+        assert!(adj_head != TOMBSTONE);
+        let adj_chain = self.chains.get_chain(adj_head).unwrap();
+        if adj_chain.approx_count_libs() <= 1 {
+          eyeish = false;
+        }
       }
     });
     if !eyeish {
@@ -801,8 +807,6 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
     }
 
     // Illegal to suicide (place in opponent's eye).
-    // FIXME(20151107): the "eyelike" or "2/4" definition can be overly strict
-    // in rare cases.
     if self.is_eyelike(turn.opponent(), point) {
       return Some(TxnStatusIllegalReason::Suicide);
     }
@@ -883,7 +887,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
         let &mut TxnState{
           ref position, ref mut chains, .. } = self;
         chains.extend_chain(adj_head, place_point, position);
-        println!("DEBUG: txnstate: extend chain: {:?} {:?} <- {:?}", turn, place_point, adj_head);
+        //println!("DEBUG: merge_chains: extend {:?} {:?} <- {:?}", turn, place_point, adj_head);
         extended = true;
       }
     });
@@ -892,7 +896,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
       let &mut TxnState{
         ref position, ref mut chains, .. } = self;
       chains.create_chain(place_point, position);
-      println!("DEBUG: txnstate: create chain: {:?} {:?}", turn, place_point);
+      //println!("DEBUG: merge_chains: create {:?} {:?}", turn, place_point);
     }
   }
 
@@ -909,11 +913,11 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
         if adj_head != place_head {
           let mut adj_chain = self.chains.get_chain_mut(adj_head).unwrap();
           adj_chain.remove_pseudolib(place_point);
-          println!("DEBUG: capture_chains: remove lib {:?} from {:?}", place_point, adj_head);
+          //println!("DEBUG: capture_chains: remove lib {:?} from {:?}", place_point, adj_head);
         }
         let adj_chain_libs = self.chains.get_chain(adj_head).unwrap().count_pseudolibs();
         if adj_chain_libs == 0 {
-          println!("DEBUG: txnstate: capture chain {:?} by {:?}", adj_head, place_point);
+          //println!("DEBUG: capture_chains: capture {:?} by {:?}", adj_head, place_point);
           // Clear captured opponent chain stones from position, and add
           // captured opponent chain to own chains' liberties.
           let &mut TxnState{
@@ -1023,10 +1027,8 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
       // Commit changes to the chains list. This performs checkpointing per chain.
       self.chains.commit();
 
-      // Commit changes to the extra data. Typically, .update() does all the work,
-      // and .commit() does nothing..
+      // Run changes on the extra data.
       self.data.update(&self.position, &self.chains);
-      self.data.commit();
 
       self.position.last_placed = None;
       self.position.last_killed.clear();
@@ -1045,14 +1047,10 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
 
       // Undo everything in reverse order.
       if self.txn_mut {
-        // First undo changes in the extra data. This should be either a no-op or
-        // a panic (if undo is not supported).
-        self.data.undo();
-
-        // Next undo changes in the chains list.
+        // Undo changes in the chains list.
         self.chains.undo();
 
-        // Finally roll back the position using saved values in the proposal.
+        // Roll back the position using saved values in the proposal.
         self.position.turn = self.proposal.prev_turn;
         self.position.ko = self.proposal.prev_ko;
         let (prev_place_stone, prev_place_point) = self.proposal.prev_place;

@@ -1,13 +1,18 @@
 extern crate rusqlite;
 extern crate rustc_serialize;
+extern crate threadpool;
 
 use rusqlite::{SqliteConnection};
 use rustc_serialize::json;
+use threadpool::{ThreadPool};
 
+use std::collections::{BTreeMap};
 use std::env;
+use std::io::{Write};
 use std::path::{PathBuf};
-use std::process::{Command};
+use std::process::{Command, Stdio};
 use std::str::{from_utf8};
+use std::sync::mpsc::{channel};
 
 #[derive(RustcEncodable, RustcDecodable)]
 pub struct SgfBlobEntry {
@@ -26,6 +31,8 @@ fn main() {
   let db_path = PathBuf::from(&args[1]);
 
   let mut db = SqliteConnection::open(&db_path).unwrap();
+  let pool = ThreadPool::new(8);
+  let (tx, rx) = channel();
 
   let sgf_entries = {
     let mut sgf_iter_stmt = db.prepare(
@@ -45,18 +52,44 @@ fn main() {
 
   let mut iter_count = 0;
   for &(i, ref sgf_entry) in sgf_entries.iter() {
+    for j in (0 .. sgf_entry.sgf_num_moves + 1) {
+      let tx = tx.clone();
+      let sgf_body = sgf_entry.sgf_body.clone();
+      pool.execute(move || {
+        let mut child = Command::new("../bin/gnugo")
+          .stdin(Stdio::piped())
+          .stdout(Stdio::piped())
+          .args(&[
+            //"--infile", &sgf_entry.sgf_path as &str,
+            "--infile",   "/proc/self/fd/0",
+            "--until",    &format!("{}", j + 1) as &str,
+            "--printsgf", "/proc/self/fd/1",
+          ])
+          .spawn().unwrap();
+        child.stdin.as_mut().unwrap()
+          .write_all(sgf_body.as_bytes()).unwrap();
+        child.stdin.as_mut().unwrap()
+          .flush().unwrap();
+        {
+          let _ = child.stdin.take();
+        }
+        /*child.wait().unwrap();
+        let mut stdout = vec![];
+        child.stdout.take().read_to_end(&mut stdout).unwrap();*/
+        let output = child.wait_with_output().unwrap();
+        let position_j = String::from_utf8(output.stdout).unwrap();
+        tx.send((j as usize, position_j));
+      });
+    }
+    let mut gnugo_results: Vec<_> = rx.iter()
+      .take((sgf_entry.sgf_num_moves + 1) as usize)
+      .collect();
+    gnugo_results.sort();
     let mut gnugo_entry = GnugoBlobEntry{
       gnugo_positions: vec![],
     };
-    for j in (0 .. sgf_entry.sgf_num_moves + 1) {
-      let output = Command::new("../bin/gnugo")
-        .args(&[
-          "--infile", &sgf_entry.sgf_path as &str,
-          "--until", &format!("{}", j + 1) as &str,
-          "--printsgf", "/proc/self/fd/1",
-        ])
-        .output().unwrap();
-      let position_j = String::from_utf8(output.stdout).unwrap();
+    for (j, (j_ref, position_j)) in gnugo_results.into_iter().enumerate() {
+      assert_eq!(j, j_ref);
       gnugo_entry.gnugo_positions.push(position_j);
     }
     println!("DEBUG: idx {} num moves {} positions {}",

@@ -5,14 +5,14 @@ extern crate rustc_serialize;
 use holmes::board::{RuleSet, Stone, Action};
 use holmes::sgf::{Sgf};
 use holmes::txnboard::{TxnState, TxnResult};
-use rusqlite::{SqliteConnection};
+use rusqlite::{SqliteConnection, SqliteOpenFlags};
 use rustc_serialize::json;
 
 use std::path::{PathBuf};
 //use std::str::{from_utf8};
 
-const DB_PATH: &'static str = "test_data/test_sgf.20.sqlite";
-const EXPECTED_COUNT: usize = 20;
+const DB_PATH: &'static str = "test_data/test_sgf.1000.sqlite";
+const EXPECTED_COUNT: usize = 1000;
 
 #[derive(RustcEncodable, RustcDecodable)]
 pub struct SgfBlobEntry {
@@ -35,10 +35,10 @@ fn test_sgf_dummy() {
 #[test]
 fn test_sgf_check_db_consistency() {
   let db_path = PathBuf::from(DB_PATH);
-  let db = SqliteConnection::open(&db_path).unwrap();
+  let db = SqliteConnection::open_with_flags(
+      &db_path, SqliteOpenFlags::from_bits(0x01).unwrap()).unwrap();
 
   let expected_count = EXPECTED_COUNT;
-
   let mut total_count = 0;
   let mut positions_count = 0;
 
@@ -73,9 +73,13 @@ fn test_sgf_check_db_consistency() {
 }
 
 #[test]
-fn test_sgf_equivalence() {
+fn test_sgf_correctness() {
   let db_path = PathBuf::from(DB_PATH);
-  let db = SqliteConnection::open(&db_path).unwrap();
+  let db = SqliteConnection::open_with_flags(
+      &db_path, SqliteOpenFlags::from_bits(0x01).unwrap()).unwrap();
+
+  let expected_count = EXPECTED_COUNT;
+  let mut total_count = 0;
 
   {
     let mut sgf_iter_stmt = db.prepare(
@@ -100,6 +104,7 @@ fn test_sgf_equivalence() {
       assert_eq!(0, sgf.black_pos.len());
       assert_eq!(0, sgf.white_pos.len());
 
+      // TODO(20151107): legal moves depend on rule set.
       let rules = match sgf.rules.as_ref().map(|s| s as &str) {
         Some("Japanese")    => RuleSet::KgsJapanese,
         Some("Chinese")     => RuleSet::KgsChinese,
@@ -110,32 +115,33 @@ fn test_sgf_equivalence() {
 
       let mut state = TxnState::new(());
       state.reset();
-      println!("DEBUG: starting new game...");
-      println!("DEBUG: board:");
-      for s in state.to_debug_strings().iter() {
-        println!("DEBUG:   {}", s);
-      }
       for (j, &(ref turn_code, ref move_code)) in sgf.moves.iter().enumerate() {
-        //println!("DEBUG: move code: '{}'", move_code);
         let turn = Stone::from_code_str(&turn_code);
         let action = Action::from_code_str(&move_code);
-        println!("DEBUG: move {}: {:?} {:?}", j, turn, action);
-        if let Action::Place{point} = action {
-          let coord = point.to_coord();
-          println!("DEBUG:   move coord: {:?}", coord);
-        }
-        state.try_action(turn, action);
+        let res1 = state.try_action(turn, action);
         state.undo();
-        let res = state.try_action(turn, action);
-        println!("DEBUG: board:");
-        for s in state.to_debug_strings().iter() {
-          println!("DEBUG:   {}", s);
-        }
-        match res {
+        let res2 = state.try_action(turn, action);
+        assert_eq!(res1, res2);
+        match res2 {
           Ok(_)   => state.commit(),
-          Err(e)  => panic!("move should be legal! {:?}", e),
+          Err(e)  => {
+            println!("DEBUG: move {}: {:?} {:?}", j, turn, action);
+            if let Action::Place{point} = action {
+              let coord = point.to_coord();
+              println!("DEBUG:   move coord: {:?} {:?}", turn, coord);
+            }
+            println!("DEBUG: board:");
+            for s in state.to_debug_strings().iter() {
+              println!("DEBUG:   {}", s);
+            }
+            panic!("move should be legal! {:?}", e);
+          }
         }
       }
+
+      total_count += 1;
     }
+
+    assert_eq!(expected_count, total_count);
   }
 }
