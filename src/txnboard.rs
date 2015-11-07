@@ -3,8 +3,18 @@ use gtp_board::{dump_xcoord};
 
 use bit_set::{BitSet};
 use std::iter::{repeat};
+use std::slice::bytes::{copy_memory};
 
 pub const TOMBSTONE:  Point = Point(-1);
+
+pub const BLACK_PLANE:      usize = 0;
+pub const WHITE_PLANE:      usize = 1 * Board::SIZE;
+/*pub const ATARI_PLANE:      usize = 2 * Board::SIZE;
+pub const LIVE_2_PLANE:     usize = 3 * Board::SIZE;
+pub const LIVE_3_PLANE:     usize = 4 * Board::SIZE;*/
+pub const FEAT_PLANES:      usize = 2;
+//pub const FEAT_PLANES:      usize = 5;
+pub const FEAT_TIME_STEPS:  usize = 2;
 
 pub fn for_each_adjacent<F>(point: Point, mut f: F) where F: FnMut(Point) {
   let (x, y) = (point.0 % Board::DIM_PT.0, point.0 / Board::DIM_PT.0);
@@ -76,6 +86,99 @@ pub trait TxnStateData {
 impl TxnStateData for () {
 }
 
+pub fn slice_twice_mut<T>(xs: &mut [T], lo1: usize, hi1: usize, lo2: usize, hi2: usize) -> (&mut [T], &mut [T]) {
+  let mut flip = false;
+  let (lo1, hi1, lo2, hi2) = if (lo1 <= lo2) {
+    (lo1, hi1, lo2, hi2)
+  } else {
+    flip = true;
+    (lo2, hi2, lo1, hi1)
+  };
+  assert!(hi1 <= lo2, "ranges must not overlap!");
+  let (mut lo_xs, hi_xs) = xs.split_at_mut(lo2);
+  let (lo_xs, _) = lo_xs.split_at_mut(hi1 - lo1);
+  if !flip {
+    (lo_xs, hi_xs)
+  } else {
+    (hi_xs, lo_xs)
+  }
+}
+
+#[derive(Clone)]
+pub struct TxnStateLightData {
+  features: Vec<u8>,
+  time_step_offset: usize,
+}
+
+impl TxnStateLightData {
+  pub fn new() -> TxnStateLightData {
+    TxnStateLightData{
+      features: repeat(0).take(FEAT_TIME_STEPS * FEAT_PLANES * Board::SIZE).collect(),
+      time_step_offset: 0,
+    }
+  }
+}
+
+impl TxnStateData for TxnStateLightData {
+  fn reset(&mut self) {
+    for p in (0 .. FEAT_TIME_STEPS * FEAT_PLANES * Board::SIZE) {
+      self.features[p] = 0;
+    }
+    self.time_step_offset = 0;
+  }
+
+  fn update(&mut self, position: &TxnPosition, chains: &TxnChainsList) {
+    let slice_sz = FEAT_PLANES * Board::SIZE;
+    let next_slice_off = self.time_step_offset;
+    if FEAT_TIME_STEPS > 1 {
+      let prev_slice_off = (self.time_step_offset + FEAT_TIME_STEPS - 1) % FEAT_TIME_STEPS;
+      let (src_feats, mut dst_feats) = slice_twice_mut(
+          &mut self.features,
+          prev_slice_off * slice_sz, (prev_slice_off + 1) * slice_sz,
+          next_slice_off * slice_sz, (next_slice_off + 1) * slice_sz,
+      );
+      copy_memory(src_feats, &mut dst_feats);
+    }
+    let next_start = next_slice_off * slice_sz;
+    let next_end = next_start + slice_sz;
+    {
+      // TODO(20151107): iterate over placed and killed chains to update stone
+      // repr.
+      let mut features = &mut self.features[next_start .. next_end];
+      if let Some((stone, point)) = position.last_placed {
+        let p = point.idx();
+        match stone {
+          Stone::Black => {
+            features[BLACK_PLANE + p] = 1;
+            features[WHITE_PLANE + p] = 0;
+          }
+          Stone::White => {
+            features[BLACK_PLANE + p] = 0;
+            features[WHITE_PLANE + p] = 1;
+          }
+          Stone::Empty => { unreachable!(); }
+        }
+      }
+      for &(stone, point) in position.last_killed.iter() {
+        let p = point.idx();
+        match stone {
+          Stone::Black => {
+            features[BLACK_PLANE + p] = 1;
+            features[WHITE_PLANE + p] = 0;
+          }
+          Stone::White => {
+            features[BLACK_PLANE + p] = 0;
+            features[WHITE_PLANE + p] = 1;
+          }
+          Stone::Empty => { unreachable!(); }
+        }
+      }
+      // TODO(20151107): iterate over "touched" chains to update liberty repr.
+    }
+    self.time_step_offset = (self.time_step_offset + 1) % FEAT_TIME_STEPS;
+  }
+}
+
 #[derive(Clone)]
 pub struct TxnStateHeavyData {
   cached_illegal_moves: Vec<BitSet>,
@@ -112,6 +215,8 @@ pub struct TxnPosition {
   turn:         Stone,
   stones:       Vec<Stone>,
   ko:           Option<(Stone, Point)>,
+  // FIXME(20151107): semantics of when `last_placed` and `last_killed` are
+  // valid is unclear; currently used as tmp variables.
   last_placed:  Option<(Stone, Point)>,
   last_killed:  Vec<(Stone, Point)>,
 }
@@ -119,6 +224,7 @@ pub struct TxnPosition {
 #[derive(Clone, Debug)]
 pub struct TxnPositionProposal {
   // Fields to directly overwrite upon commit.
+  resigned:     Option<Stone>,
   next_turn:    Stone,
   prev_turn:    Stone,
   next_ko:      Option<Point>,
@@ -552,6 +658,7 @@ pub struct TxnStateScratch {
 ///   rollouts)
 #[derive(Clone)]
 pub struct TxnState<Data=()> where Data: TxnStateData + Clone {
+  in_soft_txn:  bool,
   in_txn:       bool,
   txn_mut:      bool,
 
@@ -570,6 +677,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
   pub fn new(data: Data) -> TxnState<Data> {
     let mut stones: Vec<Stone> = repeat(Stone::Empty).take(Board::SIZE).collect();
     TxnState{
+      in_soft_txn: false,
       in_txn: false,
       txn_mut: false,
       resigned: None,
@@ -582,6 +690,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
         last_killed:  vec![],
       },
       proposal: TxnPositionProposal{
+        resigned: None,
         next_turn: Stone::Black,
         prev_turn: Stone::Black,
         next_ko: None,
@@ -597,6 +706,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
 
   pub fn reset(&mut self) {
     // TODO(20151105)
+    self.in_soft_txn = false;
     self.in_txn = false;
     self.txn_mut = false;
     self.resigned = None;
@@ -614,6 +724,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
   pub fn shrink_clone(&self) -> TxnState<()> {
     assert!(!self.in_txn);
     TxnState{
+      in_soft_txn:  false,
       in_txn:   false,
       txn_mut:  false,
       resigned: self.resigned.clone(),
@@ -740,12 +851,17 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
         self.try_place(turn, point/*, scratch*/)
       }
       Action::Pass => {
-        self.position.turn = turn.opponent();
+        self.in_soft_txn = true;
+        self.proposal.resigned = None;
+        self.proposal.next_turn = turn.opponent();
+        self.proposal.next_ko = None;
         Ok(())
       }
       Action::Resign => {
-        self.resigned = Some(turn);
-        self.position.turn = turn.opponent();
+        self.in_soft_txn = true;
+        self.proposal.resigned = Some(turn);
+        self.proposal.next_turn = turn.opponent();
+        self.proposal.next_ko = None;
         Ok(())
       }
     }
@@ -870,6 +986,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
     self.position.turn = turn;
     self.position.stones[place_p] = turn;
     self.position.last_placed = Some((turn, place_point));
+    self.position.last_killed.clear();
     self.merge_chains(turn, place_point);
 
     // 2. Capture opponent chains.
@@ -893,55 +1010,64 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
   }
 
   pub fn commit(&mut self) {
-    if !self.in_txn {
-      return;
-    }
-
     // Committing the position consists only of rolling forward the current turn
     // and the current ko point.
     self.position.turn = self.proposal.next_turn;
     self.position.ko = self.proposal.next_ko.map(|ko_point| (self.proposal.next_turn, ko_point));
-    self.position.last_placed = None;
-    self.position.last_killed.clear();
 
-    // Commit changes to the chains list. This performs checkpointing per chain.
-    self.chains.commit();
+    if self.in_soft_txn {
+      self.resigned = self.proposal.resigned;
+    } else {
+      assert!(self.in_txn);
 
-    // Commit changes to the extra data. Typically, .update() does all the work,
-    // and .commit() does nothing..
-    self.data.update(&self.position, &self.chains);
-    self.data.commit();
+      // Commit changes to the chains list. This performs checkpointing per chain.
+      self.chains.commit();
 
-    self.txn_mut = false;
-    self.in_txn = false;
-  }
+      // Commit changes to the extra data. Typically, .update() does all the work,
+      // and .commit() does nothing..
+      self.data.update(&self.position, &self.chains);
+      self.data.commit();
 
-  pub fn undo(&mut self) {
-    assert!(self.in_txn);
-
-    // Undo everything in reverse order.
-    if self.txn_mut {
-      // First undo changes in the extra data. This should be either a no-op or
-      // a panic (if undo is not supported).
-      self.data.undo();
-
-      // Next undo changes in the chains list.
-      self.chains.undo();
-
-      // Finally roll back the position using saved values in the proposal.
-      self.position.turn = self.proposal.prev_turn;
-      self.position.ko = self.proposal.prev_ko;
-      let (prev_place_stone, prev_place_point) = self.proposal.prev_place;
-      self.position.stones[prev_place_point.idx()] = prev_place_stone;
       self.position.last_placed = None;
-      for &(cap_stone, cap_point) in self.position.last_killed.iter() {
-        self.position.stones[cap_point.idx()] = cap_stone;
-      }
       self.position.last_killed.clear();
     }
 
     self.txn_mut = false;
     self.in_txn = false;
+    self.in_soft_txn = false;
+  }
+
+  pub fn undo(&mut self) {
+    if self.in_soft_txn {
+      // Do nothing.
+    } else {
+      assert!(self.in_txn);
+
+      // Undo everything in reverse order.
+      if self.txn_mut {
+        // First undo changes in the extra data. This should be either a no-op or
+        // a panic (if undo is not supported).
+        self.data.undo();
+
+        // Next undo changes in the chains list.
+        self.chains.undo();
+
+        // Finally roll back the position using saved values in the proposal.
+        self.position.turn = self.proposal.prev_turn;
+        self.position.ko = self.proposal.prev_ko;
+        let (prev_place_stone, prev_place_point) = self.proposal.prev_place;
+        self.position.stones[prev_place_point.idx()] = prev_place_stone;
+        self.position.last_placed = None;
+        for &(cap_stone, cap_point) in self.position.last_killed.iter() {
+          self.position.stones[cap_point.idx()] = cap_stone;
+        }
+        self.position.last_killed.clear();
+      }
+    }
+
+    self.txn_mut = false;
+    self.in_txn = false;
+    self.in_soft_txn = false;
   }
 
   pub fn to_debug_strings(&self) -> Vec<String> {

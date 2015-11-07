@@ -133,7 +133,7 @@ fn test_sgf_equivalence() {
         }
         match res {
           Ok(_)   => state.commit(),
-          Err(_)  => panic!("move should be legal!"),
+          Err(e)  => panic!("move should be legal! {:?}", e),
         }
       }
     }
