@@ -56,8 +56,8 @@ fn train_simba_2_layers() {
                     },
 
     display_interval:   20,
-    validate_interval:  400,
-    save_interval:      Some(400),
+    validate_interval:  800,
+    save_interval:      Some(800),
   };
   let descent = DescentSchedule::new(opt_cfg);
 
@@ -105,11 +105,11 @@ fn train_simba_2_layers() {
   let conv4_layer = Conv2dLayer::new(0, hidden_conv_layer_cfg, batch_size, Some(&conv3_layer), &ctx);
   let conv5_layer = Conv2dLayer::new(0, hidden_conv_layer_cfg, batch_size, Some(&conv4_layer), &ctx);
   let conv6_layer = Conv2dLayer::new(0, final_conv_layer_cfg, batch_size, Some(&conv5_layer), &ctx);
+  //let conv6_layer = Conv2dLayer::new(0, final_conv_layer_cfg, batch_size, Some(&conv2_layer), &ctx);
   let softmax_layer = SoftmaxLossLayer::new(0, loss_layer_cfg, batch_size, Some(&conv6_layer));
-  //let softmax_layer = SoftmaxLossLayer::new(0, loss_layer_cfg, batch_size, Some(&conv2_layer));
   let mut arch = LinearNetArch::new(
-      //PathBuf::from("experiments/models/convnet_19x19x4_conv_9x9x16R_conv_3x3x1"),
-      PathBuf::from("experiments/models/tmp3_19x19x4"),
+      PathBuf::from("experiments/models/tmp_19x19x4.v2"),
+      //PathBuf::from("experiments/models/tmp2_19x19x4.v2"),
       batch_size,
       data_layer,
       softmax_layer,
@@ -127,7 +127,8 @@ fn train_simba_2_layers() {
   }
 
   //let dataset_cfg = DatasetConfiguration::open(&PathBuf::from("experiments/gogodb_orig.data"));
-  let dataset_cfg = DatasetConfiguration::open(&PathBuf::from("experiments/gogodb_19x19x4_move.data"));
+  //let dataset_cfg = DatasetConfiguration::open(&PathBuf::from("experiments/gogodb_19x19x4_move.data"));
+  let dataset_cfg = DatasetConfiguration::open(&PathBuf::from("experiments/gogodb_19x19x4.v2.data"));
   let mut train_data_source = if let Some(&(ref name, ref cfg)) = dataset_cfg.datasets.get("train") {
     DataSourceBuilder::build(name, cfg.clone())
   } else {

@@ -20,6 +20,10 @@ name = "prepare-position-testsuite-data-p2"
 path = "tools/prepare-position-testsuite-data-p2.rs"
 
 [[bin]]
+name = "extract-gogod-data"
+path = "tools/extract-gogod-data.rs"
+
+[[bin]]
 name = "test-book"
 path = "tools/test-book.rs"
 
@@ -27,9 +31,9 @@ path = "tools/test-book.rs"
 name = "test-sgf"
 path = "tools/test-sgf.rs"
 
-[[bin]]
-name = "bench-board"
-path = "tools/bench-board.rs"
+#[[bin]]
+#name = "bench-board"
+#path = "tools/bench-board.rs"
 
 #[[bin]]
 #name = "bench-tree"
@@ -77,7 +81,7 @@ bit-vec = "*"
 bufstream = "*"
 byteorder = "*"
 getopts = "*"
-leveldb-rs = "0.0.5"
+#leveldb-rs = "0.0.5"
 rand = "*"
 rusqlite = "=0.4.0"
 rustc-serialize = "*"

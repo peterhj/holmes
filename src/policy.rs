@@ -10,6 +10,7 @@ use rembrandt::layer::{
   DataLayer, Conv2dLayer, SoftmaxLossLayer,
 };
 use rembrandt::net::{NetArch, LinearNetArch};
+use rembrandt::opt::{OptPhase};
 use statistics_avx2::array::{array_argmax};
 use statistics_avx2::random::{StreamRng, XorShift128PlusStreamRng};
 
@@ -109,7 +110,7 @@ impl PriorPolicy for ConvNetPriorPolicy {
     arch.loss_layer().preload_mask(batch_idx, state.extract_legal_mask(turn), ctx);
     arch.data_layer().load_frames(batch_size, ctx);
     arch.loss_layer().load_masks(batch_size, ctx);
-    arch.evaluate(ctx);
+    arch.evaluate(OptPhase::Evaluation, ctx);
     arch.loss_layer().store_probs(batch_size, &self.ctx);
   }
 
@@ -657,7 +658,7 @@ impl RolloutPolicy for ConvNetBatchRolloutPolicy {
       ref ctx, ref mut arch, ..} = self;
     arch.data_layer().load_frames(batch_size, ctx);
     arch.loss_layer().load_masks(batch_size, ctx);
-    arch.evaluate(ctx);
+    arch.evaluate(OptPhase::Evaluation, ctx);
     arch.loss_layer().store_labels(batch_size, &self.ctx);
     arch.loss_layer().store_probs(batch_size, &self.ctx);
     arch.loss_layer().store_cdfs(batch_size, &self.ctx);
