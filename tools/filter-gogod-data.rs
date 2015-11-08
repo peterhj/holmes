@@ -72,6 +72,8 @@ fn main() {
     let mut is_19 = false;
     let mut is_nohand = false;
     let mut is_goodkomi = false;
+    let mut is_komi65 = false;
+    let mut is_japanese = false;
 
     let path_toks: Vec<_> = sgf_path.file_name().unwrap()
       .to_str().unwrap().split("-").collect();
@@ -105,6 +107,7 @@ fn main() {
           &GameInfoProperty::Rules(ref rules) => {
             let rules = rules.to_lowercase();
             if rules == "japanese" {
+              is_japanese = true;
               japanese_count += 1;
             } else if rules == "chinese" {
               chinese_count += 1;
@@ -139,6 +142,7 @@ fn main() {
         if (komi - 6.5).abs() <= 0.01 {
           assert_eq!(komi, 6.5);
           is_goodkomi = true;
+          is_komi65 = true;
           nohand_65komi_count += 1;
         } else if (komi - 0.5).abs() <= 0.01 {
           assert_eq!(komi, 0.5);
@@ -164,7 +168,8 @@ fn main() {
         }
       }
     }
-    if is_modern && is_19 && is_nohand && is_goodkomi {
+    //if is_modern && is_19 && is_nohand && is_goodkomi {
+    if is_modern && is_19 && is_nohand && is_komi65 && is_japanese {
       let sgf = Sgf::from_raw(&raw_sgf);
       //if let Some(game) = GameHistory::new(sgf) {
         writeln!(filterindex, "{}", sgf_path.to_str().unwrap());

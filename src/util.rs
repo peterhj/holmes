@@ -1,11 +1,22 @@
-pub trait Verbosity {
-  fn debug() -> bool;
-}
-
-pub struct Verbose;
-
-impl Verbosity for Verbose {
-  fn debug() -> bool { true }
+pub fn slice_twice_mut<T>(xs: &mut [T], lo1: usize, hi1: usize, lo2: usize, hi2: usize) -> (&mut [T], &mut [T]) {
+  assert!(lo1 <= hi1);
+  assert!(lo2 <= hi2);
+  let mut flip = false;
+  let (lo1, hi1, lo2, hi2) = if (lo1 <= lo2) {
+    (lo1, hi1, lo2, hi2)
+  } else {
+    flip = true;
+    (lo2, hi2, lo1, hi1)
+  };
+  assert!(hi1 <= lo2, "ranges must not overlap!");
+  let (mut lo_xs, mut hi_xs) = xs.split_at_mut(lo2);
+  let lo_xs = &mut lo_xs[lo1 .. hi1];
+  let hi_xs = &mut hi_xs[.. hi2 - lo2];
+  if !flip {
+    (lo_xs, hi_xs)
+  } else {
+    (hi_xs, lo_xs)
+  }
 }
 
 #[inline]
@@ -37,4 +48,14 @@ pub fn swizzle64(x: u64) -> u64 {
   ((x >> 24) & 0x0000000000ff0000_u64) |
   ((x >> 40) & 0x000000000000ff00_u64) |
   ((x >> 56) & 0x00000000000000ff_u64)
+}
+
+pub trait Verbosity {
+  fn debug() -> bool;
+}
+
+pub struct Verbose;
+
+impl Verbosity for Verbose {
+  fn debug() -> bool { true }
 }

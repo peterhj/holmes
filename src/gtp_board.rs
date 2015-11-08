@@ -102,6 +102,11 @@ impl Coord {
   pub fn to_string(&self) -> String {
     String::from_utf8(self.to_bytestring()).ok().unwrap()
   }
+
+  pub fn to_sgf(&self) -> String {
+    let (x, y) = ((b'a' + self.x) as char, (b'a' + self.y) as char);
+    [x, y].iter().map(|&c| c).collect::<String>()
+  }
 }
 
 #[derive(Clone, Copy)]

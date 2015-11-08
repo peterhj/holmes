@@ -56,11 +56,12 @@ fn main() {
       let tx = tx.clone();
       let sgf_body = sgf_entry.sgf_body.clone();
       pool.execute(move || {
-        let mut child = Command::new("../bin/gnugo")
+        let mut child = Command::new("../bin/gnugo-3.8")
           .stdin(Stdio::piped())
           .stdout(Stdio::piped())
           .args(&[
             //"--infile", &sgf_entry.sgf_path as &str,
+            //"--komi",     "6.5",
             "--infile",   "/proc/self/fd/0",
             "--until",    &format!("{}", j + 1) as &str,
             "--printsgf", "/proc/self/fd/1",

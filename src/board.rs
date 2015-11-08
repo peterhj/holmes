@@ -2,13 +2,6 @@ pub use gtp_board::{Coord};
 
 use std::str::{from_utf8};
 
-pub enum RuleSet {
-  KgsAga,
-  KgsChinese,
-  KgsJapanese,
-  KgsNewZealand,
-}
-
 pub struct Board;
 
 impl Board {
@@ -17,6 +10,83 @@ impl Board {
   pub const MAX_PT:     Point = Point(361);
   pub const DIM:        usize = 19;
   pub const SIZE:       usize = 361;
+}
+
+#[derive(Clone, Copy)]
+pub struct Rules {
+  pub score_captures:   bool,
+  pub score_stones:     bool,
+  pub score_territory:  bool,
+  // FIXME(20151107): score w/ handicap komi convention.
+  pub handicap_komi:    HandicapKomi,
+  pub ko_rule:          KoRule,
+  pub suicide_rule:     SuicideRule,
+}
+
+#[derive(Clone, Copy)]
+pub enum HandicapKomi {
+  Zero,
+  One,
+  OneExceptFirst,
+}
+
+#[derive(Clone, Copy)]
+pub enum KoRule {
+  Ko,
+  Superko,
+}
+
+#[derive(Clone, Copy)]
+pub enum SuicideRule {
+  Illegal,
+  Allowed,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
+pub enum RuleSet {
+  KgsJapanese,
+  KgsChinese,
+  KgsAga,
+  KgsNewZealand,
+}
+
+impl RuleSet {
+  pub fn rules(&self) -> Rules {
+    match *self {
+      RuleSet::KgsJapanese => Rules{
+        score_captures:   true,
+        score_stones:     false,
+        score_territory:  true,
+        handicap_komi:    HandicapKomi::Zero,
+        ko_rule:          KoRule::Ko,
+        suicide_rule:     SuicideRule::Illegal,
+      },
+      RuleSet::KgsChinese => Rules{
+        score_captures:   false,
+        score_stones:     true,
+        score_territory:  true,
+        handicap_komi:    HandicapKomi::One,
+        ko_rule:          KoRule::Superko,
+        suicide_rule:     SuicideRule::Illegal,
+      },
+      RuleSet::KgsAga => Rules{
+        score_captures:   false,
+        score_stones:     true,
+        score_territory:  true,
+        handicap_komi:    HandicapKomi::OneExceptFirst,
+        ko_rule:          KoRule::Superko,
+        suicide_rule:     SuicideRule::Illegal,
+      },
+      RuleSet::KgsNewZealand => Rules{
+        score_captures:   false,
+        score_stones:     true,
+        score_territory:  true,
+        handicap_komi:    HandicapKomi::One,
+        ko_rule:          KoRule::Superko,
+        suicide_rule:     SuicideRule::Allowed,
+      },
+    }
+  }
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]

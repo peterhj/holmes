@@ -33,5 +33,5 @@ pub mod random;
 //pub mod search;
 pub mod sgf;
 pub mod table;
-pub mod txnboard;
+pub mod txnstate;
 pub mod util;
