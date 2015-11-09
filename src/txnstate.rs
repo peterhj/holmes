@@ -85,14 +85,14 @@ impl TxnStateData for () {
 }
 
 #[derive(Clone)]
-pub struct TxnStateLightData {
+pub struct TxnStateFeaturesData {
   features: Vec<u8>,
   time_step_offset: usize,
 }
 
-impl TxnStateLightData {
-  pub fn new() -> TxnStateLightData {
-    TxnStateLightData{
+impl TxnStateFeaturesData {
+  pub fn new() -> TxnStateFeaturesData {
+    TxnStateFeaturesData{
       features: repeat(0).take(FEAT_TIME_STEPS * FEAT_PLANES * Board::SIZE).collect(),
       time_step_offset: 0,
     }
@@ -143,7 +143,7 @@ impl TxnStateLightData {
   }
 }
 
-impl TxnStateData for TxnStateLightData {
+impl TxnStateData for TxnStateFeaturesData {
   fn reset(&mut self) {
     assert_eq!(FEAT_TIME_STEPS * FEAT_PLANES * Board::SIZE, self.features.len());
     for p in (0 .. self.features.len()) {
