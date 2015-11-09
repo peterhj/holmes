@@ -1,5 +1,9 @@
-use agent::{PreGame, AgentBuilder, Agent};
-use fastboard::{PosExt, Pos, Stone};
+//use agent::{PreGame, AgentBuilder, Agent};
+use agent::{PreGame};
+use agents::{Agent};
+use agents::convnet::{ConvnetAgent};
+use board::{Stone, Point, Action};
+//use fastboard::{PosExt, Pos, Stone};
 use gtp::{GtpClient, Entity};
 use gtp::Entity::*;
 use gtp_board::{Player, Coord, Vertex, RuleSystem, TimeSystem, MoveResult, UndoResult, dump_xcoord, dump_ycoord};
@@ -13,8 +17,9 @@ pub struct Client {
   should_shutdown:  bool,
 
   pre_game:         PreGame,
-  agent_builder:    AgentBuilder,
-  agent:            Agent,
+  /*agent_builder:    AgentBuilder,
+  agent:            Agent,*/
+  agent:            ConvnetAgent,
 }
 
 impl Client {
@@ -25,8 +30,9 @@ impl Client {
       //player: player,
       should_shutdown: false,
       pre_game: Default::default(),
-      agent_builder: Default::default(),
-      agent: Agent::new(),
+      /*agent_builder: Default::default(),
+      agent: Agent::new(),*/
+      agent: ConvnetAgent::new(),
     }
   }
 }
@@ -118,14 +124,16 @@ impl GtpClient for Client {
   // Setup commands.
 
   fn reply_boardsize(&mut self, args: &[Vec<u8>]) -> Vec<Entity> {
-    let size = match Entity::parse_int(&args[0]) {
-      IntEntity(size) => size,
+    let board_dim = match Entity::parse_int(&args[0]) {
+      IntEntity(board_dim) => board_dim,
       _ => return vec![ErrorEntity(b"syntax error".to_vec())],
     } as usize;
-    match size {
+    match board_dim {
       19 => {
-        self.agent_builder.board_dim(size);
-        self.agent.invalidate();
+        /*self.agent_builder.board_dim(size);
+        self.agent.invalidate();*/
+        self.agent.reset();
+        self.agent.board_dim(board_dim);
       },
       _ => return vec![ErrorEntity(b"unacceptable size".to_vec())],
     }
@@ -136,7 +144,8 @@ impl GtpClient for Client {
     // XXX(20151006): not sure about the order in which boardsize, clear, etc.
     // are called.
     //self.agent_builder.reset();
-    self.agent.invalidate();
+    /*self.agent.invalidate();*/
+    self.agent.reset();
     vec![]
   }
 
@@ -145,7 +154,8 @@ impl GtpClient for Client {
       FloatEntity(new_komi) => new_komi,
       _ => return vec![ErrorEntity(b"syntax error".to_vec())],
     };
-    self.agent_builder.komi(new_komi);
+    /*self.agent_builder.komi(new_komi);*/
+    self.agent.komi(new_komi);
     vec![]
   }
 
@@ -160,20 +170,24 @@ impl GtpClient for Client {
       return vec![ErrorEntity(b"invalid number of stones".to_vec())];
     }
     // XXX: The black player places the handicap stones.
-    if !self.agent.is_valid() {
+    /*if !self.agent.is_valid() {
       self.agent_builder.own_color(Stone::Black);
       self.agent_builder.remaining_defaults();
       self.agent = self.agent_builder.build();
-    }
+    }*/
+    // TODO(20151108)
+    unimplemented!();
     // TODO(20151008): check for empty board.
     /*if self.agent.is_valid() {
       return vec![ErrorEntity(b"board not empty".to_vec())];
     }*/
     let mut vertexes = vec![];
     for &pos in self.pre_game.fixed_handicap_positions(num_stones).iter() {
-      let coord = pos.to_coord();
+      // TODO(20151108)
+      /*let coord = pos.to_coord();
       self.agent_builder.place_handicap(pos);
-      vertexes.push(VertexEntity(Vertex::Play(coord)));
+      vertexes.push(VertexEntity(Vertex::Play(coord)));*/
+      unimplemented!();
     }
     vertexes
   }
@@ -187,31 +201,37 @@ impl GtpClient for Client {
       return vec![ErrorEntity(b"invalid number of stones".to_vec())];
     }
     // XXX: The black player places the handicap stones.
-    if !self.agent.is_valid() {
+    // TODO(20151108)
+    /*if !self.agent.is_valid() {
       self.agent_builder.own_color(Stone::Black);
       self.agent_builder.remaining_defaults();
       self.agent = self.agent_builder.build();
-    }
+    }*/
+    unimplemented!();
     // TODO(20151008): check for empty board.
     /*if self.agent.is_valid() {
       return vec![ErrorEntity(b"board not empty".to_vec())];
     }*/
     let mut vertexes = vec![];
     for &pos in self.pre_game.prefer_handicap_positions(num_stones).iter() {
-      let coord = pos.to_coord();
+      // TODO(20151108)
+      /*let coord = pos.to_coord();
       self.agent_builder.place_handicap(pos);
-      vertexes.push(VertexEntity(Vertex::Play(coord)));
+      vertexes.push(VertexEntity(Vertex::Play(coord)));*/
+      unimplemented!();
     }
     vertexes
   }
 
   fn reply_set_free_handicap(&mut self, args: &[Vec<u8>]) -> Vec<Entity> {
     // XXX: The black player places the handicap stones.
-    if !self.agent.is_valid() {
+    // TODO(20151108)
+    /*if !self.agent.is_valid() {
       self.agent_builder.own_color(Stone::White);
       self.agent_builder.remaining_defaults();
       self.agent = self.agent_builder.build();
-    }
+    }*/
+    unimplemented!();
     // TODO(20151008): check for empty board.
     /*if self.agent.is_valid() {
       return vec![ErrorEntity(b"board not empty".to_vec())];
@@ -221,8 +241,10 @@ impl GtpClient for Client {
         VertexEntity(Vertex::Play(coord)) => coord,
         _ => return vec![ErrorEntity(b"bad vertex list".to_vec())],
       };
-      let pos = Pos::from_coord(coord);
-      self.agent_builder.place_handicap(pos);
+      // TODO(20151108)
+      /*let pos = Pos::from_coord(coord);
+      self.agent_builder.place_handicap(pos);*/
+      unimplemented!();
     }
     vec![]
   }
@@ -237,7 +259,7 @@ impl GtpClient for Client {
     // TODO(20151006): can we assume that play commands are always for the
     // opponent's moves? seems like there may be cases where this is not
     // true.
-    if !self.agent.is_valid() {
+    /*if !self.agent.is_valid() {
       self.agent_builder.own_color(Stone::from_player(player).opponent());
       self.agent = self.agent_builder.build();
     }
@@ -245,7 +267,18 @@ impl GtpClient for Client {
       MoveResult::Okay        => vec![],
       MoveResult::IllegalMove => vec![ErrorEntity(b"illegal move".to_vec())],
       _ => unreachable!(),
-    }
+    }*/
+    let turn = match player {
+      Player::Black => Stone::Black,
+      Player::White => Stone::White,
+    };
+    let action = match vertex {
+      Vertex::Resign  => Action::Resign,
+      Vertex::Pass    => Action::Pass,
+      Vertex::Play(c) => Action::Place{point: Point::from_coord(c)},
+    };
+    self.agent.apply_action(turn, action);
+    vec![]
   }
 
   fn reply_genmove(&mut self, args: &[Vec<u8>]) -> Vec<Entity> {
@@ -253,23 +286,36 @@ impl GtpClient for Client {
       ColorEntity(player) => player,
       _ => return vec![ErrorEntity(b"syntax error".to_vec())],
     };
-    if !self.agent.is_valid() {
+    /*if !self.agent.is_valid() {
       self.agent_builder.own_color(Stone::from_player(player));
       self.agent_builder.remaining_defaults();
       self.agent = self.agent_builder.build();
     }
-    let vertex = self.agent.gen_move_external(player);
+    let vertex = self.agent.gen_move_external(player);*/
+    let turn = match player {
+      Player::Black => Stone::Black,
+      Player::White => Stone::White,
+    };
+    let action = self.agent.act(turn);
+    self.agent.apply_action(turn, action);
+    let vertex = match action {
+      Action::Resign        => Vertex::Resign,
+      Action::Pass          => Vertex::Pass,
+      Action::Place{point}  => Vertex::Play(point.to_coord()),
+    };
     vec![VertexEntity(vertex)]
   }
 
   fn reply_undo(&mut self) -> Vec<Entity> {
-    if !self.agent.is_valid() {
+    /*if !self.agent.is_valid() {
       return vec![ErrorEntity(b"cannot undo".to_vec())];
     }
     match self.agent.undo() {
       UndoResult::Okay        => vec![],
       UndoResult::CannotUndo  => vec![ErrorEntity(b"cannot undo".to_vec())],
-    }
+    }*/
+    self.agent.undo();
+    vec![]
   }
 
   // Tournament commands.
@@ -292,7 +338,8 @@ impl GtpClient for Client {
       byo_yomi_time_s:  byo_yomi_time,
       stones:           stones,
     };
-    self.agent_builder.time_system(time_system);
+    // TODO(20151108)
+    /*self.agent_builder.time_system(time_system);*/
     vec![]
   }
 
@@ -344,7 +391,8 @@ impl GtpClient for Client {
       b"new_zealand"  => RuleSystem::NewZealand,
       x => panic!("FATAL: unknown kgs-rules rule system: '{}'", from_utf8(x).unwrap()),
     };
-    self.agent_builder.rule_system(rule_system);
+    // TODO(20151108)
+    /*self.agent_builder.rule_system(rule_system);*/
     vec![]
   }
 
@@ -402,7 +450,8 @@ impl GtpClient for Client {
       }
       _ => return vec![ErrorEntity(b"unsupported time system".to_vec())],
     };
-    self.agent_builder.time_system(time_system);
+    // TODO(20151108)
+    /*self.agent_builder.time_system(time_system);*/
     vec![]
   }
 
@@ -423,7 +472,9 @@ impl GtpClient for Client {
   // Debug commands.
 
   fn reply_showboard(&mut self) -> Vec<Entity> {
-    let mut lines = Vec::new();
+    // TODO(20151108)
+    vec![]
+    /*let mut lines = Vec::new();
     lines.push(StringEntity(b" ".to_vec()));
     let mut line = b"   ".to_vec();
     for x in (0 .. 19u8) {
@@ -485,6 +536,6 @@ impl GtpClient for Client {
       line.extend(b" ");
     }
     lines.push(StringEntity(line));
-    [MultilineListEntity(lines)].to_vec()
+    [MultilineListEntity(lines)].to_vec()*/
   }
 }

@@ -126,6 +126,7 @@ impl Agent for ConvnetAgent {
   }
 
   fn undo(&mut self) {
+    // FIXME(20151108): track ply; limit to how far we can undo.
     if let Some((prev_state, _)) = self.history.pop() {
       self.state.clone_from(&prev_state);
     } else {
@@ -149,15 +150,14 @@ impl Agent for ConvnetAgent {
     let mut action = Action::Pass;
     for k in (0 .. Board::SIZE) {
       let place_point = Point(ranked_labels[k] as i16);
-      match state.try_place(turn, place_point) {
+      let res = state.try_place(turn, place_point);
+      state.undo();
+      match res {
         Ok(_) => {
-          state.undo();
           action = Action::Place{point: place_point};
           break;
         }
-        Err(_) => {
-          state.undo();
-        }
+        Err(_) => {}
       }
     }
     action

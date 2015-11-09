@@ -3,8 +3,9 @@ set -e
 set -u
 
 #GNUGO_FLAGS="--level 8"
-GNUGO_FLAGS="--level 0 --chinese-rules --positional-superko"
-GNUGO="../bin/gnugo ${GNUGO_FLAGS} --mode gtp --gtp-connect 127.0.0.1:6061"
+#GNUGO_FLAGS="--level 0 --chinese-rules --positional-superko"
+GNUGO_FLAGS="--level 10 --chinese-rules"
+GNUGO="../bin/gnugo-3.8 ${GNUGO_FLAGS} --mode gtp --gtp-connect 127.0.0.1:6061"
 
 HOLMES_PRELUDE=
 #HOLMES_PRELUDE=/data0/bin/operf
