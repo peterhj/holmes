@@ -24,6 +24,7 @@ pub mod book;
 pub mod contains;
 pub mod fastboard;
 //pub mod fasttree;
+pub mod features;
 pub mod game;
 pub mod gtp;
 pub mod gtp_board;

@@ -24,6 +24,10 @@ name = "extract-gogod-data"
 path = "tools/extract-gogod-data.rs"
 
 [[bin]]
+name = "measure-holmes-vs-gnugo"
+path = "tools/measure-holmes-vs-gnugo.rs"
+
+[[bin]]
 name = "test-book"
 path = "tools/test-book.rs"
 

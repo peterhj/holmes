@@ -16,4 +16,5 @@ HOLMES="./target/release/holmes-gtp -h 127.0.0.1 -p 6060"
 RUST_BACKTRACE=1 ./target/release/gtpctl &
 sleep 1
 ${GNUGO} &
+sleep 1
 RUST_BACKTRACE=1 ${HOLMES_PRELUDE} ${HOLMES}

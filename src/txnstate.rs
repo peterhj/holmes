@@ -1,22 +1,11 @@
 use board::{Board, Rules, RuleSet, Coord, Stone, Point, Action};
 use gtp_board::{dump_xcoord};
-use util::{slice_twice_mut};
 
 use bit_set::{BitSet};
 use std::cmp::{max};
 use std::iter::{repeat};
-use std::slice::bytes::{copy_memory};
 
 pub const TOMBSTONE:  Point = Point(-1);
-
-pub const BLACK_PLANE:      usize = 0;
-pub const WHITE_PLANE:      usize = 1 * Board::SIZE;
-/*pub const ATARI_PLANE:      usize = 2 * Board::SIZE;
-pub const LIVE_2_PLANE:     usize = 3 * Board::SIZE;
-pub const LIVE_3_PLANE:     usize = 4 * Board::SIZE;*/
-pub const FEAT_PLANES:      usize = 2;
-//pub const FEAT_PLANES:      usize = 5;
-pub const FEAT_TIME_STEPS:  usize = 2;
 
 pub fn for_each_adjacent<F>(point: Point, mut f: F) where F: FnMut(Point) {
   let (x, y) = (point.0 % Board::DIM_PT.0, point.0 / Board::DIM_PT.0);
@@ -75,129 +64,9 @@ pub trait TxnStateData {
   fn update(&mut self, position: &TxnPosition, chains: &TxnChainsList) {
     // Do nothing.
   }
-
-  fn undo(&mut self) {
-    // Do nothing.
-  }
 }
 
 impl TxnStateData for () {
-}
-
-#[derive(Clone)]
-pub struct TxnStateFeaturesData {
-  features: Vec<u8>,
-  time_step_offset: usize,
-}
-
-impl TxnStateFeaturesData {
-  pub fn new() -> TxnStateFeaturesData {
-    TxnStateFeaturesData{
-      features: repeat(0).take(FEAT_TIME_STEPS * FEAT_PLANES * Board::SIZE).collect(),
-      time_step_offset: 0,
-    }
-  }
-
-  pub fn feature_dims(&self) -> (usize, usize, usize) {
-    (Board::DIM, Board::DIM, FEAT_TIME_STEPS * FEAT_PLANES)
-  }
-
-  pub fn extract_relative_features(&self, turn: Stone, dst_buf: &mut [u8]) {
-    let slice_sz = FEAT_PLANES * Board::SIZE;
-    let init_time_step = self.time_step_offset;
-    let mut time_step = init_time_step;
-    let mut dst_time_step = 0;
-    loop {
-      let src_offset = time_step * slice_sz;
-      let dst_offset = dst_time_step * slice_sz;
-      match turn {
-        Stone::Black => {
-          copy_memory(
-              &self.features[src_offset .. src_offset + slice_sz],
-              &mut dst_buf[dst_offset .. dst_offset + slice_sz],
-          );
-        }
-        Stone::White => {
-          copy_memory(
-              &self.features[src_offset + BLACK_PLANE .. src_offset + BLACK_PLANE + Board::SIZE],
-              &mut dst_buf[dst_offset + WHITE_PLANE .. dst_offset + WHITE_PLANE + Board::SIZE],
-          );
-          copy_memory(
-              &self.features[src_offset + WHITE_PLANE .. src_offset + WHITE_PLANE + Board::SIZE],
-              &mut dst_buf[dst_offset + BLACK_PLANE .. dst_offset + BLACK_PLANE + Board::SIZE],
-          );
-          /*copy_memory(
-              &self.features[time_step * slice_sz + ATARI_PLANE .. (time_step + 1) * slize_sz],
-              &mut dst_buf[dst_time_step * slice_sz + ATARI_PLANE .. (dst_time_step + 1) * slice_sz],
-          );*/
-        }
-        _ => unreachable!(),
-      }
-      time_step = (time_step + FEAT_TIME_STEPS - 1) % FEAT_TIME_STEPS;
-      dst_time_step += 1;
-      if time_step == init_time_step {
-        assert_eq!(FEAT_TIME_STEPS, dst_time_step);
-        break;
-      }
-    }
-  }
-}
-
-impl TxnStateData for TxnStateFeaturesData {
-  fn reset(&mut self) {
-    assert_eq!(FEAT_TIME_STEPS * FEAT_PLANES * Board::SIZE, self.features.len());
-    for p in (0 .. self.features.len()) {
-      self.features[p] = 0;
-    }
-    self.time_step_offset = 0;
-  }
-
-  fn update(&mut self, position: &TxnPosition, chains: &TxnChainsList) {
-    self.time_step_offset = (self.time_step_offset + 1) % FEAT_TIME_STEPS;
-    let slice_sz = FEAT_PLANES * Board::SIZE;
-    let next_slice_off = self.time_step_offset;
-    if FEAT_TIME_STEPS > 1 {
-      let prev_slice_off = (self.time_step_offset + FEAT_TIME_STEPS - 1) % FEAT_TIME_STEPS;
-      let (src_feats, mut dst_feats) = slice_twice_mut(
-          &mut self.features,
-          prev_slice_off * slice_sz, (prev_slice_off + 1) * slice_sz,
-          next_slice_off * slice_sz, (next_slice_off + 1) * slice_sz,
-      );
-      copy_memory(src_feats, &mut dst_feats);
-    }
-    let next_start = next_slice_off * slice_sz;
-    let next_end = next_start + slice_sz;
-    {
-      // TODO(20151107): iterate over placed and killed chains to update stone
-      // repr.
-      let mut features = &mut self.features[next_start .. next_end];
-      if let Some((stone, point)) = position.last_placed {
-        let p = point.idx();
-        match stone {
-          Stone::Black => {
-            features[BLACK_PLANE + p] = 1;
-            features[WHITE_PLANE + p] = 0;
-          }
-          Stone::White => {
-            features[BLACK_PLANE + p] = 0;
-            features[WHITE_PLANE + p] = 1;
-          }
-          Stone::Empty => { unreachable!(); }
-        }
-      }
-      for &point in position.last_killed[0].iter() {
-        let p = point.idx();
-        features[BLACK_PLANE + p] = 0;
-        features[WHITE_PLANE + p] = 0;
-      }
-      for &point in position.last_killed[1].iter() {
-        let p = point.idx();
-        features[BLACK_PLANE + p] = 0;
-        features[WHITE_PLANE + p] = 0;
-      }
-      // TODO(20151107): iterate over "touched" chains to update liberty repr.
-    }
-  }
 }
 
 #[derive(Clone)]
@@ -225,10 +94,6 @@ impl TxnStateData for TxnStateHeavyData {
   fn update(&mut self, position: &TxnPosition, chains: &TxnChainsList) {
     // TODO(20151106)
   }
-
-  fn undo(&mut self) {
-    panic!("FATAL: TxnStateHeavyData does not support txn undo!");
-  }
 }
 
 #[derive(Clone, Debug)]
@@ -237,10 +102,12 @@ pub struct TxnPosition {
   num_stones:   [usize; 2],
   stones:       Vec<Stone>,
   ko:           Option<(Stone, Point)>,
-  // FIXME(20151107): semantics of when `last_placed` and `last_killed` are
-  // valid is unclear; currently used as tmp variables.
-  last_placed:  Option<(Stone, Point)>,
-  last_killed:  Vec<Vec<Point>>,
+
+  // FIXME(20151107): Semantics of when `last_placed` and `last_killed` are
+  // valid is unclear; currently used as tmp variables that last until the end
+  // of .commit(). These are also used by TxnStateData.update().
+  pub last_placed:  Option<(Stone, Point)>,
+  pub last_killed:  Vec<Vec<Point>>,
 }
 
 #[derive(Clone, Debug)]

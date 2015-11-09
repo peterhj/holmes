@@ -954,12 +954,18 @@ impl GtpController {
             let current_move = self.play_client(Player::Black, &black_to_ctl_rx, &ctl_to_black_tx);
             let result = self.update_client(current_move, &white_to_ctl_rx, &ctl_to_white_tx);
             black_state.previous_move = Some(current_move);
+            if let Vertex::Resign = current_move.vertex {
+              break;
+            }
             result
           },
           Player::White => {
             let current_move = self.play_client(Player::White, &white_to_ctl_rx, &ctl_to_white_tx);
             let result = self.update_client(current_move, &black_to_ctl_rx, &ctl_to_black_tx);
             white_state.previous_move = Some(current_move);
+            if let Vertex::Resign = current_move.vertex {
+              break;
+            }
             result
           },
         };
@@ -977,8 +983,6 @@ impl GtpController {
             Vertex::Pass => {
               match white_state.previous_move.unwrap().vertex {
                 Vertex::Pass => {
-                  self.shutdown_client(&black_to_ctl_rx, &ctl_to_black_tx);
-                  self.shutdown_client(&white_to_ctl_rx, &ctl_to_white_tx);
                   // FIXME(20150104): We get a "receiving on a closed channel"
                   // panic message on termination.
                   break;
@@ -991,6 +995,8 @@ impl GtpController {
         }
         current_player = current_player.opponent();
       }
+      self.shutdown_client(&black_to_ctl_rx, &ctl_to_black_tx);
+      self.shutdown_client(&white_to_ctl_rx, &ctl_to_white_tx);
 
       break; // FIXME: stop after one game.
     }

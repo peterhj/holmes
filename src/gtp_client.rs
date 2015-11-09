@@ -362,7 +362,8 @@ impl GtpClient for Client {
 
   fn reply_final_score(&mut self) -> Vec<Entity> {
     // FIXME(20151003)
-    [StringEntity(format!("B+{}", 0.0).as_bytes().to_vec())].to_vec()
+    //[StringEntity(format!("B+{}", 0.0).as_bytes().to_vec())].to_vec()
+    [StringEntity(b"?".to_vec())].to_vec()
     /*let score = self.agent.score_board();
     if score > 0.0 {
       [StringEntity(format!("B+{}", score).as_slice().as_bytes().to_vec())].to_vec()

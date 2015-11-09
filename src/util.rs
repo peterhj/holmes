@@ -2,7 +2,7 @@ pub fn slice_twice_mut<T>(xs: &mut [T], lo1: usize, hi1: usize, lo2: usize, hi2:
   assert!(lo1 <= hi1);
   assert!(lo2 <= hi2);
   let mut flip = false;
-  let (lo1, hi1, lo2, hi2) = if (lo1 <= lo2) {
+  let (lo1, hi1, lo2, hi2) = if lo1 <= lo2 {
     (lo1, hi1, lo2, hi2)
   } else {
     flip = true;

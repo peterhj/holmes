@@ -1,6 +1,7 @@
 use agents::{Agent};
 use board::{Board, RuleSet, Stone, Point, Action};
-use txnstate::{TxnState, TxnStateFeaturesData};
+use features::{TxnStateFeaturesData};
+use txnstate::{TxnState};
 
 use async_cuda::context::{DeviceContext};
 use rembrandt::layer::{
@@ -70,7 +71,7 @@ impl ConvnetAgent {
     let conv6_layer = Conv2dLayer::new(0, final_conv_layer_cfg, batch_size, Some(&conv5_layer), &ctx);
     let softmax_layer = SoftmaxLossLayer::new(0, loss_layer_cfg, batch_size, Some(&conv6_layer));
     let mut arch = LinearNetArch::new(
-        PathBuf::from("experiments/models/tmp_19x19x4.v2"),
+        PathBuf::from("experiments/models/action_6layer_19x19x4.v2"),
         batch_size,
         data_layer,
         softmax_layer,
@@ -136,8 +137,11 @@ impl Agent for ConvnetAgent {
 
   fn act(&mut self, turn: Stone) -> Action {
     if self.history.len() > 0 {
-      if let Action::Pass = self.history[self.history.len() - 1].1 {
-        return Action::Pass;
+      match self.history[self.history.len() - 1].1 {
+        Action::Resign | Action::Pass => {
+          return Action::Pass;
+        }
+        _ => {}
       }
     }
     let &mut ConvnetAgent{
