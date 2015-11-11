@@ -93,7 +93,7 @@ fn train_simba_2_layers() {
       PathBuf::from("experiments/models/maddison_3_layers"),
       batch_size,
       data_layer,
-      softmax_layer,
+      Box::new(softmax_layer),
       vec![
         Box::new(conv1_layer),
         Box::new(conv2_layer),

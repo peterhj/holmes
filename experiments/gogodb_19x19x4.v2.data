@@ -1,0 +1,11 @@
+[dataset.train]
+source        = "arraydb"
+data_path     = "/data0/go/gogodb-preproc/train_frames_19x19x4.v2.arraydb"
+labels_path   = "/data0/go/gogodb-preproc/train_action_labels_19x19x4.v2.arraydb"
+#labels2_path  = "/data0/go/gogodb-preproc/train_value_labels_19x19x4.v2.arraydb"
+
+[dataset.valid]
+source        = "arraydb"
+data_path     = "/data0/go/gogodb-preproc/valid_frames_19x19x4.v2.arraydb"
+labels_path   = "/data0/go/gogodb-preproc/valid_action_labels_19x19x4.v2.arraydb"
+#labels2_path  = "/data0/go/gogodb-preproc/valid_value_labels_19x19x4.v2.arraydb"

@@ -82,7 +82,7 @@ impl ConvNetPriorPolicy {
         PathBuf::from("experiments/models/convnet_19x19x4_conv_9x9x16R_conv_3x3x1"),
         batch_size,
         data_layer,
-        softmax_layer,
+        Box::new(softmax_layer),
         vec![
           Box::new(conv1_layer),
           Box::new(conv2_layer),
@@ -620,7 +620,7 @@ impl ConvNetBatchRolloutPolicy {
         PathBuf::from("experiments/models/convnet_19x19x4_conv_9x9x16R_conv_3x3x1"),
         batch_size,
         data_layer,
-        softmax_layer,
+        Box::new(softmax_layer),
         vec![
           Box::new(conv1_layer),
           Box::new(conv2_layer),

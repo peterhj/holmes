@@ -28,6 +28,10 @@ name = "measure-holmes-vs-gnugo"
 path = "tools/measure-holmes-vs-gnugo.rs"
 
 [[bin]]
+name = "train-mimic-19x19x4"
+path = "tools/train-mimic-19x19x4.rs"
+
+[[bin]]
 name = "test-book"
 path = "tools/test-book.rs"
 
@@ -85,6 +89,7 @@ bit-vec = "*"
 bufstream = "*"
 byteorder = "*"
 getopts = "*"
+libc = "*"
 #leveldb-rs = "0.0.5"
 rand = "*"
 rusqlite = "=0.4.0"

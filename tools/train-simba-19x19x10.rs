@@ -113,7 +113,7 @@ fn train_simba_2_layers() {
       PathBuf::from("experiments/models/tmp_19x19x10_hidden_64"),
       batch_size,
       data_layer,
-      softmax_layer,
+      Box::new(softmax_layer),
       vec![
         Box::new(conv1_layer),
         Box::new(conv2_layer),

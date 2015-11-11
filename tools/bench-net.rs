@@ -87,7 +87,7 @@ fn bench_net() {
       PathBuf::from(""),
       batch_size,
       data_layer,
-      softmax_layer,
+      Box::new(softmax_layer),
       vec![
         Box::new(conv1_layer),
         Box::new(conv2_layer),

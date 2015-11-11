@@ -7,15 +7,13 @@ use rembrandt::data::{DatasetConfiguration, DataSourceBuilder};
 use rembrandt::layer::{
   Layer,
   ParamsInitialization, ActivationFunction,
-  DataLayerConfig, Conv2dLayerConfig, SoftmaxLossLayerConfig,
-};
-use rembrandt::layer::{
-  DataLayer, Conv2dLayer, SoftmaxLossLayer,
+  DataLayerConfig, MimicAffineLayerConfig, Conv2dLayerConfig, SoftmaxLossLayerConfig, L2LossLayerConfig,
+  DataLayer, MimicAffineLayer, Conv2dLayer, SoftmaxLossLayer, L2LossLayer,
 };
 use rembrandt::net::{NetArch, LinearNetArch};
 use rembrandt::opt::{
   OptConfig, DescentSchedule, AnnealingPolicy,
-  OptState, Optimizer, SgdOptimizer,
+  OptState, Optimizer, SgdOptimizer, MimicSgdOptimizer,
 };
 
 use async_cuda::context::{DeviceContext};
@@ -23,45 +21,14 @@ use async_cuda::context::{DeviceContext};
 use rand::{Rng, thread_rng};
 use std::path::{PathBuf};
 
+const BATCH_SIZE: usize = 128;
+
 fn main() {
   train_simba_2_layers();
 }
 
-fn train_simba_2_layers() {
-  let mut rng = thread_rng();
-  let ctx = DeviceContext::new(0);
-
-  let opt_cfg = OptConfig{
-    minibatch_size: 256,
-    max_iters:      500000,
-    momentum:       0.9,
-    l2_reg_coef:    0.0,
-    //init_step_size: 0.01,
-    //anneal:         AnnealingPolicy::Step{step_iters: 6144, decay: 0.1},
-    //anneal:         AnnealingPolicy::Step{step_iters: 12288, decay: 0.1},
-    //anneal:         AnnealingPolicy::StepOnce{step_iters: 3072, new_rate: 0.01},
-
-    /*init_step_size: 0.1,
-    anneal:         AnnealingPolicy::StepTwice{
-                      first_step: 3072, second_step: 6144,
-                      first_rate: 0.01, second_rate: 0.001,
-                    },*/
-
-    init_step_size: 0.01,
-    anneal:         AnnealingPolicy::StepTwice{
-                      /*first_step: 100000, second_step: 200000,
-                      first_rate: 0.001, second_rate: 0.0001,*/
-                      first_step:  100000, first_rate:  0.001,
-                      second_step: 200000, second_rate: 0.0001,
-                    },
-
-    display_interval:   20,
-    validate_interval:  800,
-    save_interval:      Some(800),
-  };
-  let descent = DescentSchedule::new(opt_cfg);
-
-  let batch_size = 256;
+fn build_target_arch(ctx: &DeviceContext) -> LinearNetArch {
+  let batch_size = BATCH_SIZE;
   let num_hidden = 64;
 
   let data_layer_cfg = DataLayerConfig{
@@ -108,9 +75,7 @@ fn train_simba_2_layers() {
   //let conv6_layer = Conv2dLayer::new(0, final_conv_layer_cfg, batch_size, Some(&conv2_layer), &ctx);
   let softmax_layer = SoftmaxLossLayer::new(0, loss_layer_cfg, batch_size, Some(&conv6_layer));
   let mut arch = LinearNetArch::new(
-      //PathBuf::from("experiments/models/tmp_19x19x4.v2"),
-      //PathBuf::from("experiments/models/tmp2_19x19x4.v2"),
-      PathBuf::from("experiments/models/tmp_scratch_19x19x4.v2"),
+      PathBuf::from("experiments/models/action_6layer_19x19x4.v2"),
       batch_size,
       data_layer,
       Box::new(softmax_layer),
@@ -123,12 +88,85 @@ fn train_simba_2_layers() {
         Box::new(conv6_layer),
       ],
   );
-  for layer in arch.hidden_layers_forward() {
-    layer.initialize_params(&ctx);
-  }
+  arch.load_layer_params(None, &ctx);
+  arch
+}
 
-  //let dataset_cfg = DatasetConfiguration::open(&PathBuf::from("experiments/gogodb_orig.data"));
-  //let dataset_cfg = DatasetConfiguration::open(&PathBuf::from("experiments/gogodb_19x19x4_move.data"));
+fn build_mimic_arch(ctx: &DeviceContext) -> LinearNetArch {
+  let batch_size = BATCH_SIZE;
+  let low_rank = 256;
+  let num_hidden = 16 * 1024;
+
+  let data_layer_cfg = DataLayerConfig{
+    raw_width: 19, raw_height: 19,
+    crop_width: 19, crop_height: 19,
+    channels: 4,
+  };
+  let mimic_layer_cfg = MimicAffineLayerConfig{
+    in_channels: 19 * 19 * 4,
+    bottleneck_rank: low_rank,
+    hidden_channels: num_hidden,
+    hidden_act_fun: ActivationFunction::Rect,
+    out_channels: 361,
+    init_weights: ParamsInitialization::Normal{mean: 0.0, std: 0.1},
+  };
+  let loss_layer_cfg = L2LossLayerConfig{
+    num_channels: 361,
+  };
+
+  let data_layer = DataLayer::new(0, data_layer_cfg, batch_size);
+  let mimic_layer = MimicAffineLayer::new(0, mimic_layer_cfg, batch_size, Some(&data_layer));
+  let loss_layer = L2LossLayer::new(0, loss_layer_cfg, batch_size, Some(&mimic_layer));
+  let mut arch = LinearNetArch::new(
+      PathBuf::from("experiments/models/tmp_action_mimic_19x19x4.v2"),
+      batch_size,
+      data_layer,
+      Box::new(loss_layer),
+      vec![
+        Box::new(mimic_layer),
+      ],
+  );
+  arch.initialize_layer_params(&ctx);
+  arch
+}
+
+fn train_simba_2_layers() {
+  let mut rng = thread_rng();
+  let ctx = DeviceContext::new(0);
+
+  let opt_cfg = OptConfig{
+    minibatch_size: BATCH_SIZE,
+    max_iters:      500000,
+    momentum:       0.0,
+    l2_reg_coef:    0.0,
+    //init_step_size: 0.01,
+    //anneal:         AnnealingPolicy::Step{step_iters: 6144, decay: 0.1},
+    //anneal:         AnnealingPolicy::Step{step_iters: 12288, decay: 0.1},
+    //anneal:         AnnealingPolicy::StepOnce{step_iters: 3072, new_rate: 0.01},
+
+    /*init_step_size: 0.1,
+    anneal:         AnnealingPolicy::StepTwice{
+                      first_step: 3072, second_step: 6144,
+                      first_rate: 0.01, second_rate: 0.001,
+                    },*/
+
+    init_step_size: 0.01,
+    anneal:         AnnealingPolicy::StepTwice{
+                      /*first_step: 100000, second_step: 200000,
+                      first_rate: 0.001, second_rate: 0.0001,*/
+                      first_step:  100000, first_rate:  0.0001,
+                      second_step: 200000, second_rate: 0.0001,
+                    },
+
+    display_interval:   20,
+    validate_interval:  800,
+    save_interval:      Some(12800),
+  };
+  let descent = DescentSchedule::new(opt_cfg);
+
+  let mut target_arch = build_target_arch(&ctx);
+  let mut mimic_arch = build_mimic_arch(&ctx);
+
   let dataset_cfg = DatasetConfiguration::open(&PathBuf::from("experiments/gogodb_19x19x4.v2.data"));
   let mut train_data_source = if let Some(&(ref name, ref cfg)) = dataset_cfg.datasets.get("train") {
     DataSourceBuilder::build(name, cfg.clone())
@@ -141,7 +179,7 @@ fn train_simba_2_layers() {
     panic!("missing validation data source!");
   };
 
-  let sgd = SgdOptimizer;
+  let sgd = MimicSgdOptimizer;
   let mut state = OptState{epoch: 0, t: 0};
-  sgd.train(&opt_cfg, &mut state, &mut arch, &mut *train_data_source, &mut *test_data_source, &ctx);
+  sgd.train(&opt_cfg, &mut state, &mut target_arch, &mut mimic_arch, &mut *train_data_source, &mut *test_data_source, &ctx);
 }

@@ -74,7 +74,7 @@ impl ConvnetAgent {
         PathBuf::from("experiments/models/action_6layer_19x19x4.v2"),
         batch_size,
         data_layer,
-        softmax_layer,
+        Box::new(softmax_layer),
         vec![
           Box::new(conv1_layer),
           Box::new(conv2_layer),
