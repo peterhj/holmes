@@ -32,6 +32,14 @@ name = "train-mimic-19x19x4"
 path = "tools/train-mimic-19x19x4.rs"
 
 [[bin]]
+name = "train-shallow-19x19x4"
+path = "tools/train-shallow-19x19x4.rs"
+
+[[bin]]
+name = "train-3layer-19x19x4"
+path = "tools/train-3layer-19x19x4.rs"
+
+[[bin]]
 name = "test-book"
 path = "tools/test-book.rs"
 

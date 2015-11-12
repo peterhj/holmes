@@ -20,8 +20,11 @@ pub fn array_prefix_sum(xs: &[f32], ys: &mut [f32]) {
   }
 }
 
-pub fn array_argmax(xs: &[f32]) -> usize {
-  unsafe { statistics_array_argmax(xs.as_ptr(), xs.len() as size_t) as usize }
+pub fn array_argmax(xs: &[f32]) -> Option<usize> {
+  match unsafe { statistics_array_argmax(xs.as_ptr(), xs.len() as size_t) as usize } {
+    -1 => None,
+    j => Some(j),
+  }
 }
 
 pub fn array_binary_search(xs: &[f32], query: f32) -> usize {

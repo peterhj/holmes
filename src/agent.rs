@@ -18,40 +18,6 @@ use rand::{Rng, thread_rng};
 use std::path::{PathBuf};
 use time::{Timespec, Duration, get_time};
 
-// XXX: See <http://www.lysator.liu.se/~gunnar/gtp/gtp2-spec-draft2/gtp2-spec.html#sec:fixed-handicap-placement>.
-static FIXED_HANDICAP_19X19_POSITIONS: [&'static [&'static [u8]]; 10] = [
-  &[],
-  &[],
-  &[b"D4", b"Q16"],
-  &[b"D4", b"Q16", b"D16"],
-  &[b"D4", b"Q16", b"D16", b"Q4"],
-  &[b"D4", b"Q16", b"D16", b"Q4", b"K10"],
-  &[b"D4", b"Q16", b"D16", b"Q4", b"D10", b"Q10"],
-  &[b"D4", b"Q16", b"D16", b"Q4", b"D10", b"Q10", b"K10"],
-  &[b"D4", b"Q16", b"D16", b"Q4", b"D10", b"Q10", b"K4", b"K16"],
-  &[b"D4", b"Q16", b"D16", b"Q4", b"D10", b"Q10", b"K4", b"K16", b"K10"],
-];
-
-#[derive(Default)]
-pub struct PreGame;
-
-impl PreGame {
-  pub fn fixed_handicap_positions(&self, num_stones: usize) -> Vec<Pos> {
-    assert!(num_stones >= 2 && num_stones <= 9);
-    let mut ps = vec![];
-    for &code in FIXED_HANDICAP_19X19_POSITIONS[num_stones] {
-      let coord = Coord::from_code(code);
-      let pos = Pos::from_coord(coord);
-      ps.push(pos);
-    }
-    ps
-  }
-
-  pub fn prefer_handicap_positions(&self, num_stones: usize) -> Vec<Pos> {
-    self.fixed_handicap_positions(num_stones)
-  }
-}
-
 #[derive(Default)]
 pub struct AgentBuilder {
   pub board_dim:    Option<i16>,

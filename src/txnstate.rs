@@ -45,12 +45,12 @@ pub type TxnResult = Result<(), TxnStatus>;
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub enum TxnStatus {
-  Illegal,
-  IllegalReason(TxnStatusIllegalReason),
+  Illegal(IllegalReason),
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
-pub enum TxnStatusIllegalReason {
+pub enum IllegalReason {
+  Noop,
   NotEmpty,
   Suicide,
   Ko,
@@ -754,27 +754,27 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
     let mut eyeish = true;
     for_each_adjacent(point, |adj_point| {
       if self.position.stones[adj_point.idx()] != stone {
-        if point == Point(262) {
+        /*if point == Point(262) {
           println!("DEBUG: is_eyelike: {:?}, 262: {} not same color",
               stone, adj_point.to_coord().to_string());
-        }
+        }*/
         eyeish = false;
       } else {
         let adj_head = self.chains.find_chain(adj_point);
         assert!(adj_head != TOMBSTONE);
         let adj_chain = self.chains.get_chain(adj_head).unwrap();
         if adj_chain.approx_count_libs() <= 1 {
-          if point == Point(262) {
+          /*if point == Point(262) {
             println!("DEBUG: is_eyelike: {:?}, 262: {} in atari",
                 stone, adj_point.to_coord().to_string());
-          }
+          }*/
           eyeish = false;
         }
       }
     });
-    if point == Point(262) {
+    /*if point == Point(262) {
       println!("DEBUG: is_eyelike: {:?}, 262: eyeish: {:?}", stone, eyeish);
-    }
+    }*/
     if !eyeish {
       return false;
     }
@@ -786,12 +786,15 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
         false_count += 1;
       }
     });
-    if point == Point(262) {
+    /*if point == Point(262) {
       println!("DEBUG: is_eyelike: {:?}, 262: false_count: {}", stone, false_count);
-    }
+    }*/
     false_count < 2
   }
 
+  /// A point is "eyeish" for a stone if:
+  /// - the point is surrounded on all sides by the stone, and
+  /// - the surrounding stones have at least 2 liberties.
   pub fn is_eyeish(&self, stone: Stone, point: Point) -> bool {
     let mut eyeish = true;
     for_each_adjacent(point, |adj_point| {
@@ -809,23 +812,38 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
     eyeish
   }
 
-  pub fn check_illegal_move_simple(&self, turn: Stone, point: Point) -> Option<TxnStatusIllegalReason> {
+  pub fn is_capture(&self, stone: Stone, point: Point) -> bool {
+    let mut capture = false;
+    for_each_adjacent(point, |adj_point| {
+      if self.position.stones[adj_point.idx()] == stone {
+        let adj_head = self.chains.find_chain(adj_point);
+        assert!(adj_head != TOMBSTONE);
+        let adj_chain = self.chains.get_chain(adj_head).unwrap();
+        if adj_chain.approx_count_libs() <= 1 {
+          capture = true;
+        }
+      }
+    });
+    capture
+  }
+
+  pub fn check_illegal_move_simple(&self, turn: Stone, point: Point) -> Option<IllegalReason> {
     let p = point.idx();
 
     // Illegal to place a stone on top of an existing stone.
     if self.position.stones[p] != Stone::Empty {
-      return Some(TxnStatusIllegalReason::NotEmpty);
+      return Some(IllegalReason::NotEmpty);
     }
 
     // Illegal to suicide (place in opponent's eye).
     if self.is_eyeish(turn.opponent(), point) {
-      return Some(TxnStatusIllegalReason::Suicide);
+      return Some(IllegalReason::Suicide);
     }
 
     // Illegal to place at ko point.
     if let Some((ko_turn, ko_point)) = self.position.ko {
       if ko_turn == turn && ko_point == point {
-        return Some(TxnStatusIllegalReason::Ko);
+        return Some(IllegalReason::Ko);
       }
     }
 
@@ -998,13 +1016,13 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
 
     // Do not allow an empty turn.
     if Stone::Empty == turn {
-      return Err(TxnStatus::Illegal);
+      return Err(TxnStatus::Illegal(IllegalReason::Noop));
     }
     // TODO(20151105): Allow placements out of turn, but somehow warn about it?
     let place_p = place_point.idx();
     // Do not allow simple illegal moves.
     if let Some(reason) = self.check_illegal_move_simple(turn, place_point) {
-      return Err(TxnStatus::IllegalReason(reason));
+      return Err(TxnStatus::Illegal(reason));
     }
 
     // Then, enable mutating state (and full undos).
@@ -1062,7 +1080,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
         turn, self.position.stones[360]);*/
 
     if num_suicided_stones > 0 {
-      Err(TxnStatus::IllegalReason(TxnStatusIllegalReason::Suicide))
+      Err(TxnStatus::Illegal(IllegalReason::Suicide))
     } else {
       Ok(())
     }

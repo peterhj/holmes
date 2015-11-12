@@ -1,6 +1,6 @@
 //use agent::{PreGame, AgentBuilder, Agent};
-use agent::{PreGame};
-use agents::{Agent};
+//use agent::{PreGame};
+use agents::{PreGame, Agent};
 use agents::convnet::{ConvnetAgent};
 use board::{Stone, Point, Action};
 //use fastboard::{PosExt, Pos, Stone};
