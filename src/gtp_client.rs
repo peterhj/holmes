@@ -2,11 +2,11 @@
 //use agent::{PreGame};
 use agents::{PreGame, Agent};
 use agents::convnet::{ConvnetAgent};
-use board::{Stone, Point, Action};
+use board::{RuleSet, Stone, Point, Action};
 //use fastboard::{PosExt, Pos, Stone};
 use gtp::{GtpClient, Entity};
 use gtp::Entity::*;
-use gtp_board::{Player, Coord, Vertex, RuleSystem, TimeSystem, MoveResult, UndoResult, dump_xcoord, dump_ycoord};
+use gtp_board::{Player, Coord, Vertex, TimeSystem, MoveResult, UndoResult, dump_xcoord, dump_ycoord};
 
 use std::str::{from_utf8};
 
@@ -132,7 +132,8 @@ impl GtpClient for Client {
       19 => {
         /*self.agent_builder.board_dim(size);
         self.agent.invalidate();*/
-        self.agent.reset();
+        // XXX(20151112): Often can get multiple board sizes; each call asserts
+        // that the specified board dimension is supported.
         self.agent.board_dim(board_dim);
       },
       _ => return vec![ErrorEntity(b"unacceptable size".to_vec())],
@@ -373,7 +374,11 @@ impl GtpClient for Client {
   }
 
   fn reply_final_status_list(&mut self, _args: &[Vec<u8>]) -> Vec<Entity> {
-    // TODO(20151006)
+    // TODO(20151112)
+    // General approaches:
+    // - use Benson's algorithm to mark stones that are "unconditionally alive"
+    // - use uniform playouts to determine which stones are dead with high
+    //   probability
     vec![]
   }
 
@@ -386,10 +391,10 @@ impl GtpClient for Client {
 
   fn reply_kgs_rules(&mut self, args: &[Vec<u8>]) -> Vec<Entity> {
     let rule_system = match &args[0] as &[u8] {
-      b"japanese"     => RuleSystem::Japanese,
-      b"chinese"      => RuleSystem::Chinese,
-      b"aga"          => RuleSystem::Aga,
-      b"new_zealand"  => RuleSystem::NewZealand,
+      b"japanese"     => RuleSet::KgsJapanese,
+      b"chinese"      => RuleSet::KgsChinese,
+      b"aga"          => RuleSet::KgsAga,
+      b"new_zealand"  => RuleSet::KgsNewZealand,
       x => panic!("FATAL: unknown kgs-rules rule system: '{}'", from_utf8(x).unwrap()),
     };
     // TODO(20151108)

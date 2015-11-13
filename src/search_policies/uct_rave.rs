@@ -33,7 +33,9 @@ impl UctRaveTreePolicy {
 }
 
 impl TreePolicy for UctRaveTreePolicy {
-  fn init(&mut self, node: &mut Node) {
+  fn rave(&self) -> bool { true }
+
+  fn init_node(&mut self, node: &mut Node) {
     self.update_values(node);
   }
 

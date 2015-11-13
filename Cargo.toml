@@ -40,6 +40,10 @@ name = "train-3layer-19x19x4"
 path = "tools/train-3layer-19x19x4.rs"
 
 [[bin]]
+name = "bench-discrete"
+path = "tools/bench-discrete.rs"
+
+[[bin]]
 name = "test-book"
 path = "tools/test-book.rs"
 

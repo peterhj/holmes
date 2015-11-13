@@ -1,4 +1,5 @@
 use board::{Board, Rules, RuleSet, Coord, Stone, Point, Action};
+use features::{TxnStateFeaturesData};
 use gtp_board::{dump_xcoord};
 
 use bit_set::{BitSet};
@@ -41,6 +42,49 @@ pub fn for_each_diagonal<F>(point: Point, mut f: F) where F: FnMut(Point) {
   }
 }
 
+/// A point is "eyeish" for a stone if:
+/// - the point is surrounded on all sides by the stone, and
+/// - the surrounding stones have at least 2 liberties.
+pub fn is_eyeish(position: &TxnPosition, chains: &TxnChainsList, stone: Stone, point: Point) -> bool {
+  let mut eyeish = true;
+  for_each_adjacent(point, |adj_point| {
+    if position.stones[adj_point.idx()] != stone {
+      eyeish = false;
+    } else {
+      let adj_head = chains.find_chain(adj_point);
+      assert!(adj_head != TOMBSTONE);
+      let adj_chain = chains.get_chain(adj_head).unwrap();
+      if adj_chain.approx_count_libs() <= 1 {
+        eyeish = false;
+      }
+    }
+  });
+  eyeish
+}
+
+pub fn check_illegal_move_simple(position: &TxnPosition, chains: &TxnChainsList, turn: Stone, point: Point) -> Option<IllegalReason> {
+  let p = point.idx();
+
+  // Illegal to place a stone on top of an existing stone.
+  if position.stones[p] != Stone::Empty {
+    return Some(IllegalReason::NotEmpty);
+  }
+
+  // Illegal to suicide (place in opponent's eye).
+  if is_eyeish(position, chains, turn.opponent(), point) {
+    return Some(IllegalReason::Suicide);
+  }
+
+  // Illegal to place at ko point.
+  if let Some((ko_turn, ko_point)) = position.ko {
+    if ko_turn == turn && ko_point == point {
+      return Some(IllegalReason::Ko);
+    }
+  }
+
+  None
+}
+
 pub type TxnResult = Result<(), TxnStatus>;
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
@@ -61,7 +105,8 @@ pub trait TxnStateData {
     // Do nothing.
   }
 
-  fn update(&mut self, position: &TxnPosition, chains: &TxnChainsList) {
+  //fn update(&mut self, position: &TxnPosition, chains: &TxnChainsList) {
+  fn update(&mut self, position: &TxnPosition, chains: &TxnChainsList, update_turn: Stone, update_action: Action) {
     // Do nothing.
   }
 }
@@ -70,29 +115,100 @@ impl TxnStateData for () {
 }
 
 #[derive(Clone)]
-pub struct TxnStateHeavyData {
-  cached_illegal_moves: Vec<BitSet>,
+pub struct TxnStateLegalityData {
+  cached_legal_moves: Vec<BitSet>,
+  test_state: TxnState,
 }
 
-impl TxnStateHeavyData {
-  pub fn new() -> TxnStateHeavyData {
-    TxnStateHeavyData{
-      cached_illegal_moves: vec![
+impl TxnStateLegalityData {
+  pub fn new() -> TxnStateLegalityData {
+    TxnStateLegalityData{
+      cached_legal_moves: vec![
         BitSet::with_capacity(Board::SIZE),
         BitSet::with_capacity(Board::SIZE),
       ],
+      test_state: TxnState::new(RuleSet::KgsJapanese.rules(), ()),
+    }
+  }
+
+  fn update_point(&mut self, position: &TxnPosition, chains: &TxnChainsList, point: Point) {
+    for &turn in [Stone::Black, Stone::White].iter() {
+      let turn_off = turn.offset();
+      if check_illegal_move_simple(position, chains, turn, point).is_some() {
+        self.cached_legal_moves[turn_off].remove(&point.idx());
+      } else {
+        if self.test_state.try_place(turn, point).is_err() {
+          self.cached_legal_moves[turn_off].remove(&point.idx());
+        } else {
+          self.cached_legal_moves[turn_off].insert(point.idx());
+        }
+        self.test_state.undo();
+      }
     }
   }
 }
 
-impl TxnStateData for TxnStateHeavyData {
+impl TxnStateData for TxnStateLegalityData {
   fn reset(&mut self) {
-    self.cached_illegal_moves[0].clear();
-    self.cached_illegal_moves[1].clear();
+    self.cached_legal_moves[0].clear();
+    self.cached_legal_moves[1].clear();
+    self.test_state.reset();
   }
 
-  fn update(&mut self, position: &TxnPosition, chains: &TxnChainsList) {
-    // TODO(20151106)
+  fn update(&mut self, position: &TxnPosition, chains: &TxnChainsList, update_turn: Stone, update_action: Action) {
+    // FIXME(20151112): need to apply the action.
+    /*match self.test_state.try_action(update_turn, update_action) {
+      Ok(_) => { self.test_state.commit(); }
+      Err(_) => { panic!("TxnStateLegalityData encountered an illegal update!"); }
+    }*/
+
+    // TODO(20151112)
+    // Update the points:
+    // - the last placed stone
+    // - captured stones (now empty points)
+    // - pseudolibs of chains adjacent to last placed stone
+    // - pseudolibs of chains adjacent to captured stones
+    // The last two could really use a `last_mut_heads` field in chains list.
+    if let Some((place_stone, place_point)) = position.last_placed {
+      self.update_point(position, chains, place_point);
+    }
+    for &kill_point in position.last_killed[0].iter().chain(position.last_killed[1].iter()) {
+      self.update_point(position, chains, kill_point);
+    }
+    for &head in chains.last_mut_heads.iter() {
+      if let Some(chain) = chains.get_chain(head) {
+        for &lib in chain.ps_libs.iter() {
+          self.update_point(position, chains, lib);
+        }
+      }
+    }
+  }
+}
+
+#[derive(Clone)]
+pub struct TxnStateNodeData {
+  pub features: TxnStateFeaturesData,
+  pub legality: TxnStateLegalityData,
+}
+
+impl TxnStateNodeData {
+  pub fn new() -> TxnStateNodeData {
+    TxnStateNodeData{
+      features: TxnStateFeaturesData::new(),
+      legality: TxnStateLegalityData::new(),
+    }
+  }
+}
+
+impl TxnStateData for TxnStateNodeData {
+  fn reset(&mut self) {
+    self.features.reset();
+    self.legality.reset();
+  }
+
+  fn update(&mut self, position: &TxnPosition, chains: &TxnChainsList, update_turn: Stone, update_action: Action) {
+    self.features.update(position, chains, update_turn, update_action);
+    self.legality.update(position, chains, update_turn, update_action);
   }
 }
 
@@ -106,6 +222,7 @@ pub struct TxnPosition {
   // FIXME(20151107): Semantics of when `last_placed` and `last_killed` are
   // valid is unclear; currently used as tmp variables that last until the end
   // of .commit(). These are also used by TxnStateData.update().
+  pub last_move:    Option<(Stone, Action)>,
   pub last_placed:  Option<(Stone, Point)>,
   pub last_killed:  Vec<Vec<Point>>,
 }
@@ -290,8 +407,10 @@ pub struct TxnChainsList {
   roots:      Vec<Point>,
   links:      Vec<Point>,
 
-  mut_chains: Vec<Point>,
-  ops:        Vec<ChainOp>,
+  mut_chains: Vec<Point>,     // chain heads which were modified this round.
+  ops:        Vec<ChainOp>,   // chain operations this round.
+
+  last_mut_heads: Vec<Point>, // a duplicate of `mut_chains` (for Data.update()).
 }
 
 impl TxnChainsList {
@@ -304,6 +423,7 @@ impl TxnChainsList {
       links:      nils,
       mut_chains: Vec::with_capacity(4),
       ops:        Vec::with_capacity(4),
+      last_mut_heads: Vec::with_capacity(4),
     }
   }
 
@@ -316,6 +436,7 @@ impl TxnChainsList {
     }
     self.mut_chains.clear();
     self.ops.clear();
+    self.last_mut_heads.clear();
   }
 
   pub fn find_chain(&self, point: Point) -> Point {
@@ -505,6 +626,7 @@ impl TxnChainsList {
         }
       }
     }
+    self.last_mut_heads.extend(self.mut_chains.iter());
     self.mut_chains.clear();
     self.ops.clear();
   }
@@ -573,6 +695,7 @@ impl TxnChainsList {
     }
     self.mut_chains.clear();
     self.ops.clear();
+    self.last_mut_heads.clear();
   }
 }
 
@@ -615,6 +738,23 @@ pub struct TxnState<Data=()> where Data: TxnStateData + Clone {
   data:         Data,
 }
 
+impl TxnState<()> {
+  pub fn shrink_clone_from<Data>(&mut self, other: &TxnState<Data>) where Data: TxnStateData + Clone {
+    assert!(!self.in_txn);
+    assert!(!other.in_txn);
+    self.rules        = other.rules;
+    self.in_soft_txn  = false;
+    self.in_txn       = false;
+    self.txn_mut      = false;
+    self.resigned     = other.resigned.clone();
+    self.passed       = other.passed.clone();
+    self.num_captures = other.num_captures.clone();
+    self.position     = other.position.clone();
+    self.proposal     = other.proposal.clone();
+    self.chains       = other.chains.clone();
+  }
+}
+
 impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
   pub fn new(rules: Rules, data: Data) -> TxnState<Data> {
     let mut stones: Vec<Stone> = repeat(Stone::Empty).take(Board::SIZE).collect();
@@ -631,6 +771,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
         num_stones:   [0, 0],
         stones:       stones,
         ko:           None,
+        last_move:    None,
         last_placed:  None,
         last_killed:  vec![
           vec![],
@@ -734,7 +875,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
   pub fn iter_legal_moves_accurate<F>(&mut self, turn: Stone, /*scratch: &mut TxnStateScratch,*/ mut f: F) where F: FnMut(Point) {
     for p in (0 .. Board::SIZE as i16) {
       let point = Point(p);
-      if self.check_illegal_move_simple(turn, point).is_some() {
+      if check_illegal_move_simple(&self.position, &self.chains, turn, point).is_some() {
         continue;
       }
       match self.try_place(turn, point) {
@@ -792,26 +933,6 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
     false_count < 2
   }
 
-  /// A point is "eyeish" for a stone if:
-  /// - the point is surrounded on all sides by the stone, and
-  /// - the surrounding stones have at least 2 liberties.
-  pub fn is_eyeish(&self, stone: Stone, point: Point) -> bool {
-    let mut eyeish = true;
-    for_each_adjacent(point, |adj_point| {
-      if self.position.stones[adj_point.idx()] != stone {
-        eyeish = false;
-      } else {
-        let adj_head = self.chains.find_chain(adj_point);
-        assert!(adj_head != TOMBSTONE);
-        let adj_chain = self.chains.get_chain(adj_head).unwrap();
-        if adj_chain.approx_count_libs() <= 1 {
-          eyeish = false;
-        }
-      }
-    });
-    eyeish
-  }
-
   pub fn is_capture(&self, stone: Stone, point: Point) -> bool {
     let mut capture = false;
     for_each_adjacent(point, |adj_point| {
@@ -825,29 +946,6 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
       }
     });
     capture
-  }
-
-  pub fn check_illegal_move_simple(&self, turn: Stone, point: Point) -> Option<IllegalReason> {
-    let p = point.idx();
-
-    // Illegal to place a stone on top of an existing stone.
-    if self.position.stones[p] != Stone::Empty {
-      return Some(IllegalReason::NotEmpty);
-    }
-
-    // Illegal to suicide (place in opponent's eye).
-    if self.is_eyeish(turn.opponent(), point) {
-      return Some(IllegalReason::Suicide);
-    }
-
-    // Illegal to place at ko point.
-    if let Some((ko_turn, ko_point)) = self.position.ko {
-      if ko_turn == turn && ko_point == point {
-        return Some(IllegalReason::Ko);
-      }
-    }
-
-    None
   }
 
   pub fn check_ko_candidate(&self, place_turn: Stone, place_point: Point, ko_point: Point) -> bool {
@@ -888,6 +986,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
         self.proposal.resigned = None;
         self.proposal.next_turn = turn.opponent();
         self.proposal.next_ko = None;
+        self.position.last_move = Some((turn, action));
         Ok(())
       }
       Action::Resign => {
@@ -895,6 +994,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
         self.proposal.resigned = Some(turn);
         self.proposal.next_turn = turn.opponent();
         self.proposal.next_ko = None;
+        self.position.last_move = Some((turn, action));
         Ok(())
       }
     }
@@ -1021,7 +1121,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
     // TODO(20151105): Allow placements out of turn, but somehow warn about it?
     let place_p = place_point.idx();
     // Do not allow simple illegal moves.
-    if let Some(reason) = self.check_illegal_move_simple(turn, place_point) {
+    if let Some(reason) = check_illegal_move_simple(&self.position, &self.chains, turn, place_point) {
       return Err(TxnStatus::Illegal(reason));
     }
 
@@ -1050,6 +1150,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
     self.position.turn = turn;
     self.position.num_stones[turn.offset()] += 1;
     self.position.stones[place_p] = turn;
+    self.position.last_move = Some((turn, Action::Place{point: place_point}));
     self.position.last_placed = Some((turn, place_point));
     self.position.last_killed[0].clear();
     self.position.last_killed[1].clear();
@@ -1101,14 +1202,17 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
       self.chains.commit();
 
       // Run changes on the extra data.
-      self.data.update(&self.position, &self.chains);
+      let (update_turn, update_point) = self.position.last_move.unwrap();
+      self.data.update(&self.position, &self.chains, update_turn, update_point);
 
       self.num_captures[0] += self.position.last_killed[1].len();
       self.num_captures[1] += self.position.last_killed[0].len();
 
+      self.position.last_move = None;
       self.position.last_placed = None;
       self.position.last_killed[0].clear();
       self.position.last_killed[1].clear();
+      self.chains.last_mut_heads.clear();
     }
 
     /*let test_head = self.chains.find_chain(Point(283));
@@ -1157,9 +1261,11 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
         self.position.turn = self.proposal.prev_turn;
         self.position.ko = self.proposal.prev_ko;
 
+        self.position.last_move = None;
         self.position.last_placed = None;
         self.position.last_killed[0].clear();
         self.position.last_killed[1].clear();
+        self.chains.last_mut_heads.clear();
       }
     }
 
@@ -1362,7 +1468,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
             if self.position.stones[ptr] == Stone::Empty {
               let turn = self.current_turn();
               let point = Point(ptr as i16);
-              if self.check_illegal_move_simple(turn, point).is_some() {
+              if check_illegal_move_simple(&self.position, &self.chains, turn, point).is_some() {
                 illegal = true;
               } else {
                 if self.try_place(turn, point).is_err() {

@@ -1,4 +1,4 @@
-use board::{Board, Stone};
+use board::{Board, Stone, Action};
 use txnstate::{TxnStateData, TxnPosition, TxnChainsList};
 use util::{slice_twice_mut};
 
@@ -78,7 +78,8 @@ impl TxnStateData for TxnStateFeaturesData {
     self.time_step_offset = 0;
   }
 
-  fn update(&mut self, position: &TxnPosition, chains: &TxnChainsList) {
+  //fn update(&mut self, position: &TxnPosition, chains: &TxnChainsList) {
+  fn update(&mut self, position: &TxnPosition, chains: &TxnChainsList, update_turn: Stone, update_action: Action) {
     self.time_step_offset = (self.time_step_offset + 1) % Self::NUM_TIME_STEPS;
     let slice_sz = Self::NUM_PLANES * Board::SIZE;
     let next_slice_off = self.time_step_offset;
@@ -190,5 +191,20 @@ impl TxnStateLibFeaturesData {
         break;
       }
     }
+  }
+}
+
+impl TxnStateData for TxnStateLibFeaturesData {
+  fn reset(&mut self) {
+    assert_eq!(Self::NUM_TIME_STEPS * Self::NUM_PLANES * Board::SIZE, self.features.len());
+    for p in (0 .. self.features.len()) {
+      self.features[p] = 0;
+    }
+    self.time_step_offset = 0;
+  }
+
+  fn update(&mut self, position: &TxnPosition, chains: &TxnChainsList, update_turn: Stone, update_action: Action) {
+    // TODO(20151112)
+    unimplemented!();
   }
 }
