@@ -1,4 +1,4 @@
-use board::{Board, Stone, Action};
+use board::{Board, Stone, Point, Action};
 use txnstate::{TxnStateData, TxnPosition, TxnChainsList};
 use util::{slice_twice_mut};
 
@@ -207,4 +207,8 @@ impl TxnStateData for TxnStateLibFeaturesData {
     // TODO(20151112)
     unimplemented!();
   }
+}
+
+pub struct TxnStateSparseFeaturesData {
+  features: Vec<(Point, Vec<u32>)>,
 }

@@ -112,6 +112,7 @@ rusqlite = "=0.4.0"
 rustc-serialize = "*"
 threadpool = "*"
 time = "*"
+vec_map = "*"
 
 [dependencies.array]
 #path = "../../rembrandt-project/libarray"

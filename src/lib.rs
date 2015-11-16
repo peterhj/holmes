@@ -16,8 +16,8 @@ extern crate byteorder;
 extern crate rand;
 extern crate rustc_serialize;
 extern crate time;
+extern crate vec_map;
 
-//pub mod agent;
 pub mod agents;
 pub mod board;
 pub mod book;
@@ -30,8 +30,6 @@ pub mod game;
 pub mod gtp;
 pub mod gtp_board;
 pub mod gtp_client;
-//pub mod mctree;
-//pub mod policy;
 pub mod random;
 pub mod search_policies;
 pub mod search_tree;

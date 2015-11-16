@@ -15,16 +15,17 @@ use std::cmp::{max, min};
 use std::collections::{HashMap};
 use std::iter::{repeat};
 use std::rc::{Rc, Weak};
+use vec_map::{VecMap};
 
 #[derive(Default, Debug)]
 pub struct SearchStats {
-  pub edge_count:       u64,
-  pub inner_edge_count: u64,
-  pub term_edge_count: u64,
-  pub old_leaf_count:   u64,
-  pub new_leaf_count:   u64,
-  pub term_count:       u64,
-  pub nonterm_count:    u64,
+  pub edge_count:       i32,
+  pub inner_edge_count: i32,
+  pub term_edge_count:  i32,
+  pub old_leaf_count:   i32,
+  pub new_leaf_count:   i32,
+  pub term_count:       i32,
+  pub nonterm_count:    i32,
 }
 
 pub struct Trajectory {
@@ -36,6 +37,10 @@ pub struct Trajectory {
   pub sim_pairs:  Vec<(Stone, Point)>,
 
   pub score:      Option<f32>,
+
+  // Temporary variables during rollouts/backups.
+  rave_mask:  Vec<BitSet>,
+  dead_mask:  Vec<BitSet>,
 }
 
 impl Trajectory {
@@ -43,10 +48,18 @@ impl Trajectory {
     Trajectory{
       backup_triples: vec![],
       leaf_node:      None,
-      rollout:        false,
-      sim_state:      TxnState::new(RuleSet::KgsJapanese.rules(), ()),
-      sim_pairs:      vec![],
-      score:          None,
+      rollout:    false,
+      sim_state:  TxnState::new(RuleSet::KgsJapanese.rules(), ()),
+      sim_pairs:  vec![],
+      score:      None,
+      rave_mask:  vec![
+        BitSet::with_capacity(Board::SIZE),
+        BitSet::with_capacity(Board::SIZE),
+      ],
+      dead_mask:  vec![
+        BitSet::with_capacity(Board::SIZE),
+        BitSet::with_capacity(Board::SIZE),
+      ],
     }
   }
 
@@ -82,8 +95,8 @@ pub struct Node {
   pub total_trials:     f32,
   pub horizon:          usize,
   pub child_nodes:      Vec<Option<Rc<RefCell<Node>>>>,
-  //pub valid_moves:      Vec<Point>,
   pub prior_moves:      Vec<(Point, f32)>,
+  pub arm_indexes:      VecMap<usize>,
   pub num_trials:       Vec<f32>,
   pub num_succs:        Vec<f32>,
   pub num_trials_rave:  Vec<f32>,
@@ -95,14 +108,18 @@ impl Node {
   pub fn new(parent_node: Option<&Rc<RefCell<Node>>>, state: TxnState<TxnStateNodeData>, prior_policy: &mut PriorPolicy) -> Node {
     let mut valid_moves = vec![];
     state.get_data().legality.fill_legal_points(state.current_turn(), &mut valid_moves);
-    let mut prior_moves = vec![];
+    let num_arms = valid_moves.len();
+    let mut prior_moves = Vec::with_capacity(num_arms);
     prior_policy.fill_prior_probs(&state, &valid_moves, &mut prior_moves);
     prior_moves.sort_by(|left, right| ((right.1 * 1.0e6) as i32).cmp(&((left.1 * 1.0e6) as i32)));
-    let num_arms = prior_moves.len();
+    let mut arm_indexes = VecMap::with_capacity(Board::SIZE);
+    for j in (0 .. num_arms) {
+      arm_indexes.insert(prior_moves[j].0.idx(), j);
+    }
     let child_nodes: Vec<_> = repeat(None).take(num_arms).collect();
     let zeros: Vec<_> = repeat(0.0f32).take(num_arms).collect();
     // XXX: Choose a subset of arms to play.
-    let horizon = min(30, num_arms);
+    let horizon = min(1, num_arms);
     //println!("DEBUG: node horizon: {} top priors: {:?}", horizon, &prior_moves[.. min(10, num_arms)]);
     Node{
       parent_node:  parent_node.map(|node| Rc::downgrade(node)),
@@ -110,8 +127,8 @@ impl Node {
       total_trials:     0.0,
       horizon:          horizon,
       child_nodes:      child_nodes,
-      //valid_moves:      valid_moves,
       prior_moves:      prior_moves,
+      arm_indexes:      arm_indexes,
       num_trials:       zeros.clone(),
       num_succs:        zeros.clone(),
       num_trials_rave:  zeros.clone(),
@@ -128,7 +145,7 @@ impl Node {
     let mu = 2.0f32;
     self.total_trials += 1.0;
     // XXX: Progressive widening.
-    //self.horizon = min((1.0 + (1.0 + self.total_trials).ln() / mu.ln()).ceil() as usize, self.child_nodes.len());
+    self.horizon = min((1.0 + (1.0 + self.total_trials).ln() / mu.ln()).ceil() as usize, self.child_nodes.len());
   }
 
   pub fn update_arm(&mut self, j: usize, score: f32) {
@@ -158,8 +175,8 @@ pub enum WalkResult {
 pub struct Tree {
   root_node:  Rc<RefCell<Node>>,
 
-  rave_mask:  Vec<BitSet>,
-  dead_mask:  Vec<BitSet>,
+  // Accumulators across rollouts/backups.
+  dead_count: VecMap<i32>,
 }
 
 impl Tree {
@@ -168,14 +185,7 @@ impl Tree {
     tree_policy.init_node(&mut *root_node.borrow_mut());
     Tree{
       root_node:  root_node,
-      rave_mask:  vec![
-        BitSet::with_capacity(Board::SIZE),
-        BitSet::with_capacity(Board::SIZE),
-      ],
-      dead_mask:  vec![
-        BitSet::with_capacity(Board::SIZE),
-        BitSet::with_capacity(Board::SIZE),
-      ],
+      dead_count: VecMap::with_capacity(Board::SIZE),
     }
   }
 
@@ -244,9 +254,9 @@ impl Tree {
     }
   }
 
-  pub fn backup(&mut self, tree_policy: &mut TreePolicy, traj: &Trajectory) {
-    self.rave_mask[0].clear();
-    self.rave_mask[1].clear();
+  pub fn backup(&mut self, tree_policy: &mut TreePolicy, traj: &mut Trajectory) {
+    traj.rave_mask[0].clear();
+    traj.rave_mask[1].clear();
     let score = match traj.score {
       Some(score) => score,
       None => panic!("Trajectory failed to score!"),
@@ -254,8 +264,9 @@ impl Tree {
 
     if traj.sim_pairs.len() >= 1 {
       let mut leaf_node = traj.leaf_node.as_ref().unwrap().borrow_mut();
+
       let (update_turn, update_point) = traj.sim_pairs[0];
-      let mut update_j = None;
+      /*let mut update_j = None;
       for j in (0 .. leaf_node.prior_moves.len()) {
         if leaf_node.prior_moves[j].0 == update_point {
           update_j = Some(j);
@@ -263,22 +274,44 @@ impl Tree {
         }
       }
       assert!(update_j.is_some());
-      let update_j = update_j.unwrap();
+      let update_j = update_j.unwrap();*/
+      let update_j = leaf_node.arm_indexes[update_point.idx()];
+      assert_eq!(update_point, leaf_node.prior_moves[update_j].0);
       leaf_node.update_visits();
       leaf_node.update_arm(update_j, score);
 
       if tree_policy.rave() {
         // TODO(20151113)
+        for &(sim_turn, sim_point) in traj.sim_pairs.iter() {
+          traj.rave_mask[sim_turn.offset()].insert(sim_point.idx());
+        }
+        for sim_p in traj.rave_mask[update_turn.offset()].iter() {
+          let sim_point = Point::from_idx(sim_p);
+          if let Some(&sim_j) = leaf_node.arm_indexes.get(&sim_point.idx()) {
+            assert_eq!(sim_point, leaf_node.prior_moves[sim_j].0);
+            leaf_node.rave_update_arm(sim_j, score);
+          }
+        }
       }
     }
 
     for &(ref node, update_point, update_j) in traj.backup_triples.iter().rev() {
       let mut node = node.borrow_mut();
+
+      assert_eq!(update_point, node.prior_moves[update_j].0);
       node.update_visits();
       node.update_arm(update_j, score);
 
       if tree_policy.rave() {
-        // TODO(20151113)
+        let update_turn = node.state.current_turn();
+        traj.rave_mask[update_turn.offset()].insert(update_point.idx());
+        for sim_p in traj.rave_mask[update_turn.offset()].iter() {
+          let sim_point = Point::from_idx(sim_p);
+          if let Some(&sim_j) = node.arm_indexes.get(&sim_point.idx()) {
+            assert_eq!(sim_point, node.prior_moves[sim_j].0);
+            node.rave_update_arm(sim_j, score);
+          }
+        }
       }
     }
   }

@@ -1,5 +1,5 @@
 use std::env;
-use std::fs::{File};
+use std::fs::{File, create_dir};
 use std::io::{Write};
 use std::path::{PathBuf};
 use std::process::{Command, Stdio};
@@ -15,10 +15,15 @@ fn main() {
 
   let n = 200;
 
+  // Set up the log directory.
+  create_dir(&logs_dir).ok();
+  // TODO(20151116): copy executable to the log directory.
+
   for i in (maybe_start_idx.unwrap_or(0) .. n) {
     println!("DEBUG: running game {} / {}...", i, n);
+    // FIXME(20151116): instead of calling out to shell script, run processes
+    // here and poll them for progress.
     let mut child = Command::new("./gtpctl-holmes-vs-gnugo.sh")
-      .stdin(Stdio::piped())
       .stdout(Stdio::piped())
       .spawn().unwrap();
     let output = child.wait_with_output().unwrap();

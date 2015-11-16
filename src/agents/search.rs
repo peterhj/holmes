@@ -95,7 +95,7 @@ impl Agent for SearchAgent {
     }
     assert_eq!(turn, self.state.current_turn());
     let mut search = SequentialSearch{
-      num_rollouts: 1000,
+      num_rollouts: 10000,
       stats: Default::default(),
     };
     let mut tree = Tree::new(self.state.clone(), &mut self.prior_policy, &mut self.tree_policy);

@@ -126,6 +126,10 @@ impl Stone {
 pub struct Point(pub i16);
 
 impl Point {
+  pub fn from_idx(idx: usize) -> Point {
+    Point(idx as i16)
+  }
+
   pub fn from_coord(coord: Coord) -> Point {
     Point(coord.x as i16 + coord.y as i16 * Board::DIM_PT.0)
   }
