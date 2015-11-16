@@ -1,7 +1,8 @@
 use board::{Stone, Point};
-use features::{TxnStateFeaturesData};
-use search_tree::{Node};
-use txnstate::{TxnState, TxnStateNodeData};
+use search::{Node};
+use txnstate::{TxnState};
+use txnstate::extras::{TxnStateNodeData};
+use txnstate::features::{TxnStateFeaturesData};
 
 pub mod convnet;
 pub mod quasiuniform;

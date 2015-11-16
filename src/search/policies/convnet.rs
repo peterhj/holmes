@@ -3,8 +3,9 @@ use convnet::{
   build_action_3layer_arch,
   //build_action_6layer_arch,
 };
-use search_policies::{PriorPolicy};
-use txnstate::{TxnState, TxnStateNodeData};
+use search::policies::{PriorPolicy};
+use txnstate::{TxnState};
+use txnstate::extras::{TxnStateNodeData};
 
 use async_cuda::context::{DeviceContext};
 use rembrandt::layer::{Layer};

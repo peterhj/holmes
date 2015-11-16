@@ -8,9 +8,9 @@ extern crate rustc_serialize;
 //use holmes::game::{GameHistory};
 //use holmes::sgf::{Sgf, Property, RootProperty, GameInfoProperty, parse_raw_sgf};
 use holmes::board::{RuleSet, Coord, Stone, Point, Action};
-use holmes::features::{TxnStateFeaturesData};
 use holmes::sgf::{Sgf, parse_raw_sgf};
 use holmes::txnstate::{TxnState};
+use holmes::txnstate::features::{TxnStateFeaturesData};
 
 use array::{NdArrayFormat, ArrayDeserialize, ArraySerialize, Array3d};
 use arraydb::{ArrayDb};

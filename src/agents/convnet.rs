@@ -4,8 +4,8 @@ use convnet::{
   build_action_3layer_arch,
   build_action_6layer_arch,
 };
-use features::{TxnStateFeaturesData};
 use txnstate::{TxnState};
+use txnstate::features::{TxnStateFeaturesData};
 
 use async_cuda::context::{DeviceContext};
 use rembrandt::layer::{Layer};

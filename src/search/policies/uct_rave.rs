@@ -1,8 +1,8 @@
 use board::{Stone, Point};
-use search_policies::{TreePolicy};
-use search_tree::{Node};
+use search::{Node};
+use search::policies::{TreePolicy};
 
-use statistics_avx2::array::{array_argmax};
+//use statistics_avx2::array::{array_argmax};
 
 pub struct UctRaveTreePolicy {
   pub c: f32,

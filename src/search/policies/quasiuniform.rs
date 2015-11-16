@@ -1,4 +1,4 @@
-use search_policies::{RolloutPolicy};
+use search::policies::{RolloutPolicy};
 
 pub struct QuasiUniformRolloutPolicy;
 

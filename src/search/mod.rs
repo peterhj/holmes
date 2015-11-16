@@ -2,8 +2,9 @@ use board::{RuleSet, Board, Stone, Point, Action};
 //use features::{TxnStateFeaturesData};
 //use policy::{PriorPolicy, SearchPolicy, RolloutPolicy};
 use random::{XorShift128PlusRng, choose_without_replace};
-use search_policies::{PriorPolicy, TreePolicy, RolloutPolicy};
-use txnstate::{TxnState, TxnStateNodeData};
+use search::policies::{PriorPolicy, TreePolicy, RolloutPolicy};
+use txnstate::{TxnState};
+use txnstate::extras::{TxnStateNodeData};
 
 use statistics_avx2::array::{array_argmax};
 use statistics_avx2::random::{StreamRng};
@@ -16,6 +17,8 @@ use std::collections::{HashMap};
 use std::iter::{repeat};
 use std::rc::{Rc, Weak};
 use vec_map::{VecMap};
+
+pub mod policies;
 
 #[derive(Default, Debug)]
 pub struct SearchStats {

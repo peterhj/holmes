@@ -1,10 +1,11 @@
 use agents::{Agent};
 use board::{Board, RuleSet, Stone, Point, Action};
-use search_policies::convnet::{ConvnetPriorPolicy};
-use search_policies::quasiuniform::{QuasiUniformRolloutPolicy};
-use search_policies::uct_rave::{UctRaveTreePolicy};
-use search_tree::{Tree, Trajectory, SequentialSearch};
-use txnstate::{TxnState, TxnStateNodeData};
+use search::{Tree, Trajectory, SequentialSearch};
+use search::policies::convnet::{ConvnetPriorPolicy};
+use search::policies::quasiuniform::{QuasiUniformRolloutPolicy};
+use search::policies::uct_rave::{UctRaveTreePolicy};
+use txnstate::{TxnState};
+use txnstate::extras::{TxnStateNodeData};
 
 use async_cuda::context::{DeviceContext};
 
