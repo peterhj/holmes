@@ -1,38 +1,43 @@
 use agents::{Agent};
 use board::{Board, RuleSet, Stone, Point, Action};
-use convnet::{
-  build_action_3layer_arch,
-  build_action_6layer_arch,
-};
+use search_policies::convnet::{ConvnetPriorPolicy};
 use search_policies::quasiuniform::{QuasiUniformRolloutPolicy};
 use search_policies::uct_rave::{UctRaveTreePolicy};
 use search_tree::{Tree, Trajectory, SequentialSearch};
 use txnstate::{TxnState, TxnStateNodeData};
 
 use async_cuda::context::{DeviceContext};
-use rembrandt::layer::{Layer};
-use rembrandt::net::{NetArch, LinearNetArch};
-use rembrandt::opt::{OptPhase};
 
 use std::path::{PathBuf};
 
 pub struct SearchAgent {
   komi:     f32,
+  player:   Option<Stone>,
 
   history:  Vec<(TxnState<TxnStateNodeData>, Action)>,
   state:    TxnState<TxnStateNodeData>,
 
-  ctx:      DeviceContext,
+  //ctx:      DeviceContext,
+  prior_policy: ConvnetPriorPolicy,
+  tree_policy:  UctRaveTreePolicy,
+  roll_policy:  QuasiUniformRolloutPolicy,
 }
 
 impl SearchAgent {
   pub fn new() -> SearchAgent {
-    let ctx = DeviceContext::new(0);
+    //let ctx = DeviceContext::new(0);
+    let mut prior_policy = ConvnetPriorPolicy::new();
+    let mut tree_policy = UctRaveTreePolicy{c: 0.5};
+    let mut roll_policy = QuasiUniformRolloutPolicy;
     SearchAgent{
       komi:     0.0,
+      player:   None,
       history:  vec![],
       state:    TxnState::new(RuleSet::KgsJapanese.rules(), TxnStateNodeData::new()),
-      ctx:      ctx,
+      //ctx:      ctx,
+      prior_policy: prior_policy,
+      tree_policy:  tree_policy,
+      roll_policy:  roll_policy,
     }
   }
 }
@@ -40,6 +45,7 @@ impl SearchAgent {
 impl Agent for SearchAgent {
   fn reset(&mut self) {
     self.komi = 6.5;
+    self.player = None;
 
     self.history.clear();
     self.state.reset();
@@ -75,14 +81,27 @@ impl Agent for SearchAgent {
   }
 
   fn act(&mut self, turn: Stone) -> Action {
-    let search = SequentialSearch{
+    if self.history.len() > 0 {
+      match self.history[self.history.len() - 1].1 {
+        Action::Resign | Action::Pass => {
+          return Action::Pass;
+        }
+        _ => {}
+      }
+    }
+    if self.player.is_none() {
+      self.player = Some(turn);
+      self.state.set_turn(turn);
+    }
+    assert_eq!(turn, self.state.current_turn());
+    let mut search = SequentialSearch{
       num_rollouts: 1000,
+      stats: Default::default(),
     };
-    let mut tree = Tree::new(self.state.clone());
+    let mut tree = Tree::new(self.state.clone(), &mut self.prior_policy, &mut self.tree_policy);
     let mut traj = Trajectory::new();
-    let mut tree_policy = UctRaveTreePolicy{c: 0.3};
-    let mut roll_policy = QuasiUniformRolloutPolicy;
-    let (_, action) = search.join(&mut tree, &mut traj, &mut tree_policy, &mut roll_policy);
+    let (_, action) = search.join(&mut tree, &mut traj, &mut self.prior_policy, &mut self.tree_policy, &mut self.roll_policy);
+    println!("DEBUG: search stats: {:?}", search.stats);
     action
   }
 }

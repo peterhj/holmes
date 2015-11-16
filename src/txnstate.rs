@@ -3,7 +3,9 @@ use features::{TxnStateFeaturesData};
 use gtp_board::{dump_xcoord};
 
 use bit_set::{BitSet};
+use bit_vec::{BitVec};
 use std::cmp::{max};
+use std::collections::{BTreeSet};
 use std::iter::{repeat};
 
 pub const TOMBSTONE:  Point = Point(-1);
@@ -60,6 +62,37 @@ pub fn is_eyeish(position: &TxnPosition, chains: &TxnChainsList, stone: Stone, p
     }
   });
   eyeish
+}
+
+/// The "2/4" rule, a conservative estimate of whether a point is an eye.
+/// Some true eyes (c.f., "two headed dragon") will not be detected by this
+/// rule.
+pub fn is_eyelike(position: &TxnPosition, chains: &TxnChainsList, stone: Stone, point: Point) -> bool {
+  let mut eyeish = true;
+  for_each_adjacent(point, |adj_point| {
+    if position.stones[adj_point.idx()] != stone {
+      eyeish = false;
+    } else {
+      let adj_head = chains.find_chain(adj_point);
+      assert!(adj_head != TOMBSTONE);
+      let adj_chain = chains.get_chain(adj_head).unwrap();
+      if adj_chain.approx_count_libs() <= 1 {
+        eyeish = false;
+      }
+    }
+  });
+  if !eyeish {
+    return false;
+  }
+  // XXX: a.k.a. the "2/4 rule".
+  let opp_stone = stone.opponent();
+  let mut false_count = if point.is_edge() { 1 } else { 0 };
+  for_each_diagonal(point, |diag_point| {
+    if position.stones[diag_point.idx()] == opp_stone {
+      false_count += 1;
+    }
+  });
+  false_count < 2
 }
 
 pub fn check_illegal_move_simple(position: &TxnPosition, chains: &TxnChainsList, turn: Stone, point: Point) -> Option<IllegalReason> {
@@ -124,10 +157,17 @@ impl TxnStateLegalityData {
   pub fn new() -> TxnStateLegalityData {
     TxnStateLegalityData{
       cached_legal_moves: vec![
-        BitSet::with_capacity(Board::SIZE),
-        BitSet::with_capacity(Board::SIZE),
+        BitSet::from_bit_vec(BitVec::from_elem(Board::SIZE, true)),
+        BitSet::from_bit_vec(BitVec::from_elem(Board::SIZE, true)),
       ],
       test_state: TxnState::new(RuleSet::KgsJapanese.rules(), ()),
+    }
+  }
+
+  pub fn fill_legal_points(&self, turn: Stone, points: &mut Vec<Point>) {
+    let turn_off = turn.offset();
+    for p in self.cached_legal_moves[turn_off].iter() {
+      points.push(Point(p as i16));
     }
   }
 
@@ -150,27 +190,37 @@ impl TxnStateLegalityData {
 
 impl TxnStateData for TxnStateLegalityData {
   fn reset(&mut self) {
-    self.cached_legal_moves[0].clear();
-    self.cached_legal_moves[1].clear();
+    self.cached_legal_moves[0] = BitSet::from_bit_vec(BitVec::from_elem(Board::SIZE, true));
+    self.cached_legal_moves[1] = BitSet::from_bit_vec(BitVec::from_elem(Board::SIZE, true));
     self.test_state.reset();
   }
 
   fn update(&mut self, position: &TxnPosition, chains: &TxnChainsList, update_turn: Stone, update_action: Action) {
-    // FIXME(20151112): need to apply the action.
-    /*match self.test_state.try_action(update_turn, update_action) {
+    let prev_ko = self.test_state.current_ko();
+    match self.test_state.try_action(update_turn, update_action) {
       Ok(_) => { self.test_state.commit(); }
       Err(_) => { panic!("TxnStateLegalityData encountered an illegal update!"); }
-    }*/
+    }
 
     // TODO(20151112)
     // Update the points:
-    // - the last placed stone
+    // - the last placed stone and adjacent stones
+    // - the current and previous ko points
     // - captured stones (now empty points)
     // - pseudolibs of chains adjacent to last placed stone
     // - pseudolibs of chains adjacent to captured stones
     // The last two could really use a `last_mut_heads` field in chains list.
-    if let Some((place_stone, place_point)) = position.last_placed {
+    if let Some((_, place_point)) = position.last_placed {
       self.update_point(position, chains, place_point);
+      for_each_adjacent(place_point, |adj_point| {
+        self.update_point(position, chains, adj_point);
+      });
+    }
+    if let Some((_, ko_point)) = position.ko {
+      self.update_point(position, chains, ko_point);
+    }
+    if let Some((_, prev_ko_point)) = prev_ko {
+      self.update_point(position, chains, prev_ko_point);
     }
     for &kill_point in position.last_killed[0].iter().chain(position.last_killed[1].iter()) {
       self.update_point(position, chains, kill_point);
@@ -224,6 +274,7 @@ pub struct TxnPosition {
   // of .commit(). These are also used by TxnStateData.update().
   pub last_move:    Option<(Stone, Action)>,
   pub last_placed:  Option<(Stone, Point)>,
+  pub last_ko:      Option<(Stone, Point)>,
   pub last_killed:  Vec<Vec<Point>>,
 }
 
@@ -699,10 +750,11 @@ impl TxnChainsList {
   }
 }
 
-/*#[derive(Clone, Debug)]
-pub struct TxnStateScratch {
-  nothing: usize,
-}*/
+#[derive(Clone, Debug)]
+pub struct GnugoPrintSgf {
+  pub output:   String,
+  pub illegal:  BTreeSet<Point>,
+}
 
 /// Transactional board state.
 ///
@@ -773,6 +825,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
         ko:           None,
         last_move:    None,
         last_placed:  None,
+        last_ko:      None,
         last_killed:  vec![
           vec![],
           vec![],
@@ -831,6 +884,12 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
     }
   }
 
+  pub fn set_turn(&mut self, turn: Stone) {
+    // FIXME(20151115): this can be highly unsafe; make sure no ko points are
+    // set.
+    self.position.turn = turn;
+  }
+
   pub fn extract_absolute_features() {
     // TODO(20151105)
     unimplemented!();
@@ -854,6 +913,14 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
     self.position.turn
   }
 
+  pub fn current_stone(&self, point: Point) -> Stone {
+    self.position.stones[point.idx()]
+  }
+
+  pub fn current_ko(&self) -> Option<(Stone, Point)> {
+    self.position.ko
+  }
+
   pub fn current_score_exact(&self, komi: f32) -> f32 {
     let mut b_score = 0.0;
     let mut w_score = 0.0;
@@ -872,6 +939,26 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
     w_score - b_score + komi
   }
 
+  pub fn current_score_rollout(&self, komi: f32) -> f32 {
+    let mut b_score = 0.0;
+    let mut w_score = 0.0;
+    b_score += self.position.num_stones[0] as f32;
+    w_score += self.position.num_stones[1] as f32;
+    for p in (0 .. Board::SIZE) {
+      match self.position.stones[p] {
+        Stone::Empty => {
+          if is_eyelike(&self.position, &self.chains, Stone::Black, Point(p as i16)) {
+            b_score += 1.0;
+          } else if is_eyelike(&self.position, &self.chains, Stone::White, Point(p as i16)) {
+            w_score += 1.0;
+          }
+        }
+        _ => {}
+      }
+    }
+    w_score - b_score + komi
+  }
+
   pub fn iter_legal_moves_accurate<F>(&mut self, turn: Stone, /*scratch: &mut TxnStateScratch,*/ mut f: F) where F: FnMut(Point) {
     for p in (0 .. Board::SIZE as i16) {
       let point = Point(p);
@@ -886,51 +973,6 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
       }
       self.undo();
     }
-  }
-
-  /// The "2/4" rule, a conservative estimate of whether a point is an eye.
-  /// Some true eyes (c.f., "two headed dragon") will not be detected by this
-  /// rule.
-  pub fn is_eyelike(&self, stone: Stone, point: Point) -> bool {
-    let mut eyeish = true;
-    for_each_adjacent(point, |adj_point| {
-      if self.position.stones[adj_point.idx()] != stone {
-        /*if point == Point(262) {
-          println!("DEBUG: is_eyelike: {:?}, 262: {} not same color",
-              stone, adj_point.to_coord().to_string());
-        }*/
-        eyeish = false;
-      } else {
-        let adj_head = self.chains.find_chain(adj_point);
-        assert!(adj_head != TOMBSTONE);
-        let adj_chain = self.chains.get_chain(adj_head).unwrap();
-        if adj_chain.approx_count_libs() <= 1 {
-          /*if point == Point(262) {
-            println!("DEBUG: is_eyelike: {:?}, 262: {} in atari",
-                stone, adj_point.to_coord().to_string());
-          }*/
-          eyeish = false;
-        }
-      }
-    });
-    /*if point == Point(262) {
-      println!("DEBUG: is_eyelike: {:?}, 262: eyeish: {:?}", stone, eyeish);
-    }*/
-    if !eyeish {
-      return false;
-    }
-    // XXX: a.k.a. the "2/4 rule".
-    let opp_stone = stone.opponent();
-    let mut false_count = if point.is_edge() { 1 } else { 0 };
-    for_each_diagonal(point, |diag_point| {
-      if self.position.stones[diag_point.idx()] == opp_stone {
-        false_count += 1;
-      }
-    });
-    /*if point == Point(262) {
-      println!("DEBUG: is_eyelike: {:?}, 262: false_count: {}", stone, false_count);
-    }*/
-    false_count < 2
   }
 
   pub fn is_capture(&self, stone: Stone, point: Point) -> bool {
@@ -1152,6 +1194,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
     self.position.stones[place_p] = turn;
     self.position.last_move = Some((turn, Action::Place{point: place_point}));
     self.position.last_placed = Some((turn, place_point));
+    self.position.last_ko = self.position.ko;
     self.position.last_killed[0].clear();
     self.position.last_killed[1].clear();
     self.merge_chains(turn, place_point);
@@ -1210,6 +1253,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
 
       self.position.last_move = None;
       self.position.last_placed = None;
+      self.position.last_ko = None;
       self.position.last_killed[0].clear();
       self.position.last_killed[1].clear();
       self.chains.last_mut_heads.clear();
@@ -1263,6 +1307,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
 
         self.position.last_move = None;
         self.position.last_placed = None;
+        self.position.last_ko = None;
         self.position.last_killed[0].clear();
         self.position.last_killed[1].clear();
         self.chains.last_mut_heads.clear();
@@ -1351,8 +1396,10 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
     strs
   }
 
-  pub fn to_gnugo_printsgf(&mut self, date_str: &str, komi: f32, ruleset: RuleSet) -> String {
+  pub fn to_gnugo_printsgf(&mut self, date_str: &str, komi: f32, ruleset: RuleSet) -> GnugoPrintSgf {
     let mut s = String::new();
+    let mut illegal_points = BTreeSet::new();
+
     s.push_str("(;GM[1]FF[4]\n");
     s.push_str(&format!("SZ[{}]\n", Board::DIM));
     s.push_str("GN[GNU Go 3.8 load and print]\n");
@@ -1480,6 +1527,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
                 if num_illegal == 0 {
                   line.push_str("IL");
                 }
+                illegal_points.insert(point);
                 line.push_str(&format!("[{}]", point.to_coord().to_sgf()));
                 flushed = false;
                 num_illegal += 1;
@@ -1509,8 +1557,11 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
         }
       }
     }
-
     s.push_str(")\n");
-    s
+
+    GnugoPrintSgf{
+      output:   s,
+      illegal:  illegal_points,
+    }
   }
 }

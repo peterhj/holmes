@@ -2,12 +2,14 @@ extern crate holmes;
 extern crate rusqlite;
 extern crate rustc_serialize;
 
-use holmes::board::{RuleSet, Stone, Action};
+use holmes::board::{RuleSet, Board, Stone, Point, Action};
 use holmes::sgf::{Sgf};
-use holmes::txnstate::{TxnState, TxnResult};
+use holmes::txnstate::{TxnState, TxnStateNodeData, TxnResult};
 use rusqlite::{SqliteConnection, SqliteOpenFlags};
 use rustc_serialize::json;
 
+use std::collections::{BTreeSet};
+use std::iter::{FromIterator};
 use std::path::{PathBuf};
 //use std::str::{from_utf8};
 
@@ -114,18 +116,18 @@ fn test_sgf_correctness() {
       };
       assert_eq!(RuleSet::KgsJapanese, ruleset);
       let rules = ruleset.rules();
-      println!("DEBUG: sgf:");
-      println!("{}", sgf_entry.sgf_body);
+      /*println!("DEBUG: sgf:");
+      println!("{}", sgf_entry.sgf_body);*/
 
-      let mut state = TxnState::new(rules, ());
+      let mut state = TxnState::new(rules, TxnStateNodeData::new());
       state.reset();
       for (j, &(ref turn_code, ref move_code)) in sgf.moves.iter().enumerate() {
         let turn = Stone::from_code_str(&turn_code);
         let action = Action::from_code_str(&move_code);
+
         println!("DEBUG: move {}: {:?} {:?}", j, turn, action);
         if let Action::Place{point} = action {
-          let coord = point.to_coord();
-          println!("DEBUG:   move coord: {:?} {:?}", turn, coord);
+          println!("DEBUG:   move coord: {:?} {:?}", turn, point.to_coord());
         }
         println!("DEBUG: gnugo repr ({}):", j);
         println!("{}", gnugo_entry.gnugo_positions[j]);
@@ -133,19 +135,70 @@ fn test_sgf_correctness() {
         for s in state.to_debug_strings().iter() {
           println!("DEBUG:   {}", s);
         }
+
+        // Check that the state position and legal points match the oracle's
+        // (gnugo's) exactly.
         let gnugo_pos_guess = state.to_gnugo_printsgf("2015-11-07", 6.5, RuleSet::KgsJapanese);
-        if gnugo_entry.gnugo_positions[j] != gnugo_pos_guess {
+        if gnugo_entry.gnugo_positions[j] != gnugo_pos_guess.output {
           println!("PANIC: mismatched gnugo printsgf-style positions ({}):", j);
           println!("# gnugo repr:");
           println!("{}", gnugo_entry.gnugo_positions[j]);
           println!("# our repr:");
-          println!("{}", gnugo_pos_guess);
+          println!("{}", gnugo_pos_guess.output);
           println!("# state:");
           for s in state.to_debug_strings().iter() {
             println!("{}", s);
           }
           panic!();
         }
+
+        // Check that cached illegal moves in TxnStateLegalityData are
+        // consistent with the printsgf illegal moves.
+        /*println!("DEBUG: move {}: {:?} {:?}", j, turn, action);
+        if let Action::Place{point} = action {
+          println!("DEBUG:   move coord: {:?} {:?}", turn, point.to_coord());
+        }
+        println!("DEBUG: our repr:");
+        println!("{}", gnugo_pos_guess.output);*/
+        let mut valid_moves = vec![];
+        state.get_data().legality.fill_legal_points(turn, &mut valid_moves);
+        let valid_moves = BTreeSet::from_iter(valid_moves.into_iter());
+        for p in (0 .. Board::SIZE) {
+          let point = Point(p as i16);
+          let mut err = false;
+          if gnugo_pos_guess.illegal.contains(&point) || state.current_stone(point) != Stone::Empty {
+            if valid_moves.contains(&point) {
+              println!("PANIC: point ({}) should be illegal!", point.to_coord().to_string());
+              err = true;
+            }
+          } else {
+            if !valid_moves.contains(&point) {
+              println!("PANIC: point ({}) should be legal!", point.to_coord().to_string());
+              err = true;
+            }
+          }
+          if err {
+            /*println!("# move {}: {:?} {:?}", j, turn, action);
+            if let Action::Place{point} = action {
+              println!("#   move coord: {:?} {:?}", turn, point.to_coord());
+            }
+            //println!("# our repr:");
+            //println!("{}", gnugo_pos_guess.output);*/
+            println!("# brute force illegal empty points:");
+            println!("{:?}", gnugo_pos_guess.illegal);
+            println!("# cached valid moves:");
+            println!("{:?}", valid_moves);
+            println!("# state:");
+            for s in state.to_debug_strings().iter() {
+              println!("{}", s);
+            }
+            panic!();
+          }
+        }
+        // TODO(20151115)
+
+        // Check that the given action is valid. Check that undo also works as
+        // expected.
         let res1 = state.try_action(turn, action);
         state.undo();
         let res2 = state.try_action(turn, action);
@@ -153,6 +206,7 @@ fn test_sgf_correctness() {
         match res2 {
           Ok(_)   => state.commit(),
           Err(e)  => {
+            println!("PANIC: move should be legal! {:?}", e);
             println!("DEBUG: move {}: {:?} {:?}", j, turn, action);
             if let Action::Place{point} = action {
               let coord = point.to_coord();
@@ -162,9 +216,11 @@ fn test_sgf_correctness() {
             for s in state.to_debug_strings().iter() {
               println!("DEBUG:   {}", s);
             }
-            panic!("move should be legal! {:?}", e);
+            panic!();
           }
         }
+
+        // TODO(20151112): check position and lib features.
       }
 
       total_count += 1;

@@ -28,8 +28,8 @@ pub struct ConvnetAgent {
 impl ConvnetAgent {
   pub fn new() -> ConvnetAgent {
     let ctx = DeviceContext::new(0);
-    let arch = build_action_3layer_arch(1, &ctx);
-    //let arch = build_action_6layer_arch(1, &ctx);
+    //let arch = build_action_3layer_arch(1, &ctx);
+    let arch = build_action_6layer_arch(1, &ctx);
     ConvnetAgent{
       komi:     0.0,
       player:   None,

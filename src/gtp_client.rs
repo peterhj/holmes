@@ -1,9 +1,7 @@
-//use agent::{PreGame, AgentBuilder, Agent};
-//use agent::{PreGame};
 use agents::{PreGame, Agent};
 use agents::convnet::{ConvnetAgent};
+use agents::search::{SearchAgent};
 use board::{RuleSet, Stone, Point, Action};
-//use fastboard::{PosExt, Pos, Stone};
 use gtp::{GtpClient, Entity};
 use gtp::Entity::*;
 use gtp_board::{Player, Coord, Vertex, TimeSystem, MoveResult, UndoResult, dump_xcoord, dump_ycoord};
@@ -13,13 +11,11 @@ use std::str::{from_utf8};
 pub struct Client {
   host:             String,
   port:             u16,
-  //player:           Option<Player>,
   should_shutdown:  bool,
 
   pre_game:         PreGame,
-  /*agent_builder:    AgentBuilder,
-  agent:            Agent,*/
-  agent:            ConvnetAgent,
+  //agent:            ConvnetAgent,
+  agent:            SearchAgent,
 }
 
 impl Client {
@@ -27,12 +23,10 @@ impl Client {
     Client{
       host: host,
       port: port,
-      //player: player,
       should_shutdown: false,
       pre_game: Default::default(),
-      /*agent_builder: Default::default(),
-      agent: Agent::new(),*/
-      agent: ConvnetAgent::new(),
+      //agent: ConvnetAgent::new(),
+      agent: SearchAgent::new(),
     }
   }
 }
