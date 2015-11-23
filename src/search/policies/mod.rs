@@ -1,8 +1,10 @@
 use board::{Stone, Point};
-use search::{Node};
+use search::{Trajectory, Node};
 use txnstate::{TxnState};
 use txnstate::extras::{TxnStateNodeData};
 use txnstate::features::{TxnStateFeaturesData};
+
+use rand::{Rng};
 
 pub mod convnet;
 pub mod quasiuniform;
@@ -18,8 +20,11 @@ pub trait TreePolicy {
   fn init_node(&mut self, node: &mut Node);
   //fn execute_greedy(&mut self, node: &Node) -> Option<Point>;
   fn execute_search(&mut self, node: &Node) -> Option<(Point, usize)>;
-  fn backup(&mut self, node: &mut Node);
+  fn backup_values(&mut self, node: &mut Node);
 }
 
 pub trait RolloutPolicy {
+  type R: Rng;
+
+  fn rollout(&self, traj: &mut Trajectory, rng: &mut Self::R);
 }

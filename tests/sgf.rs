@@ -4,7 +4,8 @@ extern crate rustc_serialize;
 
 use holmes::board::{RuleSet, Board, Stone, Point, Action};
 use holmes::sgf::{Sgf};
-use holmes::txnstate::{TxnState, TxnStateNodeData, TxnResult};
+use holmes::txnstate::{TxnState, TxnResult};
+use holmes::txnstate::extras::{TxnStateNodeData};
 use rusqlite::{SqliteConnection, SqliteOpenFlags};
 use rustc_serialize::json;
 

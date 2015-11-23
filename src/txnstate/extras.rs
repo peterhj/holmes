@@ -11,7 +11,7 @@ use bit_vec::{BitVec};
 #[derive(Clone)]
 pub struct TxnStateLegalityData {
   cached_legal_moves: Vec<BitSet>,
-  test_state: TxnState,
+  test_state:         TxnState,
 }
 
 impl TxnStateLegalityData {
@@ -22,6 +22,17 @@ impl TxnStateLegalityData {
         BitSet::from_bit_vec(BitVec::from_elem(Board::SIZE, true)),
       ],
       test_state: TxnState::new(RuleSet::KgsJapanese.rules(), ()),
+    }
+  }
+
+  pub fn from_node_state(state: &TxnState<TxnStateNodeData>) -> TxnStateLegalityData {
+    state.get_data().legality.clone()
+  }
+
+  pub fn for_each_legal_point<F>(&self, turn: Stone, mut f: F) where F: FnMut(Point) {
+    for p in self.cached_legal_moves[turn.offset()].iter() {
+      let point = Point::from_idx(p);
+      f(point);
     }
   }
 

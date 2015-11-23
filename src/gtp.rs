@@ -715,11 +715,11 @@ pub struct GtpController {
 }
 
 impl GtpController {
-  pub fn new() -> GtpController {
+  pub fn new(b_port: u16, w_port: u16) -> GtpController {
     //sleep(Duration::seconds(3));
-    let black_listener = TcpListener::bind("127.0.0.1:6060")
+    let black_listener = TcpListener::bind(&format!("127.0.0.1:{}", b_port) as &str)
       .ok().expect("FATAL: server: failed to bind address (6060)");
-    let white_listener = TcpListener::bind("127.0.0.1:6061")
+    let white_listener = TcpListener::bind(&format!("127.0.0.1:{}", w_port) as &str)
       .ok().expect("FATAL: server: failed to bind address (6061)");
     GtpController{
       black_listener: black_listener,

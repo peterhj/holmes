@@ -51,13 +51,64 @@ impl<T> BHeap<T> {
 }
 
 #[derive(Clone)]
+pub struct BitVec32 {
+  length: usize,
+  data:   Vec<u32>,
+}
+
+impl BitVec32 {
+  pub fn with_capacity(n: usize) -> BitVec32 {
+    let cap = (n + 32 - 1)/32;
+    let mut data = Vec::with_capacity(cap);
+    for _ in (0 .. cap) {
+      data.push(0);
+    }
+    BitVec32{
+      length: n,
+      data:   data,
+    }
+  }
+
+  pub fn inner_mut(&mut self) -> &mut [u32] {
+    &mut self.data
+  }
+
+  pub fn clear(&mut self) {
+    for x in self.data.iter_mut() {
+      *x = 0;
+    }
+  }
+
+  pub fn get(&self, idx: usize) -> Option<bool> {
+    //assert!(idx < self.length);
+    if idx < self.length {
+      let (word_idx, bit_idx) = (idx / 32, idx % 32);
+      Some(0x0 != (0x1 & (self.data[word_idx] >> bit_idx)))
+    } else {
+      None
+    }
+  }
+
+  pub fn set(&mut self, idx: usize, value: bool) {
+    assert!(idx < self.length);
+    let (word_idx, bit_idx) = (idx / 32, idx % 32);
+    self.data[word_idx] &= !(0x1 << bit_idx);
+    if value {
+      self.data[word_idx] |= (0x1 << bit_idx);
+    }
+  }
+}
+
+#[derive(Clone)]
 pub struct BFilter {
   max_n:    usize,
   leaf_idx: usize,
   n:        usize,
   heap:     BHeap<f32>,
-  marks:    BitVec,
-  zeros:    BitVec,
+  //marks:    BitVec,
+  //zeros:    BitVec,
+  marks:    BitVec32,
+  zeros:    BitVec32,
   init:     bool,
 }
 
@@ -66,8 +117,10 @@ impl BFilter {
     let heap = BHeap::with_capacity(n, 0.0);
     let half_cap = ceil_power2(n as u64) as usize - 1;
     let cap = 2 * ceil_power2(n as u64) as usize - 1;
-    let marks = BitVec::from_elem(2 * half_cap, false);
-    let zeros = BitVec::from_elem(cap - half_cap, false);
+    //let marks = BitVec::from_elem(2 * half_cap, false);
+    //let zeros = BitVec::from_elem(cap - half_cap, false);
+    let marks = BitVec32::with_capacity(2 * half_cap);
+    let zeros = BitVec32::with_capacity(cap - half_cap);
     BFilter{
       max_n:    n,
       leaf_idx: half_cap,
@@ -79,28 +132,47 @@ impl BFilter {
     }
   }
 
+  #[inline]
+  fn mark_idx(&self, idx: usize) -> usize {
+    2 * self.heap.parent(idx) + 1 - (idx % 2)
+  }
+
+  #[inline]
+  fn mark_left_idx(&self, parent_idx: usize) -> usize {
+    2 * parent_idx
+  }
+
+  #[inline]
+  fn mark_right_idx(&self, parent_idx: usize) -> usize {
+    2 * parent_idx + 1
+  }
+
   pub fn fill(&mut self, xs: &[f32]) {
     assert_eq!(self.max_n, xs.len());
     self.n = self.max_n;
     self.marks.clear();
     self.zeros.clear();
-    // XXX: Remaining part of heap data should always be zeroed.
+
     (&mut self.heap.data[self.leaf_idx .. self.leaf_idx + self.n]).clone_from_slice(xs);
+
+    // XXX: Remaining part of heap data should always be zeroed.
     for idx in (self.leaf_idx + self.n .. self.heap.data.len()) {
-      let parent_idx = self.heap.parent(idx);
-      self.marks.set(2 * parent_idx + 1 - (idx % 2), true);
+      let mark_idx = self.mark_idx(idx);
+      self.marks.set(mark_idx, true);
       self.zeros.set(idx - self.leaf_idx, true);
     }
     for idx in (0 .. self.leaf_idx).rev() {
       let left_idx = self.heap.left(idx);
       let right_idx = self.heap.right(idx);
       self.heap.data[idx] = self.heap.data[left_idx] + self.heap.data[right_idx];
-      if self.marks.get(2 * idx).unwrap() && self.marks.get(2 * idx + 1).unwrap() {
+      if self.marks.get(self.mark_left_idx(idx)).unwrap() && self.marks.get(self.mark_right_idx(idx)).unwrap() {
         if idx > 0 {
-          self.marks.set(2 * self.heap.parent(idx) + 1 - (idx % 2), true);
+          let mark_idx = self.mark_idx(idx);
+          self.marks.set(mark_idx, true);
         }
       }
     }
+
     self.init = true;
   }
 

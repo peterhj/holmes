@@ -1,14 +1,19 @@
 use board::{Board, Stone, Point, Action};
-use txnstate::{TxnStateData, TxnPosition, TxnChainsList};
+use txnstate::{TxnStateData, TxnState, TxnPosition, TxnChainsList};
+use txnstate::extras::{TxnStateLegalityData, TxnStateNodeData};
 use util::{slice_twice_mut};
 
+use std::cell::{RefCell};
 use std::iter::{repeat};
 use std::slice::bytes::{copy_memory};
 
 #[derive(Clone)]
 pub struct TxnStateFeaturesData {
-  features: Vec<u8>,
-  time_step_offset: usize,
+  //compute_diff:       bool,
+  time_step_offset:   usize,
+  features:           Vec<u8>,
+  /*feature_diff_vals:  Vec<f32>,
+  feature_diff_idxs:  Vec<i32>,*/
 }
 
 impl TxnStateFeaturesData {
@@ -17,10 +22,13 @@ impl TxnStateFeaturesData {
   pub const NUM_PLANES:       usize = 2;
   pub const NUM_TIME_STEPS:   usize = 2;
 
-  pub fn new() -> TxnStateFeaturesData {
+  pub fn new(/*compute_diff: bool*/) -> TxnStateFeaturesData {
     TxnStateFeaturesData{
-      features: repeat(0).take(Self::NUM_TIME_STEPS * Self::NUM_PLANES * Board::SIZE).collect(),
-      time_step_offset: 0,
+      //compute_diff:       compute_diff,
+      time_step_offset:   0,
+      features:           repeat(0).take(Self::NUM_TIME_STEPS * Self::NUM_PLANES * Board::SIZE).collect(),
+      /*feature_diff_vals:  Vec::with_capacity(4),
+      feature_diff_idxs:  Vec::with_capacity(4),*/
     }
   }
 
@@ -71,16 +79,17 @@ impl TxnStateFeaturesData {
 
 impl TxnStateData for TxnStateFeaturesData {
   fn reset(&mut self) {
+    self.time_step_offset = 0;
     assert_eq!(Self::NUM_TIME_STEPS * Self::NUM_PLANES * Board::SIZE, self.features.len());
     for p in (0 .. self.features.len()) {
       self.features[p] = 0;
     }
-    self.time_step_offset = 0;
   }
 
-  //fn update(&mut self, position: &TxnPosition, chains: &TxnChainsList) {
   fn update(&mut self, position: &TxnPosition, chains: &TxnChainsList, update_turn: Stone, update_action: Action) {
+    // XXX: Before anything else, increment the time step.
     self.time_step_offset = (self.time_step_offset + 1) % Self::NUM_TIME_STEPS;
+
     let slice_sz = Self::NUM_PLANES * Board::SIZE;
     let next_slice_off = self.time_step_offset;
     if Self::NUM_TIME_STEPS > 1 {
@@ -92,6 +101,7 @@ impl TxnStateData for TxnStateFeaturesData {
       );
       copy_memory(src_feats, &mut dst_feats);
     }
+
     let next_start = next_slice_off * slice_sz;
     let next_end = next_start + slice_sz;
     {
@@ -102,27 +112,51 @@ impl TxnStateData for TxnStateFeaturesData {
         let p = point.idx();
         match stone {
           Stone::Black => {
+            /*if self.compute_diff {
+              if features[Self::BLACK_PLANE + p] != 1 {
+                self.feature_diff_vals.push(1.0);
+                self.feature_diff_idxs.push(next_start + Self::BLACK_PLANE + p);
+              }
+              if features[Self::WHITE_PLANE + p] != 0 {
+                self.feature_diff_vals.push(-1.0);
+                self.feature_diff_idxs.push(next_start + Self::BLACK_PLANE + p);
+              }
+            }*/
             features[Self::BLACK_PLANE + p] = 1;
             features[Self::WHITE_PLANE + p] = 0;
           }
           Stone::White => {
+            /*if self.compute_diff {
+              if features[Self::BLACK_PLANE + p] != 0 {
+                self.feature_diff_vals.push(-1.0);
+                self.feature_diff_idxs.push(next_start + Self::BLACK_PLANE + p);
+              }
+              if features[Self::WHITE_PLANE + p] != 1 {
+                self.feature_diff_vals.push(1.0);
+                self.feature_diff_idxs.push(next_start + Self::BLACK_PLANE + p);
+              }
+            }*/
             features[Self::BLACK_PLANE + p] = 0;
             features[Self::WHITE_PLANE + p] = 1;
           }
           Stone::Empty => { unreachable!(); }
         }
       }
-      for &point in position.last_killed[0].iter() {
+      for &point in position.last_killed[0].iter().chain(position.last_killed[1].iter()) {
         let p = point.idx();
+        /*if self.compute_diff {
+          if features[Self::BLACK_PLANE + p] != 1 {
+            self.feature_diff_vals.push(1.0);
+            self.feature_diff_idxs.push(next_start + Self::BLACK_PLANE + p);
+          }
+          if features[Self::WHITE_PLANE + p] != 0 {
+            self.feature_diff_vals.push(-1.0);
+            self.feature_diff_idxs.push(next_start + Self::BLACK_PLANE + p);
+          }
+        }*/
         features[Self::BLACK_PLANE + p] = 0;
         features[Self::WHITE_PLANE + p] = 0;
       }
-      for &point in position.last_killed[1].iter() {
-        let p = point.idx();
-        features[Self::BLACK_PLANE + p] = 0;
-        features[Self::WHITE_PLANE + p] = 0;
-      }
-      // TODO(20151107): iterate over "touched" chains to update liberty repr.
     }
   }
 }
@@ -207,8 +241,4 @@ impl TxnStateData for TxnStateLibFeaturesData {
     // TODO(20151112)
     unimplemented!();
   }
-}
-
-pub struct TxnStateSparseFeaturesData {
-  features: Vec<(Point, Vec<u32>)>,
 }

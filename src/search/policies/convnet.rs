@@ -1,7 +1,7 @@
 use board::{Point};
 use convnet::{
   build_action_3layer_arch,
-  //build_action_6layer_arch,
+  build_action_6layer_arch,
 };
 use search::policies::{PriorPolicy};
 use txnstate::{TxnState};
@@ -20,7 +20,8 @@ pub struct ConvnetPriorPolicy {
 impl ConvnetPriorPolicy {
   pub fn new() -> ConvnetPriorPolicy {
     let ctx = DeviceContext::new(0);
-    let arch = build_action_3layer_arch(1, &ctx);
+    //let arch = build_action_3layer_arch(1, &ctx);
+    let arch = build_action_6layer_arch(1, &ctx);
     ConvnetPriorPolicy{
       ctx:  ctx,
       arch: arch,

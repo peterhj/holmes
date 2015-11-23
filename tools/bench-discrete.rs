@@ -11,7 +11,7 @@ use std::iter::{repeat};
 use time::{Duration, get_time};
 
 fn main() {
-  let trials = 320000;
+  let trials = 330000;
   let n = 361;
   let range = Range::new(0.0f32, 1.0f32);
   let mut slow_rng = thread_rng();

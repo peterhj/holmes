@@ -12,6 +12,10 @@ name = "gtpctl"
 path = "tools/gtpctl.rs"
 
 [[bin]]
+name = "gen-pattern-maps"
+path = "tools/gen-pattern-maps.rs"
+
+[[bin]]
 name = "prepare-position-testsuite-data"
 path = "tools/prepare-position-testsuite-data.rs"
 
@@ -104,6 +108,7 @@ bit-set = "*"
 bit-vec = "*"
 bufstream = "*"
 byteorder = "*"
+docopt = "*"
 getopts = "*"
 libc = "*"
 #leveldb-rs = "0.0.5"

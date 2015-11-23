@@ -1,13 +1,11 @@
+use array_util::{array_argmax};
 use board::{RuleSet, Board, Stone, Point, Action};
 //use features::{TxnStateFeaturesData};
 //use policy::{PriorPolicy, SearchPolicy, RolloutPolicy};
 use random::{XorShift128PlusRng, choose_without_replace};
 use search::policies::{PriorPolicy, TreePolicy, RolloutPolicy};
-use txnstate::{TxnState};
+use txnstate::{TxnState, check_good_move_fast};
 use txnstate::extras::{TxnStateNodeData};
-
-use statistics_avx2::array::{array_argmax};
-use statistics_avx2::random::{StreamRng};
 
 use bit_set::{BitSet};
 use rand::{Rng, SeedableRng, thread_rng};
@@ -15,13 +13,16 @@ use std::cell::{RefCell};
 use std::cmp::{max, min};
 use std::collections::{HashMap};
 use std::iter::{repeat};
+use std::io::{Write, stderr};
 use std::rc::{Rc, Weak};
+use time::{get_time};
 use vec_map::{VecMap};
 
 pub mod policies;
 
 #[derive(Default, Debug)]
 pub struct SearchStats {
+  pub elapsed_ms:       i64,
   pub edge_count:       i32,
   pub inner_edge_count: i32,
   pub term_edge_count:  i32,
@@ -73,11 +74,25 @@ impl Trajectory {
     self.sim_state.reset();
     self.sim_pairs.clear();
     self.score = None;
+    self.rave_mask[0].clear();
+    self.rave_mask[1].clear();
   }
 
-  pub fn init_rollout(&mut self, state: &TxnState<TxnStateNodeData>) {
+  pub fn reset_terminal(&mut self) {
+    self.rollout = false;
+    self.sim_pairs.clear();
+  }
+
+  pub fn reset_rollout(&mut self) {
     self.rollout = true;
-    self.sim_state.shrink_clone_from(state);
+    {
+      let &mut Trajectory{ref leaf_node, ref mut sim_state, .. } = self;
+      sim_state.shrink_clone_from(&self.leaf_node.as_ref().unwrap().borrow().state);
+    }
+    self.sim_pairs.clear();
+    self.score = None;
+    self.rave_mask[0].clear();
+    self.rave_mask[1].clear();
   }
 
   pub fn score(&mut self) {
@@ -98,6 +113,7 @@ pub struct Node {
   pub total_trials:     f32,
   pub horizon:          usize,
   pub child_nodes:      Vec<Option<Rc<RefCell<Node>>>>,
+  pub valid_moves:      Vec<Point>,
   pub prior_moves:      Vec<(Point, f32)>,
   pub arm_indexes:      VecMap<usize>,
   pub num_trials:       Vec<f32>,
@@ -130,6 +146,7 @@ impl Node {
       total_trials:     0.0,
       horizon:          horizon,
       child_nodes:      child_nodes,
+      valid_moves:      valid_moves,
       prior_moves:      prior_moves,
       arm_indexes:      arm_indexes,
       num_trials:       zeros.clone(),
@@ -148,7 +165,7 @@ impl Node {
     let mu = 2.0f32;
     self.total_trials += 1.0;
     // XXX: Progressive widening.
-    self.horizon = min((1.0 + (1.0 + self.total_trials).ln() / mu.ln()).ceil() as usize, self.child_nodes.len());
+    self.horizon = min((1.0 + (1.0 + self.total_trials).ln() / mu.ln()).ceil() as usize, self.prior_moves.len());
   }
 
   pub fn update_arm(&mut self, j: usize, score: f32) {
@@ -171,8 +188,10 @@ impl Node {
 }
 
 pub enum WalkResult {
-  Terminal(Rc<RefCell<Node>>),
-  Leaf(Rc<RefCell<Node>>),
+  /*Terminal(Rc<RefCell<Node>>),
+  NonTerminal(Rc<RefCell<Node>>),*/
+  Terminal,
+  NonTerminal,
 }
 
 pub struct Tree {
@@ -251,37 +270,37 @@ impl Tree {
     traj.leaf_node = Some(cursor_node.clone());
     let terminal = cursor_node.borrow().is_terminal();
     if terminal {
-      WalkResult::Terminal(cursor_node.clone())
+      //WalkResult::Terminal(cursor_node.clone())
+      WalkResult::Terminal
     } else {
-      WalkResult::Leaf(cursor_node.clone())
+      //WalkResult::NonTerminal(cursor_node.clone())
+      WalkResult::NonTerminal
     }
   }
 
-  pub fn backup(&mut self, tree_policy: &mut TreePolicy, traj: &mut Trajectory) {
+  pub fn backup(&mut self, tree_policy: &mut TreePolicy, traj: &mut Trajectory, i: usize) {
+    //writeln!(&mut stderr(), "DEBUG: backup idx: {}", i);
     traj.rave_mask[0].clear();
     traj.rave_mask[1].clear();
-    let score = match traj.score {
-      Some(score) => score,
-      None => panic!("Trajectory failed to score!"),
-    };
+    let score = traj.score.unwrap();
 
     if traj.sim_pairs.len() >= 1 {
+      assert!(traj.rollout);
       let mut leaf_node = traj.leaf_node.as_ref().unwrap().borrow_mut();
+      let leaf_turn = leaf_node.state.current_turn();
 
+      // XXX(20151120): Currently not tracking pass pairs, so need to check that
+      // the first rollout pair belongs to the leaf node turn.
       let (update_turn, update_point) = traj.sim_pairs[0];
-      /*let mut update_j = None;
-      for j in (0 .. leaf_node.prior_moves.len()) {
-        if leaf_node.prior_moves[j].0 == update_point {
-          update_j = Some(j);
-          break;
+      if leaf_turn == update_turn {
+        if let Some(&update_j) = leaf_node.arm_indexes.get(&update_point.idx()) {
+          assert_eq!(update_point, leaf_node.prior_moves[update_j].0);
+          leaf_node.update_arm(update_j, score);
+        } else {
+          writeln!(&mut stderr(), "WARNING: leaf_node arm_indexes does not contain update arm: {:?}", update_point);
+          panic!();
         }
       }
-      assert!(update_j.is_some());
-      let update_j = update_j.unwrap();*/
-      let update_j = leaf_node.arm_indexes[update_point.idx()];
-      assert_eq!(update_point, leaf_node.prior_moves[update_j].0);
-      leaf_node.update_visits();
-      leaf_node.update_arm(update_j, score);
 
       if tree_policy.rave() {
         // TODO(20151113)
@@ -298,11 +317,16 @@ impl Tree {
       }
     }
 
+    {
+      let mut leaf_node = traj.leaf_node.as_ref().unwrap().borrow_mut();
+      leaf_node.update_visits();
+      tree_policy.backup_values(&mut *leaf_node);
+    }
+
     for &(ref node, update_point, update_j) in traj.backup_triples.iter().rev() {
       let mut node = node.borrow_mut();
 
       assert_eq!(update_point, node.prior_moves[update_j].0);
-      node.update_visits();
       node.update_arm(update_j, score);
 
       if tree_policy.rave() {
@@ -310,12 +334,18 @@ impl Tree {
         traj.rave_mask[update_turn.offset()].insert(update_point.idx());
         for sim_p in traj.rave_mask[update_turn.offset()].iter() {
           let sim_point = Point::from_idx(sim_p);
+          if node.arm_indexes.capacity() < sim_point.idx()+1 {
+            panic!("WARNING: node.arm_indexes will overflow (324)!");
+          }
           if let Some(&sim_j) = node.arm_indexes.get(&sim_point.idx()) {
             assert_eq!(sim_point, node.prior_moves[sim_j].0);
             node.rave_update_arm(sim_j, score);
           }
         }
       }
+
+      node.update_visits();
+      tree_policy.backup_values(&mut *node);
     }
   }
 }
@@ -326,66 +356,48 @@ pub struct SequentialSearch {
 }
 
 impl SequentialSearch {
-  pub fn join(&mut self, tree: &mut Tree, traj: &mut Trajectory, prior_policy: &mut PriorPolicy, tree_policy: &mut TreePolicy, roll_policy: &mut RolloutPolicy) -> (Stone, Action) {
+  pub fn join(&mut self, tree: &mut Tree, traj: &mut Trajectory, prior_policy: &mut PriorPolicy, tree_policy: &mut TreePolicy, roll_policy: &mut RolloutPolicy<R=XorShift128PlusRng>) -> (Stone, Action) {
     let mut slow_rng = thread_rng();
     let mut rng = XorShift128PlusRng::from_seed([slow_rng.next_u64(), slow_rng.next_u64()]);
     let root_turn = tree.current_turn();
 
+    let start_time = get_time();
+
     for i in (0 .. self.num_rollouts) {
       match tree.walk(prior_policy, tree_policy, traj, &mut self.stats) {
-        WalkResult::Terminal(node) => {
+        WalkResult::Terminal => {
           //println!("DEBUG: terminal node");
           self.stats.term_count += 1;
-          //node.borrow_mut().update_visits();
+          traj.reset_terminal();
           traj.score();
-          tree.backup(tree_policy, traj);
+          tree.backup(tree_policy, traj, i);
         }
-        WalkResult::Leaf(node) => {
+        WalkResult::NonTerminal => {
           //println!("DEBUG: leaf node");
           self.stats.nonterm_count += 1;
 
-          //node.borrow_mut().update_visits();
-          traj.init_rollout(&node.borrow().state);
+          traj.reset_rollout();
 
-          // TODO(20151112): do rollout.
-          let mut valid_moves = [vec![], vec![]];
-          node.borrow().state.get_data().legality.fill_legal_points(Stone::Black, &mut valid_moves[0]);
-          node.borrow().state.get_data().legality.fill_legal_points(Stone::White, &mut valid_moves[1]);
-          let mut sim_turn = traj.sim_state.current_turn();
-          let mut sim_pass = [false, false];
-          for _ in (0 .. 400) {
-            sim_pass[sim_turn.offset()] = false;
-            let mut made_move = false;
-            while !valid_moves[sim_turn.offset()].is_empty() {
-              if let Some(point) = choose_without_replace(&mut valid_moves[sim_turn.offset()], &mut rng) {
-                if traj.sim_state.try_place(sim_turn, point).is_ok() {
-                  traj.sim_state.commit();
-                  traj.sim_pairs.push((sim_turn, point));
-                  made_move = true;
-                  break;
-                } else {
-                  traj.sim_state.undo();
-                }
-              }
-            }
-            if !made_move {
-              sim_pass[sim_turn.offset()] = true;
-            }
-            if sim_pass[0] && sim_pass[1] {
-              break;
-            }
-            sim_turn = sim_turn.opponent();
-          }
+          roll_policy.rollout(traj, &mut rng);
 
           traj.score();
-          tree.backup(tree_policy, traj);
+          tree.backup(tree_policy, traj, i);
         }
       }
     }
 
+    let end_time = get_time();
+    let elapsed_ms = (end_time - start_time).num_milliseconds();
+    self.stats.elapsed_ms = elapsed_ms;
+
     if let Some(argmax_j) = array_argmax(&tree.root_node.borrow().num_trials) {
-      let argmax_point = tree.root_node.borrow().prior_moves[argmax_j].0;
-      (root_turn, Action::Place{point: argmax_point})
+      let root_node = tree.root_node.borrow();
+      if root_node.num_succs[argmax_j] / root_node.num_trials[argmax_j] <= 0.01 {
+        (root_turn, Action::Resign)
+      } else {
+        let argmax_point = root_node.prior_moves[argmax_j].0;
+        (root_turn, Action::Place{point: argmax_point})
+      }
     } else {
       (root_turn, Action::Pass)
     }

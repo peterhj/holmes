@@ -28,7 +28,7 @@ impl SearchAgent {
   pub fn new() -> SearchAgent {
     //let ctx = DeviceContext::new(0);
     let mut prior_policy = ConvnetPriorPolicy::new();
-    let mut tree_policy = UctRaveTreePolicy{c: 0.5};
+    let mut tree_policy = UctRaveTreePolicy::new();
     let mut roll_policy = QuasiUniformRolloutPolicy;
     SearchAgent{
       komi:     0.0,
@@ -96,7 +96,7 @@ impl Agent for SearchAgent {
     }
     assert_eq!(turn, self.state.current_turn());
     let mut search = SequentialSearch{
-      num_rollouts: 10000,
+      num_rollouts: 1000,
       stats: Default::default(),
     };
     let mut tree = Tree::new(self.state.clone(), &mut self.prior_policy, &mut self.tree_policy);

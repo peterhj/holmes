@@ -1,5 +1,6 @@
 use board::{Board, Rules, RuleSet, Coord, Stone, Point, Action};
 use gtp_board::{dump_xcoord};
+use pattern::{Pattern3x3};
 
 use bit_set::{BitSet};
 use bit_vec::{BitVec};
@@ -35,14 +36,43 @@ pub fn for_each_diagonal<F>(point: Point, mut f: F) where F: FnMut(Point) {
   if x >= 1 && y >= 1 {
     f(Point(point.0 - 1 - Board::DIM_PT.0));
   }
-  if x >= 1 && y < upper {
-    f(Point(point.0 - 1 + Board::DIM_PT.0));
-  }
   if x < upper && y >= 1 {
     f(Point(point.0 + 1 - Board::DIM_PT.0));
   }
   if x < upper && y < upper {
     f(Point(point.0 + 1 + Board::DIM_PT.0));
+  }
+  if x >= 1 && y < upper {
+    f(Point(point.0 - 1 + Board::DIM_PT.0));
+  }
+}
+
+pub fn for_each_x8<F>(point: Point, mut f: F) where F: FnMut(u8, Point) {
+  let (x, y) = (point.0 % Board::DIM_PT.0, point.0 / Board::DIM_PT.0);
+  let upper = Board::DIM_PT.0 - 1;
+  if x >= 1 && y >= 1 {
+    f(0, Point(point.0 - 1 - Board::DIM_PT.0));
+  }
+  if y >= 1 {
+    f(1, Point(point.0 - Board::DIM_PT.0));
+  }
+  if x < upper && y >= 1 {
+    f(2, Point(point.0 + 1 - Board::DIM_PT.0));
+  }
+  if x >= 1 {
+    f(3, Point(point.0 - 1));
+  }
+  if x < upper {
+    f(4, Point(point.0 + 1));
+  }
+  if x >= 1 && y < upper {
+    f(5, Point(point.0 - 1 + Board::DIM_PT.0));
+  }
+  if y < upper {
+    f(6, Point(point.0 + Board::DIM_PT.0));
+  }
+  if x < upper && y < upper {
+    f(7, Point(point.0 + 1 + Board::DIM_PT.0));
   }
 }
 
@@ -70,22 +100,10 @@ pub fn is_eyeish(position: &TxnPosition, chains: &TxnChainsList, stone: Stone, p
 /// Some true eyes (c.f., "two headed dragon") will not be detected by this
 /// rule.
 pub fn is_eyelike(position: &TxnPosition, chains: &TxnChainsList, stone: Stone, point: Point) -> bool {
-  let mut eyeish = true;
-  for_each_adjacent(point, |adj_point| {
-    if position.stones[adj_point.idx()] != stone {
-      eyeish = false;
-    } else {
-      let adj_head = chains.find_chain(adj_point);
-      assert!(adj_head != TOMBSTONE);
-      let adj_chain = chains.get_chain(adj_head).unwrap();
-      if adj_chain.approx_count_libs() <= 1 {
-        eyeish = false;
-      }
-    }
-  });
-  if !eyeish {
+  if !is_eyeish(position, chains, stone, point) {
     return false;
   }
+
   // XXX: a.k.a. the "2/4 rule".
   let opp_stone = stone.opponent();
   let mut false_count = if point.is_edge() { 1 } else { 0 };
@@ -120,6 +138,15 @@ pub fn check_illegal_move_simple(position: &TxnPosition, chains: &TxnChainsList,
   None
 }
 
+pub fn check_good_move_fast(position: &TxnPosition, chains: &TxnChainsList, turn: Stone, point: Point) -> bool {
+  // Don't place in our own true eye.
+  if is_eyelike(position, chains, turn, point) {
+    return false;
+  }
+
+  true
+}
+
 pub type TxnResult = Result<(), TxnStatus>;
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
@@ -140,7 +167,6 @@ pub trait TxnStateData {
     // Do nothing.
   }
 
-  //fn update(&mut self, position: &TxnPosition, chains: &TxnChainsList) {
   fn update(&mut self, position: &TxnPosition, chains: &TxnChainsList, update_turn: Stone, update_action: Action) {
     // Do nothing.
   }
@@ -154,7 +180,13 @@ pub struct TxnPosition {
   turn:         Stone,
   num_stones:   [usize; 2],
   stones:       Vec<Stone>,
-  ko:           Option<(Stone, Point)>,
+
+  // State that depends on the previously placed point.
+  // FIXME(20151120)
+  prev_play:    Option<(Stone, Point)>, // the previously played point.
+  ko:           Option<(Stone, Point)>, // ko point.
+  prev_self_atari:  bool, // previous play put own chain in atari (2-pt semeai opportunity).
+  prev_oppo_atari:  bool, // previous play put opponent chain in atari (save opportunity).
 
   // FIXME(20151107): Semantics of when `last_placed` and `last_killed` are
   // valid is unclear; currently used as tmp variables that last until the end
@@ -163,6 +195,7 @@ pub struct TxnPosition {
   pub last_placed:  Option<(Stone, Point)>,
   pub last_ko:      Option<(Stone, Point)>,
   pub last_killed:  Vec<Vec<Point>>,
+  pub last_atari:   Vec<Vec<Point>>,
 }
 
 #[derive(Clone, Debug)]
@@ -227,11 +260,30 @@ impl Chain {
     }
   }
 
-  /*/// Returns 0, 1, 2, or 3.
-  pub fn approx_count_libs_3(&self) -> usize {
-    // TODO(20151105)
-    unimplemented!();
-  }*/
+  /// Returns 0, 1, 2, or 3.
+  pub fn approx_count_libs_up_to_3(&self) -> usize {
+    let mut prev_lib = None;
+    let mut prev2_lib = None;
+    for &lib in self.ps_libs.iter() {
+      match prev_lib {
+        None => prev_lib = Some(lib),
+        Some(prev_lib) => if prev_lib != lib {
+          match prev2_lib {
+            None => prev2_lib = Some(lib),
+            Some(prev2_lib) => if prev2_lib != lib {
+              return 3;
+            }
+          }
+        },
+      }
+    }
+    match (prev_lib, prev2_lib) {
+      (None, None) => 0,
+      (Some(_), None) => 1,
+      (Some(_), Some(_)) => 2,
+      _ => unreachable!(),
+    }
+  }
 
   pub fn insert_pseudolib(&mut self, point: Point) {
     self.diff_insert_ps_libs.push(point);
@@ -278,10 +330,6 @@ impl Chain {
         /*// Mark duplicates as "dead".
         if let Some(prev) = prev_lib {
           if prev == ps_libs[i] {
-            if let Some(Point(283)) = maybe_head {
-              println!("DEBUG: rollback: 283: pslib {:?} is a DUPLICATE",
-                  ps_libs[i].to_coord().to_string());
-            }
             ps_libs[i] = TOMBSTONE;
           } else {
             prev_lib = Some(ps_libs[i]);
@@ -291,10 +339,6 @@ impl Chain {
         }*/
         // Mark inserted libs as "dead".
         if ps_libs[i] == diff_insert_ps_libs[diff_j] {
-          /*if let Some(Point(283)) = maybe_head {
-            println!("DEBUG: rollback: 283: pslib {:?} was INSERTED",
-                ps_libs[i].to_coord().to_string());
-          }*/
           // FIXME(20151107): There is a very tricky thing here.
           // Suppose we are inserting a new liberty. If the liberty already
           // exists, then when undoing, we definitely DO NOT want to delete
@@ -310,18 +354,10 @@ impl Chain {
     for i in (0 .. ps_libs.len()).rev() {
       if ps_libs[i] == TOMBSTONE {
         let deleted_lib = ps_libs.swap_remove(i);
-        /*if let Some(Point(283)) = maybe_head {
-          println!("DEBUG: rollback: 283: pslib {:?} has been DELETED",
-              deleted_lib.to_coord().to_string());
-        }*/
       }
     }
     // Add back removed libs.
     for &lib in diff_remove_ps_libs.iter() {
-      /*if let Some(Point(283)) = maybe_head {
-        println!("DEBUG: rollback: 283: pslib {:?} was REMOVED",
-            lib.to_coord().to_string());
-      }*/
       ps_libs.push(lib);
     }
     diff_insert_ps_libs.clear();
@@ -666,15 +702,15 @@ pub struct TxnState<Data=()> where Data: TxnStateData + Clone {
   num_captures: [usize; 2],
 
   // Position data. This is managed by the TxnState.
-  position:     TxnPosition,
+  pub position: TxnPosition,
   proposal:     TxnPositionProposal,
 
   // Chains data. This is managed separately.
-  chains:       TxnChainsList,
+  pub chains:   TxnChainsList,
 
   // Auxiliary data. This does not have txn support and is updated only during
   // commit.
-  data:         Data,
+  pub data:     Data,
 }
 
 impl TxnState<()> {
@@ -709,11 +745,18 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
         turn:         Stone::Black,
         num_stones:   [0, 0],
         stones:       stones,
+        prev_play:    None,
         ko:           None,
+        prev_self_atari:  false,
+        prev_oppo_atari:  false,
         last_move:    None,
         last_placed:  None,
         last_ko:      None,
         last_killed:  vec![
+          vec![],
+          vec![],
+        ],
+        last_atari:   vec![
           vec![],
           vec![],
         ],
@@ -731,6 +774,22 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
       chains: TxnChainsList::new(),
       data: data,
     }
+  }
+
+  pub fn replace_clone_from<OtherData>(&mut self, other: &TxnState<OtherData>, data: Data) where OtherData: TxnStateData + Clone {
+    assert!(!self.in_txn);
+    assert!(!other.in_txn);
+    self.rules        = other.rules;
+    self.in_soft_txn  = false;
+    self.in_txn       = false;
+    self.txn_mut      = false;
+    self.resigned     = other.resigned.clone();
+    self.passed       = other.passed.clone();
+    self.num_captures = other.num_captures.clone();
+    self.position     = other.position.clone();
+    self.proposal     = other.proposal.clone();
+    self.chains       = other.chains.clone();
+    self.data         = data;
   }
 
   pub fn reset(&mut self) {
@@ -802,6 +861,19 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
 
   pub fn current_stone(&self, point: Point) -> Stone {
     self.position.stones[point.idx()]
+  }
+
+  pub fn current_pat3x3(&self, point: Point) -> Pattern3x3 {
+    let mut mask8: u16 = 0xffff;
+    for_each_x8(point, |i, adj_pt| {
+      let adj_st = self.position.stones[adj_pt.idx()];
+      match adj_st {
+        Stone::Empty => mask8 &= !(0x3_u16 << (2*i)),
+        Stone::Black => mask8 &= !(0x2_u16 << (2*i)),
+        Stone::White => mask8 &= !(0x1_u16 << (2*i)),
+      }
+    });
+    Pattern3x3(mask8)
   }
 
   pub fn current_ko(&self) -> Option<(Stone, Point)> {
@@ -883,6 +955,10 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
     for_each_adjacent(ko_point, |adj_ko_point| {
       let adj_ko_stone = self.position.stones[adj_ko_point.idx()];
       if adj_ko_stone != Stone::Empty {
+        // This checks two cases:
+        // - an adjacent stone that is also the placed stone must have only
+        //   one liberty and have chain size of one
+        // - otherwise, adjacent stones must have at least two liberties
         let adj_ko_head = self.chains.find_chain(adj_ko_point);
         let adj_ko_chain = self.chains.get_chain(adj_ko_head).unwrap();
         let adj_ko_libs = adj_ko_chain.approx_count_libs();
@@ -900,6 +976,8 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
             _ => { unreachable!(); }
           }
         }
+      } else {
+        unreachable!();
       }
     });
     is_ko
@@ -929,7 +1007,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
     }
   }
 
-  fn merge_chains(&mut self, turn: Stone, place_point: Point) {
+  fn merge_adjacent_chains(&mut self, turn: Stone, place_point: Point) {
     let mut failed = false;
     let mut extended = false;
     for_each_adjacent(place_point, |adj_point| {
@@ -952,7 +1030,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
           failed = true;
           return;
         }
-        //println!("DEBUG: merge_chains: extend {:?} {:?} <- {:?}", turn, place_point, adj_head);
+        //println!("DEBUG: merge_adjacent_chains: extend {:?} {:?} <- {:?}", turn, place_point, adj_head);
         extended = true;
       }
     });
@@ -967,7 +1045,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
       let &mut TxnState{
         ref position, ref mut chains, .. } = self;
       chains.create_chain(place_point, position);
-      //println!("DEBUG: merge_chains: create {:?} {:?}", turn, place_point);
+      //println!("DEBUG: merge_adjacent_chains: create {:?} {:?}", turn, place_point);
     }
   }
 
@@ -1059,15 +1137,6 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
 
     // Following Tromp-Taylor evaluation order:
 
-    /*let test_head = self.chains.find_chain(Point(283));
-    if test_head != TOMBSTONE {
-      let test_chain = self.chains.get_chain(test_head).unwrap();
-      println!("DEBUG: try_place: BEFORE {:?} 283: place: {:?} ps_libs: {:?}",
-          turn, place_point.to_coord().to_string(), test_chain.ps_libs);
-    }*/
-    /*println!("DEBUG: try_place: BEFORE {:?} 360: place {} stone {:?}",
-        turn, place_point.to_coord().to_string(), self.position.stones[360]);*/
-
     // 1. Place the stone.
     self.proposal.next_turn = turn.opponent();
     self.proposal.prev_turn = self.position.turn;
@@ -1084,31 +1153,42 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
     self.position.last_ko = self.position.ko;
     self.position.last_killed[0].clear();
     self.position.last_killed[1].clear();
-    self.merge_chains(turn, place_point);
+    self.position.last_atari[0].clear();
+    self.position.last_atari[1].clear();
+    self.merge_adjacent_chains(turn, place_point);
 
     // 2. Capture opponent chains.
     let opp_turn = turn.opponent();
     self.capture_adjacent_chains(turn, opp_turn, place_point, true);
 
     // 3. Suicide own chains.
-    /*let place_head = self.chains.find_chain(place_point);
-    let mut num_suicided_stones = self.capture_chain(opp_turn, turn, place_head, false);*/
     let num_suicided_stones = self.capture_adjacent_chains(opp_turn, turn, place_point, false);
+
+    {
+      let place_head = self.chains.find_chain(place_point);
+      if place_head != TOMBSTONE {
+        let place_chain = self.chains.get_chain(place_head).unwrap();
+        if place_chain.approx_count_libs() == 1 {
+          self.position.last_atari[turn.offset()].push(place_head);
+        }
+      }
+      for_each_adjacent(place_point, |adj_point| {
+        let adj_stone = self.position.stones[adj_point.idx()];
+        let adj_head = self.chains.find_chain(adj_point);
+        if adj_head != TOMBSTONE {
+          let adj_chain = self.chains.get_chain(adj_head).unwrap();
+          if adj_chain.approx_count_libs() == 1 {
+            self.position.last_atari[adj_stone.offset()].push(adj_head);
+          }
+        }
+      });
+    }
 
     if let Some(ko_candidate) = self.proposal.ko_candidate {
       if self.check_ko_candidate(turn, place_point, ko_candidate) {
         self.proposal.next_ko = Some(ko_candidate);
       }
     }
-
-    /*let test_head = self.chains.find_chain(Point(283));
-    if test_head != TOMBSTONE {
-      let test_chain = self.chains.get_chain(test_head).unwrap();
-      println!("DEBUG: try_place: AFTER {:?} 283: ps_libs: {:?}",
-          turn, test_chain.ps_libs);
-    }*/
-    /*println!("DEBUG: try_place: AFTER {:?} 360: stone {:?}",
-        turn, self.position.stones[360]);*/
 
     if num_suicided_stones > 0 {
       Err(TxnStatus::Illegal(IllegalReason::Suicide))
@@ -1118,40 +1198,55 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
   }
 
   pub fn commit(&mut self) {
-    // Committing the position consists only of rolling forward the current turn
-    // and the current ko point.
+    // Roll forward the current turn.
     self.position.turn = self.proposal.next_turn;
+
+    // Roll forward information about this turn (now the previous turn).
+    self.position.prev_play = match self.position.last_move {
+      Some((update_turn, Action::Place{point})) => Some((update_turn, point)),
+      _ => None,
+    };
     self.position.ko = self.proposal.next_ko.map(|ko_point| (self.proposal.next_turn, ko_point));
 
     if self.in_soft_txn {
       self.resigned = self.proposal.resigned;
+      self.position.prev_self_atari = false;
+      self.position.prev_oppo_atari = false;
     } else {
       assert!(self.in_txn);
+
+      let (update_turn, update_action) = self.position.last_move.unwrap();
+
+      // Commit more stateful changes to the position.
+      if self.position.last_atari[update_turn.offset()].len() > 0 {
+        self.position.prev_self_atari = true;
+      } else {
+        self.position.prev_self_atari = false;
+      }
+      if self.position.last_atari[update_turn.opponent().offset()].len() > 0 {
+        self.position.prev_oppo_atari = true;
+      } else {
+        self.position.prev_oppo_atari = false;
+      }
+
+      self.num_captures[0] += self.position.last_killed[1].len();
+      self.num_captures[1] += self.position.last_killed[0].len();
 
       // Commit changes to the chains list. This performs checkpointing per chain.
       self.chains.commit();
 
       // Run changes on the extra data.
-      let (update_turn, update_point) = self.position.last_move.unwrap();
-      self.data.update(&self.position, &self.chains, update_turn, update_point);
-
-      self.num_captures[0] += self.position.last_killed[1].len();
-      self.num_captures[1] += self.position.last_killed[0].len();
+      self.data.update(&self.position, &self.chains, update_turn, update_action);
 
       self.position.last_move = None;
       self.position.last_placed = None;
       self.position.last_ko = None;
       self.position.last_killed[0].clear();
       self.position.last_killed[1].clear();
+      self.position.last_atari[0].clear();
+      self.position.last_atari[1].clear();
       self.chains.last_mut_heads.clear();
     }
-
-    /*let test_head = self.chains.find_chain(Point(283));
-    if test_head != TOMBSTONE {
-      let test_chain = self.chains.get_chain(test_head).unwrap();
-      println!("DEBUG: try_place: COMMIT 283: ps_libs: {:?}",
-          test_chain.ps_libs);
-    }*/
 
     self.txn_mut = false;
     self.in_txn = false;
@@ -1183,10 +1278,6 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
 
         let (prev_place_stone, prev_place_point) = self.proposal.prev_place;
         self.position.num_stones[last_turn.offset()] -= 1;
-        /*if prev_place_point.0 == 360 {
-          println!("DEBUG: undo: prev place: {:?} {}",
-              prev_place_stone, prev_place_point.to_coord().to_string());
-        }*/
         self.position.stones[prev_place_point.idx()] = prev_place_stone;
 
         self.position.turn = self.proposal.prev_turn;
@@ -1197,6 +1288,8 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
         self.position.last_ko = None;
         self.position.last_killed[0].clear();
         self.position.last_killed[1].clear();
+        self.position.last_atari[0].clear();
+        self.position.last_atari[1].clear();
         self.chains.last_mut_heads.clear();
       }
     }
