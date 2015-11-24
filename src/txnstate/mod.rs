@@ -185,6 +185,7 @@ pub struct TxnPosition {
   // FIXME(20151120)
   prev_play:    Option<(Stone, Point)>, // the previously played point.
   ko:           Option<(Stone, Point)>, // ko point.
+  prev_ko:      Option<(Stone, Point)>, // previous ko point.
   prev_self_atari:  bool, // previous play put own chain in atari (2-pt semeai opportunity).
   prev_oppo_atari:  bool, // previous play put opponent chain in atari (save opportunity).
 
@@ -747,6 +748,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
         stones:       stones,
         prev_play:    None,
         ko:           None,
+        prev_ko:      None,
         prev_self_atari:  false,
         prev_oppo_atari:  false,
         last_move:    None,
@@ -803,12 +805,16 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
     self.num_captures[0] = 0;
     self.num_captures[1] = 0;
     self.position.turn = Stone::Black;
-    self.position.ko = None;
     self.position.num_stones[0] = 0;
     self.position.num_stones[1] = 0;
     for p in (0 .. Board::SIZE) {
       self.position.stones[p] = Stone::Empty;
     }
+    self.position.prev_play = None;
+    self.position.ko = None;
+    self.position.prev_ko = None;
+    self.position.prev_self_atari = false;
+    self.position.prev_oppo_atari = false;
     self.chains.reset();
     self.data.reset();
   }
@@ -1164,6 +1170,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
     // 3. Suicide own chains.
     let num_suicided_stones = self.capture_adjacent_chains(opp_turn, turn, place_point, false);
 
+    // Determine local atari flags (used by local features).
     {
       let place_head = self.chains.find_chain(place_point);
       if place_head != TOMBSTONE {
@@ -1184,12 +1191,14 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
       });
     }
 
+    // Finalize the ko point.
     if let Some(ko_candidate) = self.proposal.ko_candidate {
       if self.check_ko_candidate(turn, place_point, ko_candidate) {
         self.proposal.next_ko = Some(ko_candidate);
       }
     }
 
+    // Currently, always disallow suicide.
     if num_suicided_stones > 0 {
       Err(TxnStatus::Illegal(IllegalReason::Suicide))
     } else {
@@ -1207,6 +1216,9 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
       _ => None,
     };
     self.position.ko = self.proposal.next_ko.map(|ko_point| (self.proposal.next_turn, ko_point));
+    self.position.prev_ko = self.proposal.prev_ko;
+
+    let (update_turn, update_action) = self.position.last_move.unwrap();
 
     if self.in_soft_txn {
       self.resigned = self.proposal.resigned;
@@ -1214,8 +1226,6 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
       self.position.prev_oppo_atari = false;
     } else {
       assert!(self.in_txn);
-
-      let (update_turn, update_action) = self.position.last_move.unwrap();
 
       // Commit more stateful changes to the position.
       if self.position.last_atari[update_turn.offset()].len() > 0 {
@@ -1235,18 +1245,21 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
       // Commit changes to the chains list. This performs checkpointing per chain.
       self.chains.commit();
 
-      // Run changes on the extra data.
-      self.data.update(&self.position, &self.chains, update_turn, update_action);
-
-      self.position.last_move = None;
+      /*self.position.last_move = None;
       self.position.last_placed = None;
       self.position.last_ko = None;
       self.position.last_killed[0].clear();
       self.position.last_killed[1].clear();
       self.position.last_atari[0].clear();
-      self.position.last_atari[1].clear();
-      self.chains.last_mut_heads.clear();
+      self.position.last_atari[1].clear();*/
     }
+
+    // Run changes on the extra data.
+    self.data.update(&self.position, &self.chains, update_turn, update_action);
+
+    // FIXME(20151124): currently, no good way to reset ChainsList `last_*`
+    // fields, so doing it here instead.
+    self.chains.last_mut_heads.clear();
 
     self.txn_mut = false;
     self.in_txn = false;
@@ -1281,7 +1294,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
         self.position.stones[prev_place_point.idx()] = prev_place_stone;
 
         self.position.turn = self.proposal.prev_turn;
-        self.position.ko = self.proposal.prev_ko;
+        //self.position.ko = self.proposal.prev_ko;
 
         self.position.last_move = None;
         self.position.last_placed = None;
@@ -1290,6 +1303,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
         self.position.last_killed[1].clear();
         self.position.last_atari[0].clear();
         self.position.last_atari[1].clear();
+
         self.chains.last_mut_heads.clear();
       }
     }
@@ -1346,8 +1360,11 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
         s.push_str(&empty_indent);
       }
       if col == 0 {
-        s.push_str(&format!("turn: {:?}   num chains: {}",
-            self.current_turn(), self.chains.num_chains));
+        s.push_str(&format!("turn: {:?}   num chains: {}   ko: {:?}   prev ko: {:?}",
+            self.current_turn(), self.chains.num_chains,
+            self.position.ko.map(|k| (k.0, k.1.to_coord().to_string())),
+            self.position.prev_ko.map(|k| (k.0, k.1.to_coord().to_string())),
+        ));
       } else if col >= 1 && col <= self.chains.num_chains {
         while self.chains.chains[chain_h].is_none() {
           chain_h += 1;

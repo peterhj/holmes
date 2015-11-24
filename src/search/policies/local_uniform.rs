@@ -23,14 +23,14 @@ impl RolloutPolicy for LocalUniformRolloutPolicy {
     let mut sim_turn = traj.sim_state.current_turn();
     let mut sim_pass = [false, false];
 
-    let max_iters = 3 * 361 + rng.gen_range(0, 2);
+    let max_iters = (361 + 361 / 2) + rng.gen_range(0, 2);
     for t in (0 .. max_iters) {
       sim_pass[sim_turn.offset()] = false;
       let mut made_move = false;
 
       // FIXME(20151120): local features [Huang, 2011]:
       // - save by capture (no self-atari)
-      // - 2-point semeai capture
+      // - 2-point semeai capture (can skip for now)
       // - save by extend (no self-atari)
       // - 8-contiguous
       // - capture after ko

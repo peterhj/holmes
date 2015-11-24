@@ -1,5 +1,8 @@
 use board::{Board, Stone, Point, Action};
-use txnstate::{TxnStateData, TxnState, TxnPosition, TxnChainsList};
+use txnstate::{
+  TxnStateData, TxnState, TxnPosition, TxnChainsList,
+  for_each_adjacent,
+};
 use txnstate::extras::{TxnStateLegalityData, TxnStateNodeData};
 use util::{slice_twice_mut};
 
@@ -168,13 +171,16 @@ pub struct TxnStateLibFeaturesData {
 }
 
 impl TxnStateLibFeaturesData {
-  pub const BLACK_PLANE:      usize = 0;
-  pub const WHITE_PLANE:      usize = 1 * Board::SIZE;
-  pub const ATARI_PLANE:      usize = 2 * Board::SIZE;
-  pub const LIVE_2_PLANE:     usize = 3 * Board::SIZE;
-  pub const LIVE_3_PLANE:     usize = 4 * Board::SIZE;
-  pub const NUM_PLANES:       usize = 5;
-  pub const NUM_TIME_STEPS:   usize = 2;
+  pub const BLACK_PLANE:        usize = 0;
+  pub const BLACK_ATARI_PLANE:  usize = 1 * Board::SIZE;
+  pub const BLACK_LIVE_2_PLANE: usize = 2 * Board::SIZE;
+  pub const BLACK_LIVE_3_PLANE: usize = 3 * Board::SIZE;
+  pub const WHITE_PLANE:        usize = 4 * Board::SIZE;
+  pub const WHITE_ATARI_PLANE:  usize = 5 * Board::SIZE;
+  pub const WHITE_LIVE_2_PLANE: usize = 6 * Board::SIZE;
+  pub const WHITE_LIVE_3_PLANE: usize = 7 * Board::SIZE;
+  pub const NUM_PLANES:         usize = 8;
+  pub const NUM_TIME_STEPS:     usize = 2;
 
   pub fn new() -> TxnStateLibFeaturesData {
     TxnStateLibFeaturesData{
@@ -211,10 +217,6 @@ impl TxnStateLibFeaturesData {
               &self.features[src_offset + Self::WHITE_PLANE .. src_offset + Self::WHITE_PLANE + Board::SIZE],
               &mut dst_buf[dst_offset + Self::BLACK_PLANE .. dst_offset + Self::BLACK_PLANE + Board::SIZE],
           );
-          copy_memory(
-              &self.features[src_offset + Self::ATARI_PLANE .. src_offset + slice_sz],
-              &mut dst_buf[dst_offset + Self::ATARI_PLANE .. dst_offset + slice_sz],
-          );
         }
         _ => unreachable!(),
       }
@@ -226,19 +228,128 @@ impl TxnStateLibFeaturesData {
       }
     }
   }
+
+  fn update_point(features: &mut [u8], position: &TxnPosition, chains: &TxnChainsList, point: Point) {
+    let p = point.idx();
+    let stone = position.stones[p];
+    if stone != Stone::Empty {
+      let bw_value: u8 = match stone {
+        Stone::Black => 0,
+        Stone::White => 1,
+        _ => unreachable!(),
+      };
+      let head = chains.find_chain(point);
+      //assert!(head != TOMBSTONE);
+      let chain = chains.get_chain(head).unwrap();
+      match chain.approx_count_libs_up_to_3() {
+        0 => { unreachable!(); }
+        1 => {
+          features[Self::BLACK_ATARI_PLANE + p]  = 1 - bw_value;
+          features[Self::BLACK_LIVE_2_PLANE + p] = 0;
+          features[Self::BLACK_LIVE_3_PLANE + p] = 0;
+          features[Self::WHITE_ATARI_PLANE + p]  = bw_value;
+          features[Self::WHITE_LIVE_2_PLANE + p] = 0;
+          features[Self::WHITE_LIVE_3_PLANE + p] = 0;
+        }
+        2 => {
+          features[Self::BLACK_ATARI_PLANE + p]  = 0;
+          features[Self::BLACK_LIVE_2_PLANE + p] = 1 - bw_value;
+          features[Self::BLACK_LIVE_3_PLANE + p] = 0;
+          features[Self::WHITE_ATARI_PLANE + p]  = 0;
+          features[Self::WHITE_LIVE_2_PLANE + p] = bw_value;
+          features[Self::WHITE_LIVE_3_PLANE + p] = 0;
+        }
+        3 => {
+          features[Self::BLACK_ATARI_PLANE + p]  = 0;
+          features[Self::BLACK_LIVE_2_PLANE + p] = 0;
+          features[Self::BLACK_LIVE_3_PLANE + p] = 1 - bw_value;
+          features[Self::WHITE_ATARI_PLANE + p]  = 0;
+          features[Self::WHITE_LIVE_2_PLANE + p] = 0;
+          features[Self::WHITE_LIVE_3_PLANE + p] = bw_value;
+        }
+        _ => { unreachable!(); }
+      }
+    }
+  }
 }
 
 impl TxnStateData for TxnStateLibFeaturesData {
   fn reset(&mut self) {
+    self.time_step_offset = 0;
     assert_eq!(Self::NUM_TIME_STEPS * Self::NUM_PLANES * Board::SIZE, self.features.len());
     for p in (0 .. self.features.len()) {
       self.features[p] = 0;
     }
-    self.time_step_offset = 0;
   }
 
   fn update(&mut self, position: &TxnPosition, chains: &TxnChainsList, update_turn: Stone, update_action: Action) {
-    // TODO(20151112)
-    unimplemented!();
+    // XXX: Before anything else, increment the time step.
+    self.time_step_offset = (self.time_step_offset + 1) % Self::NUM_TIME_STEPS;
+
+    // TODO(20151124): for sparse features, how to compute diffs efficiently?
+
+    let slice_sz = Self::NUM_PLANES * Board::SIZE;
+    let next_slice_off = self.time_step_offset;
+    if Self::NUM_TIME_STEPS > 1 {
+      let prev_slice_off = (self.time_step_offset + Self::NUM_TIME_STEPS - 1) % Self::NUM_TIME_STEPS;
+      let (src_feats, mut dst_feats) = slice_twice_mut(
+          &mut self.features,
+          prev_slice_off * slice_sz, (prev_slice_off + 1) * slice_sz,
+          next_slice_off * slice_sz, (next_slice_off + 1) * slice_sz,
+      );
+      copy_memory(src_feats, &mut dst_feats);
+    }
+
+    let next_start = next_slice_off * slice_sz;
+    let next_end = next_start + slice_sz;
+    {
+      // XXX(20151107): Iterate over placed and killed chains to update stone
+      // repr.
+      let mut features = &mut self.features[next_start .. next_end];
+      if let Some((stone, point)) = position.last_placed {
+        let p = point.idx();
+        match stone {
+          Stone::Black => {
+            features[Self::BLACK_PLANE + p] = 1;
+            features[Self::WHITE_PLANE + p] = 0;
+          }
+          Stone::White => {
+            features[Self::BLACK_PLANE + p] = 0;
+            features[Self::WHITE_PLANE + p] = 1;
+          }
+          Stone::Empty => { unreachable!(); }
+        }
+      }
+      for &kill_point in position.last_killed[0].iter().chain(position.last_killed[1].iter()) {
+        let p = kill_point.idx();
+        features[Self::BLACK_PLANE + p] = 0;
+        features[Self::WHITE_PLANE + p] = 0;
+      }
+
+      // XXX(20151124): Iterate over placed, adjacent, ko, captured stones, and
+      // pseudolibs; see TxnStateLegalityData.
+      if let Some((_, place_point)) = position.last_placed {
+        Self::update_point(features, position, chains, place_point);
+        for_each_adjacent(place_point, |adj_point| {
+          Self::update_point(features, position, chains, adj_point);
+        });
+      }
+      if let Some((_, ko_point)) = position.ko {
+        Self::update_point(features, position, chains, ko_point);
+      }
+      if let Some((_, prev_ko_point)) = position.prev_ko {
+        Self::update_point(features, position, chains, prev_ko_point);
+      }
+      for &kill_point in position.last_killed[0].iter().chain(position.last_killed[1].iter()) {
+        Self::update_point(features, position, chains, kill_point);
+      }
+      for &head in chains.last_mut_heads.iter() {
+        if let Some(chain) = chains.get_chain(head) {
+          for &lib in chain.ps_libs.iter() {
+            Self::update_point(features, position, chains, lib);
+          }
+        }
+      }
+    }
   }
 }

@@ -5,7 +5,7 @@ extern crate rustc_serialize;
 use holmes::board::{RuleSet, Board, Stone, Point, Action};
 use holmes::sgf::{Sgf};
 use holmes::txnstate::{TxnState, TxnResult};
-use holmes::txnstate::extras::{TxnStateNodeData};
+use holmes::txnstate::extras::{TxnStateAllData};
 use rusqlite::{SqliteConnection, SqliteOpenFlags};
 use rustc_serialize::json;
 
@@ -120,7 +120,7 @@ fn test_sgf_correctness() {
       /*println!("DEBUG: sgf:");
       println!("{}", sgf_entry.sgf_body);*/
 
-      let mut state = TxnState::new(rules, TxnStateNodeData::new());
+      let mut state = TxnState::new(rules, TxnStateAllData::new());
       state.reset();
       for (j, &(ref turn_code, ref move_code)) in sgf.moves.iter().enumerate() {
         let turn = Stone::from_code_str(&turn_code);
@@ -155,12 +155,6 @@ fn test_sgf_correctness() {
 
         // Check that cached illegal moves in TxnStateLegalityData are
         // consistent with the printsgf illegal moves.
-        /*println!("DEBUG: move {}: {:?} {:?}", j, turn, action);
-        if let Action::Place{point} = action {
-          println!("DEBUG:   move coord: {:?} {:?}", turn, point.to_coord());
-        }
-        println!("DEBUG: our repr:");
-        println!("{}", gnugo_pos_guess.output);*/
         let mut valid_moves = vec![];
         state.get_data().legality.fill_legal_points(turn, &mut valid_moves);
         let valid_moves = BTreeSet::from_iter(valid_moves.into_iter());
@@ -179,12 +173,6 @@ fn test_sgf_correctness() {
             }
           }
           if err {
-            /*println!("# move {}: {:?} {:?}", j, turn, action);
-            if let Action::Place{point} = action {
-              println!("#   move coord: {:?} {:?}", turn, point.to_coord());
-            }
-            //println!("# our repr:");
-            //println!("{}", gnugo_pos_guess.output);*/
             println!("# brute force illegal empty points:");
             println!("{:?}", gnugo_pos_guess.illegal);
             println!("# cached valid moves:");
@@ -196,7 +184,6 @@ fn test_sgf_correctness() {
             panic!();
           }
         }
-        // TODO(20151115)
 
         // Check that the given action is valid. Check that undo also works as
         // expected.
@@ -221,7 +208,8 @@ fn test_sgf_correctness() {
           }
         }
 
-        // TODO(20151112): check position and lib features.
+        // TODO(20151112):
+        // Check position and lib features.
       }
 
       total_count += 1;

@@ -70,6 +70,6 @@ pub fn load_hyperparam<T>(key: &str) -> T where T: Hyperparam {
   });
   match res {
     Some(x) => x,
-    None => panic!("failed to load parameter: key '{}'", key),
+    None => panic!("failed to load parameter: '{}'", key),
   }
 }
