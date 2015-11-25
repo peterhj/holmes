@@ -3,6 +3,7 @@ use board::{Board, RuleSet, Stone, Point, Action};
 use search::{Tree, Trajectory, SequentialSearch};
 use search::policies::convnet::{ConvnetPriorPolicy};
 use search::policies::quasiuniform::{QuasiUniformRolloutPolicy};
+use search::policies::thompson_rave::{ThompsonRaveTreePolicy};
 use search::policies::uct_rave::{UctRaveTreePolicy};
 use txnstate::{TxnState};
 use txnstate::extras::{TxnStateNodeData};
@@ -20,7 +21,8 @@ pub struct SearchAgent {
 
   //ctx:      DeviceContext,
   prior_policy: ConvnetPriorPolicy,
-  tree_policy:  UctRaveTreePolicy,
+  //tree_policy:  UctRaveTreePolicy,
+  tree_policy:  ThompsonRaveTreePolicy,
   roll_policy:  QuasiUniformRolloutPolicy,
 }
 
@@ -28,7 +30,8 @@ impl SearchAgent {
   pub fn new() -> SearchAgent {
     //let ctx = DeviceContext::new(0);
     let mut prior_policy = ConvnetPriorPolicy::new();
-    let mut tree_policy = UctRaveTreePolicy::new();
+    //let mut tree_policy = UctRaveTreePolicy::new();
+    let mut tree_policy = ThompsonRaveTreePolicy::new();
     let mut roll_policy = QuasiUniformRolloutPolicy;
     SearchAgent{
       komi:     0.0,
@@ -100,8 +103,7 @@ impl Agent for SearchAgent {
       stats: Default::default(),
     };
     let mut tree = Tree::new(self.state.clone(), &mut self.prior_policy, &mut self.tree_policy);
-    let mut traj = Trajectory::new();
-    let (_, action) = search.join(&mut tree, &mut traj, &mut self.prior_policy, &mut self.tree_policy, &mut self.roll_policy);
+    let (_, action) = search.join(&mut tree, &mut self.prior_policy, &mut self.tree_policy, &mut self.roll_policy);
     println!("DEBUG: search stats: {:?}", search.stats);
     action
   }

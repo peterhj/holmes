@@ -3,9 +3,13 @@ use board::{Board, RuleSet, Stone, Point, Action};
 use convnet::{
   build_action_3layer_arch,
   build_action_6layer_arch,
+  build_action_6layer_19x19x16_arch,
 };
 use txnstate::{TxnState};
-use txnstate::features::{TxnStateFeaturesData};
+use txnstate::features::{
+  TxnStateFeaturesData,
+  TxnStateLibFeaturesData,
+};
 
 use async_cuda::context::{DeviceContext};
 use rembrandt::layer::{Layer};
@@ -18,8 +22,8 @@ pub struct ConvnetAgent {
   komi:     f32,
   player:   Option<Stone>,
 
-  history:  Vec<(TxnState<TxnStateFeaturesData>, Action)>,
-  state:    TxnState<TxnStateFeaturesData>,
+  history:  Vec<(TxnState<TxnStateLibFeaturesData>, Action)>,
+  state:    TxnState<TxnStateLibFeaturesData>,
 
   ctx:      DeviceContext,
   arch:     LinearNetArch,
@@ -29,12 +33,13 @@ impl ConvnetAgent {
   pub fn new() -> ConvnetAgent {
     let ctx = DeviceContext::new(0);
     //let arch = build_action_3layer_arch(1, &ctx);
-    let arch = build_action_6layer_arch(1, &ctx);
+    //let arch = build_action_6layer_arch(1, &ctx);
+    let arch = build_action_6layer_19x19x16_arch(1, &ctx);
     ConvnetAgent{
       komi:     0.0,
       player:   None,
       history:  vec![],
-      state:    TxnState::new(RuleSet::KgsJapanese.rules(), TxnStateFeaturesData::new()),
+      state:    TxnState::new(RuleSet::KgsJapanese.rules(), TxnStateLibFeaturesData::new()),
       ctx:      ctx,
       arch:     arch,
     }

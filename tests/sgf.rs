@@ -208,8 +208,64 @@ fn test_sgf_correctness() {
           }
         }
 
-        // TODO(20151112):
-        // Check position and lib features.
+        // Check position features.
+        for p in (0 .. Board::SIZE) {
+          let point = Point::from_idx(p);
+          match state.current_stone(point) {
+            Stone::Black => {
+              assert_eq!(1, state.get_data().features.current_feature(0, point));
+              assert_eq!(0, state.get_data().features.current_feature(1, point));
+              assert_eq!(1, state.get_data().libfeats.current_feature(0, point));
+              assert_eq!(0, state.get_data().libfeats.current_feature(4, point));
+            }
+            Stone::White => {
+              assert_eq!(0, state.get_data().features.current_feature(0, point));
+              assert_eq!(1, state.get_data().features.current_feature(1, point));
+              assert_eq!(0, state.get_data().libfeats.current_feature(0, point));
+              assert_eq!(1, state.get_data().libfeats.current_feature(4, point));
+            }
+            Stone::Empty => {
+              assert_eq!(0, state.get_data().features.current_feature(0, point));
+              assert_eq!(0, state.get_data().features.current_feature(1, point));
+              assert_eq!(0, state.get_data().libfeats.current_feature(0, point));
+              assert_eq!(0, state.get_data().libfeats.current_feature(4, point));
+            }
+          }
+        }
+
+        // TODO(20151123):
+        // Check liberty features.
+        for p in (0 .. Board::SIZE) {
+          let point = Point::from_idx(p);
+          match state.current_stone(point) {
+            Stone::Black => {
+              let libs = state.current_libs(point);
+              assert_eq!(if libs == 1 { 1 } else { 0 }, state.get_data().libfeats.current_feature(1, point));
+              assert_eq!(if libs == 2 { 1 } else { 0 }, state.get_data().libfeats.current_feature(2, point));
+              assert_eq!(if libs == 3 { 1 } else { 0 }, state.get_data().libfeats.current_feature(3, point));
+              assert_eq!(0, state.get_data().libfeats.current_feature(5, point));
+              assert_eq!(0, state.get_data().libfeats.current_feature(6, point));
+              assert_eq!(0, state.get_data().libfeats.current_feature(7, point));
+            }
+            Stone::White => {
+              let libs = state.current_libs(point);
+              assert_eq!(0, state.get_data().libfeats.current_feature(1, point));
+              assert_eq!(0, state.get_data().libfeats.current_feature(2, point));
+              assert_eq!(0, state.get_data().libfeats.current_feature(3, point));
+              assert_eq!(if libs == 1 { 1 } else { 0 }, state.get_data().libfeats.current_feature(5, point));
+              assert_eq!(if libs == 2 { 1 } else { 0 }, state.get_data().libfeats.current_feature(6, point));
+              assert_eq!(if libs == 3 { 1 } else { 0 }, state.get_data().libfeats.current_feature(7, point));
+            }
+            Stone::Empty => {
+              assert_eq!(0, state.get_data().libfeats.current_feature(1, point));
+              assert_eq!(0, state.get_data().libfeats.current_feature(2, point));
+              assert_eq!(0, state.get_data().libfeats.current_feature(3, point));
+              assert_eq!(0, state.get_data().libfeats.current_feature(5, point));
+              assert_eq!(0, state.get_data().libfeats.current_feature(6, point));
+              assert_eq!(0, state.get_data().libfeats.current_feature(7, point));
+            }
+          }
+        }
       }
 
       total_count += 1;

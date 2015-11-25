@@ -28,8 +28,8 @@ fn main() {
   rng.shuffle(&mut valid_coords);
 
   //let mut state = TxnState::new(RuleSet::KgsJapanese.rules(), ());
-  //let mut state = TxnState::new(RuleSet::KgsJapanese.rules(), TxnStateLegalityData::new());
-  let mut state = TxnState::new(RuleSet::KgsJapanese.rules(), TxnStateFeaturesData::new());
+  let mut state = TxnState::new(RuleSet::KgsJapanese.rules(), TxnStateLegalityData::new());
+  //let mut state = TxnState::new(RuleSet::KgsJapanese.rules(), TxnStateFeaturesData::new());
 
   //let mut final_cdf_norm = 0.0;
   //let mut fake_cdf: Vec<f32> = Vec::with_capacity(361);
@@ -59,15 +59,16 @@ fn main() {
       }
 
       // XXX(20151119): combination of these two result in slowdown of 7-8x
-      // compared to pure quasirandom policy.
-      for j in (0 .. 361) {
+      // compared to pure quasirandom policy, or a slowdown of about 1.8x
+      // compared to quasirandom w/ legality data.
+      /*for j in (0 .. 361) {
         fake_sum += fake_pdf[j];
-      }
-      filter.fill(&fake_pdf);
+      }*/
+      //filter.fill(&fake_pdf);
 
       while valid_coords.len() > 0 {
-        let j = filter.sample(&mut rng).unwrap();
-        filter.zero(j);
+        /*let j = filter.sample(&mut rng).unwrap();
+        filter.zero(j);*/
         let p = choose_without_replace(&mut valid_coords, &mut rng);
         if let Some(p) = p {
           let point = Point(p as i16);

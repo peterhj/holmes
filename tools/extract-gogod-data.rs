@@ -10,7 +10,10 @@ extern crate rustc_serialize;
 use holmes::board::{RuleSet, Coord, Stone, Point, Action};
 use holmes::sgf::{Sgf, parse_raw_sgf};
 use holmes::txnstate::{TxnState};
-use holmes::txnstate::features::{TxnStateFeaturesData};
+use holmes::txnstate::features::{
+  TxnStateFeaturesData,
+  TxnStateLibFeaturesData,
+};
 
 use array::{NdArrayFormat, ArrayDeserialize, ArraySerialize, Array3d};
 use arraydb::{ArrayDb};
@@ -54,7 +57,8 @@ fn main() {
   //let serial_frame_sz = <Array3d<u8> as ArrayDeserialize<u8, NdArrayFormat>>::serial_size((19, 19, 4));
   //let serial_frame_sz = <Array3d<u8> as ArrayDeserialize<u8, NdArrayFormat>>::serial_size((19, 19, 10));
 
-  let expected_dims = (19, 19, 4);
+  //let expected_dims = (19, 19, 4);
+  let expected_dims = (19, 19, 16);
   let expected_frame_sz = <Array3d<u8> as ArrayDeserialize<u8, NdArrayFormat>>::serial_size(expected_dims);
 
   let n = sgf_paths.len() * 210;
@@ -106,7 +110,8 @@ fn main() {
     };
 
     let mut history = vec![];
-    let mut state = TxnState::new(RuleSet::KgsJapanese.rules(), TxnStateFeaturesData::new());
+    //let mut state = TxnState::new(RuleSet::KgsJapanese.rules(), TxnStateFeaturesData::new());
+    let mut state = TxnState::new(RuleSet::KgsJapanese.rules(), TxnStateLibFeaturesData::new());
     state.reset();
     for &(ref player, ref mov) in sgf.moves.iter() {
       let turn = match player as &str {

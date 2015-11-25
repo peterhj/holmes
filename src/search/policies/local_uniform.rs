@@ -2,7 +2,11 @@ use board::{Stone, Point};
 use random::{XorShift128PlusRng, choose_without_replace};
 use search::{Trajectory};
 use search::policies::{RolloutPolicy};
-use txnstate::{for_each_adjacent_8, check_good_move_fast};
+use txnstate::{
+  for_each_adjacent,
+  for_each_adjacent_8,
+  check_good_move_fast,
+};
 
 use rand::{Rng};
 
@@ -36,6 +40,21 @@ impl RolloutPolicy for LocalUniformRolloutPolicy {
       // - capture after ko
 
       if !valid_moves[sim_turn.offset()].is_empty() {
+        if let Some((prev_turn, prev_point)) = sim_state.position.prev_play {
+          if prev_turn == sim_turn.opponent() {
+            let mut new_atari = vec![];
+            for_each_adjacent(prev_point, |adj_point| {
+              let adj_stone = sim_state.current_stone(adj_point);
+              if adj_stone == sim_turn {
+                let adj_head = sim_state.chains.find_chain(adj_point);
+                let adj_chain = sim_state.chains.get_chain(adj_head).unwrap();
+                if adj_chain.approx_count_libs() == 1 {
+                  new_atari.push(adj_head);
+                }
+              }
+            });
+          }
+        }
       }
 
       while !valid_moves[sim_turn.offset()].is_empty() {

@@ -2,6 +2,7 @@ extern crate holmes;
 extern crate rand;
 extern crate time;
 
+use holmes::discrete::{DiscreteFilter};
 use holmes::discrete::bfilter::{BFilter};
 use holmes::random::{XorShift128PlusRng};
 use rand::{Rng, SeedableRng, thread_rng};
@@ -28,7 +29,7 @@ fn main() {
     for x in xs.iter_mut() {
       *x = range.ind_sample(&mut rng);
     }
-    filter.fill(&xs);
+    filter.reset(&xs);
     loop {
       if let Some(j) = filter.sample(&mut rng) {
         assert!(j < n);

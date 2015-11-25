@@ -123,16 +123,55 @@ pub fn check_illegal_move_simple(position: &TxnPosition, chains: &TxnChainsList,
     return Some(IllegalReason::NotEmpty);
   }
 
-  // Illegal to suicide (place in opponent's eye).
-  if is_eyeish(position, chains, turn.opponent(), point) {
-    return Some(IllegalReason::Suicide);
-  }
-
   // Illegal to place at ko point.
   if let Some((ko_turn, ko_point)) = position.ko {
     if ko_turn == turn && ko_point == point {
       return Some(IllegalReason::Ko);
     }
+  }
+
+  // Illegal to suicide (place in opponent's eye).
+  if is_eyeish(position, chains, turn.opponent(), point) {
+    return Some(IllegalReason::Suicide);
+  }
+
+  None
+}
+
+pub fn check_legal_move_simple(position: &TxnPosition, chains: &TxnChainsList, turn: Stone, point: Point) -> Option<TxnResult> {
+  let p = point.idx();
+
+  // Illegal to place a stone on top of an existing stone.
+  if position.stones[p] != Stone::Empty {
+    return Some(Err(TxnStatus::Illegal(IllegalReason::NotEmpty)));
+  }
+
+  // Illegal to place at ko point.
+  if let Some((ko_turn, ko_point)) = position.ko {
+    if ko_turn == turn && ko_point == point {
+      return Some(Err(TxnStatus::Illegal(IllegalReason::Ko)));
+    }
+  }
+
+  // Illegal to suicide (place in opponent's eye).
+  if is_eyeish(position, chains, turn.opponent(), point) {
+    return Some(Err(TxnStatus::Illegal(IllegalReason::Suicide)));
+  }
+
+  // If the move is not next to our own atari chain, it is legal (barring superko).
+  let mut no_adj_atari = true;
+  for_each_adjacent(point, |adj_point| {
+    let adj_stone = position.stones[adj_point.idx()];
+    if adj_stone == turn {
+      let adj_head = chains.find_chain(adj_point);
+      let adj_chain = chains.get_chain(adj_head).unwrap();
+      if adj_chain.approx_count_libs() == 1 {
+        no_adj_atari = false;
+      }
+    }
+  });
+  if no_adj_atari {
+    return Some(Ok(()));
   }
 
   None
@@ -882,6 +921,16 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
     Pattern3x3(mask8)
   }
 
+  pub fn current_libs(&self, point: Point) -> usize {
+    let head = self.chains.find_chain(point);
+    if head == TOMBSTONE {
+      0
+    } else {
+      let chain = self.chains.get_chain(head).unwrap();
+      chain.approx_count_libs_up_to_3()
+    }
+  }
+
   pub fn current_ko(&self) -> Option<(Stone, Point)> {
     self.position.ko
   }
@@ -1244,18 +1293,18 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
 
       // Commit changes to the chains list. This performs checkpointing per chain.
       self.chains.commit();
-
-      /*self.position.last_move = None;
-      self.position.last_placed = None;
-      self.position.last_ko = None;
-      self.position.last_killed[0].clear();
-      self.position.last_killed[1].clear();
-      self.position.last_atari[0].clear();
-      self.position.last_atari[1].clear();*/
     }
 
     // Run changes on the extra data.
     self.data.update(&self.position, &self.chains, update_turn, update_action);
+
+    /*self.position.last_move = None;
+    self.position.last_placed = None;
+    self.position.last_ko = None;
+    self.position.last_killed[0].clear();
+    self.position.last_killed[1].clear();
+    self.position.last_atari[0].clear();
+    self.position.last_atari[1].clear();*/
 
     // FIXME(20151124): currently, no good way to reset ChainsList `last_*`
     // fields, so doing it here instead.

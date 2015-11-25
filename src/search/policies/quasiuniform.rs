@@ -11,7 +11,7 @@ use rand::{Rng};
 pub struct QuasiUniformRolloutPolicy;
 
 impl RolloutPolicy for QuasiUniformRolloutPolicy {
-  type R = XorShift128PlusRng;
+  //type R = XorShift128PlusRng;
 
   fn rollout(&self, traj: &mut Trajectory, rng: &mut Self::R) {
     //let zero_or_one = Range::new(0, 2);

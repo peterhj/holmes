@@ -1,4 +1,5 @@
 #![feature(associated_consts)]
+#![feature(associated_type_defaults)]
 #![feature(clone_from_slice)]
 #![feature(drain)]
 #![feature(slice_bytes)]
