@@ -3,7 +3,7 @@ use board::{Board, Stone, Point};
 use hyper::{
   RAVE,
   RAVE_EQUIV,
-  //PRIOR_EQUIV,
+  PRIOR_EQUIV,
 };
 use search::{Node};
 use search::policies::{TreePolicy};
@@ -26,7 +26,7 @@ impl ThompsonRaveTreePolicy {
     ThompsonRaveTreePolicy{
       rave:         RAVE.with(|x| *x),
       rave_equiv:   RAVE_EQUIV.with(|x| *x),
-      prior_equiv:  600.0,
+      prior_equiv:  PRIOR_EQUIV.with(|x| *x),
 
       tmp_values:   repeat(0.0).take(Board::SIZE).collect(),
     }
@@ -39,7 +39,7 @@ impl TreePolicy for ThompsonRaveTreePolicy {
   }
 
   fn init_node(&mut self, node: &mut Node, rng: &mut Self::R) {
-    self.backup_values(node, rng);
+    // Do nothing.
   }
 
   fn execute_search(&mut self, node: &Node, rng: &mut Self::R) -> Option<(Point, usize)> {

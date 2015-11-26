@@ -3,6 +3,7 @@ use convnet::{
   build_action_3layer_arch,
   build_action_6layer_arch,
   build_action_2layer_19x19x16_arch,
+  build_action_3layer_19x19x16_arch,
   build_action_6layer_19x19x16_arch,
 };
 use discrete::{DiscreteFilter};
@@ -35,7 +36,8 @@ impl ConvnetPriorPolicy {
     let ctx = DeviceContext::new(0);
     //let arch = build_action_3layer_arch(1, &ctx);
     //let arch = build_action_6layer_arch(1, &ctx);
-    let arch = build_action_6layer_19x19x16_arch(1, &ctx);
+    let arch = build_action_3layer_19x19x16_arch(1, &ctx);
+    //let arch = build_action_6layer_19x19x16_arch(1, &ctx);
     ConvnetPriorPolicy{
       ctx:  ctx,
       arch: arch,
@@ -101,6 +103,7 @@ impl RolloutPolicy for BatchConvnetRolloutPolicy {
     let mut valid_moves = vec![vec![], vec![]];
     let mut bad_moves = vec![vec![], vec![]];
     let mut turn_pass = vec![vec![], vec![]];
+    let mut num_both_passed = 0;
     let mut filters = vec![];
     for idx in (0 .. batch_size) {
       let leaf_node = trajs[idx].leaf_node.as_ref().unwrap().borrow();
@@ -115,7 +118,17 @@ impl RolloutPolicy for BatchConvnetRolloutPolicy {
 
     let max_iters = 361 + 361 / 2 + rng.gen_range(0, 2);
     for t in (0 .. max_iters) {
+      //println!("DEBUG: BatchConvnetRolloutPolicy: iter {} / {}", t, max_iters);
+      if num_both_passed == batch_size {
+        //println!("DEBUG: BatchConvnetRolloutPolicy: all passed");
+        break;
+      }
+
       for idx in (0 .. batch_size) {
+        if !trajs[idx].rollout {
+          continue;
+        }
+
         let turn = trajs[idx].sim_state.current_turn();
         trajs[idx].sim_state.get_data()
           .extract_relative_features(
@@ -133,11 +146,18 @@ impl RolloutPolicy for BatchConvnetRolloutPolicy {
       {
         let batch_probs = self.arch.loss_layer().predict_probs(batch_size, &self.ctx).as_slice();
         for idx in (0 .. batch_size) {
+          if !trajs[idx].rollout {
+            continue;
+          }
           filters[idx].reset(&batch_probs[idx * Board::SIZE .. (idx + 1) * Board::SIZE]);
         }
       }
 
       for idx in (0 .. batch_size) {
+        if !trajs[idx].rollout {
+          continue;
+        }
+
         let sim_turn = trajs[idx].sim_state.current_turn();
         let sim_turn_off = sim_turn.offset();
         if turn_pass[0][idx] && turn_pass[1][idx] {
@@ -145,10 +165,12 @@ impl RolloutPolicy for BatchConvnetRolloutPolicy {
         }
 
         let mut made_move = false;
+        let mut spin_count = 0;
         while !valid_moves[sim_turn_off][idx].is_empty() {
+          spin_count += 1;
           if let Some(p) = filters[idx].sample(rng) {
-            let sim_point = Point::from_idx(p);
             filters[idx].zero(p);
+            let sim_point = Point::from_idx(p);
             if !valid_moves[sim_turn_off][idx].contains(&p) {
               continue;
             } else if !check_good_move_fast(&trajs[idx].sim_state.position, &trajs[idx].sim_state.chains, sim_turn, sim_point) {
@@ -173,6 +195,9 @@ impl RolloutPolicy for BatchConvnetRolloutPolicy {
             unreachable!();
           }
         }
+        /*println!("DEBUG: BatchConvnetRolloutPolicy: iter {}: idx {}: spin count: {}",
+            t, idx, spin_count);*/
+        assert!(spin_count <= Board::SIZE);
 
         // XXX: Bad moves are not technically illegal.
         valid_moves[sim_turn_off][idx].extend(bad_moves[sim_turn_off][idx].iter().map(|&pt| pt.idx()));
@@ -185,6 +210,10 @@ impl RolloutPolicy for BatchConvnetRolloutPolicy {
             valid_moves[sim_turn_off][idx].insert(pt.idx());
           });
           turn_pass[sim_turn_off][idx] = true;
+          if turn_pass[0][idx] && turn_pass[1][idx] {
+            num_both_passed += 1;
+            continue;
+          }
         }
       }
     }

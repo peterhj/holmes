@@ -938,6 +938,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
   pub fn current_score_exact(&self, komi: f32) -> f32 {
     let mut b_score = 0.0;
     let mut w_score = 0.0;
+    // FIXME(20151125): rule for removing dead stones.
     if self.rules.score_captures {
       b_score += self.num_captures[0] as f32;
       w_score += self.num_captures[1] as f32;
@@ -950,7 +951,71 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
       // FIXME(20151107)
     }
     // TODO(20151107): handicap komi (for non-Japanese rulesets).
-    w_score - b_score + komi
+    //w_score - b_score + komi
+    unimplemented!();
+  }
+
+  pub fn current_score_tromp_taylor(&self, komi: f32) -> f32 {
+    let mut score: [f32; 2] = [0.0, 0.0];
+
+    // Add own stones (area counting).
+    score[0] += self.position.num_stones[0] as f32;
+    score[1] += self.position.num_stones[1] as f32;
+
+    // TODO(20151126): Remove dead stones (mark dead w/ uniform rollouts).
+
+    // Add territory using a 3-pass flood fill algorithm.
+    let mut territory: Vec<u8> = repeat(0).take(Board::SIZE).collect();
+    let mut territory_count: [i32; 2] = [0, 0];
+    fn flood_fill(p: usize, mask: u8, position: &TxnPosition, territory: &mut [u8]) {
+      match position.stones[p] {
+        Stone::Empty => {
+          if territory[p] & mask != 0 {
+            return;
+          }
+          territory[p] |= mask;
+          for_each_adjacent(Point::from_idx(p), |adj_pt| {
+            flood_fill(adj_pt.idx(), mask, position, territory);
+          });
+        }
+        _ => {}
+      }
+    }
+    for p in (0 .. Board::SIZE) {
+      match self.position.stones[p] {
+        Stone::Empty => {
+          for_each_adjacent(Point::from_idx(p), |adj_pt| {
+            match self.position.stones[adj_pt.idx()] {
+              Stone::Black => {
+                flood_fill(p, 1, &self.position, &mut territory);
+              }
+              Stone::White => {
+                flood_fill(p, 2, &self.position, &mut territory);
+              }
+              _ => {}
+            }
+          });
+        }
+        _ => {}
+      }
+    }
+    for p in (0 .. Board::SIZE) {
+      match self.position.stones[p] {
+        Stone::Empty => {
+          match territory[p] {
+            1 => territory_count[0] += 1,
+            2 => territory_count[1] += 1,
+            3 => {}
+            _ => unreachable!(),
+          }
+        }
+        _ => {}
+      }
+    }
+    score[0] += territory_count[0] as f32;
+    score[1] += territory_count[1] as f32;
+
+    score[1] - score[0] + komi
   }
 
   pub fn current_score_rollout(&self, komi: f32) -> f32 {

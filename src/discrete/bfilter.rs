@@ -163,6 +163,12 @@ impl BFilter {
   }
 
   #[inline]
+  fn mark_sibling_idx(&self, idx: usize) -> usize {
+    //2 * self.heap.parent(idx) + (idx % 2)
+    2 * self.heap.parent(idx) + 1 - (idx % 2)
+  }
+
+  #[inline]
   fn mark_left_idx(&self, parent_idx: usize) -> usize {
     2 * parent_idx
   }
@@ -237,8 +243,10 @@ impl DiscreteFilter for BFilter {
       // of the data structure.
       self.heap.data[parent_idx] = self.heap.data[idx] + self.heap.data[self.heap.sibling(idx)];
       if do_mark {
-        self.marks.set(2 * parent_idx + 1 - (idx % 2), true);
-        if !self.marks.get(2 * parent_idx + (idx % 2)).unwrap() {
+        let mark_idx = self.mark_idx(idx);
+        let mark_sib_idx = self.mark_sibling_idx(idx);
+        self.marks.set(mark_idx, true);
+        if !self.marks.get(mark_sib_idx).unwrap() {
           do_mark = false;
         }
       }
@@ -257,7 +265,7 @@ impl DiscreteFilter for BFilter {
       }
       let left_idx = self.heap.left(idx);
       let right_idx = self.heap.right(idx);
-      match (self.marks.get(2 * idx).unwrap(), self.marks.get(2 * idx + 1).unwrap()) {
+      match (self.marks.get(self.mark_left_idx(idx)).unwrap(), self.marks.get(self.mark_right_idx(idx)).unwrap()) {
         (false, false) => {
           let value = self.heap.data[idx];
           let left_value = self.heap.data[left_idx];

@@ -1,7 +1,7 @@
 use agents::{Agent};
 use board::{Board, RuleSet, Stone, Point, Action};
-use search::{Tree, Trajectory, SequentialSearch};
-use search::policies::convnet::{ConvnetPriorPolicy};
+use search::{Tree, Trajectory, SequentialSearch, SearchResult};
+use search::policies::convnet::{ConvnetPriorPolicy, BatchConvnetRolloutPolicy};
 use search::policies::quasiuniform::{QuasiUniformRolloutPolicy};
 use search::policies::thompson_rave::{ThompsonRaveTreePolicy};
 use search::policies::uct_rave::{UctRaveTreePolicy};
@@ -16,14 +16,16 @@ pub struct SearchAgent {
   komi:     f32,
   player:   Option<Stone>,
 
-  history:  Vec<(TxnState<TxnStateNodeData>, Action)>,
+  history:  Vec<(TxnState<TxnStateNodeData>, Action, Option<SearchResult>)>,
   state:    TxnState<TxnStateNodeData>,
+  result:   Option<SearchResult>,
 
   //ctx:      DeviceContext,
   prior_policy: ConvnetPriorPolicy,
   //tree_policy:  UctRaveTreePolicy,
   tree_policy:  ThompsonRaveTreePolicy,
-  roll_policy:  QuasiUniformRolloutPolicy,
+  //roll_policy:  QuasiUniformRolloutPolicy,
+  roll_policy:  BatchConvnetRolloutPolicy,
 }
 
 impl SearchAgent {
@@ -32,12 +34,14 @@ impl SearchAgent {
     let mut prior_policy = ConvnetPriorPolicy::new();
     //let mut tree_policy = UctRaveTreePolicy::new();
     let mut tree_policy = ThompsonRaveTreePolicy::new();
-    let mut roll_policy = QuasiUniformRolloutPolicy;
+    //let mut roll_policy = QuasiUniformRolloutPolicy;
+    let mut roll_policy = BatchConvnetRolloutPolicy::new();
     SearchAgent{
       komi:     0.0,
       player:   None,
       history:  vec![],
       state:    TxnState::new(RuleSet::KgsJapanese.rules(), TxnStateNodeData::new()),
+      result:   None,
       //ctx:      ctx,
       prior_policy: prior_policy,
       tree_policy:  tree_policy,
@@ -68,7 +72,7 @@ impl Agent for SearchAgent {
   }
 
   fn apply_action(&mut self, turn: Stone, action: Action) {
-    self.history.push((self.state.clone(), action));
+    self.history.push((self.state.clone(), action, self.result));
     match self.state.try_action(turn, action) {
       Ok(_)   => { self.state.commit(); }
       Err(_)  => { panic!("agent tried to apply an illegal action!"); }
@@ -77,10 +81,12 @@ impl Agent for SearchAgent {
 
   fn undo(&mut self) {
     // FIXME(20151108): track ply; limit to how far we can undo.
-    if let Some((prev_state, _)) = self.history.pop() {
+    if let Some((prev_state, _, prev_result)) = self.history.pop() {
       self.state.clone_from(&prev_state);
+      self.result = prev_result;
     } else {
       self.state.reset();
+      self.result = None;
     }
   }
 
@@ -99,12 +105,20 @@ impl Agent for SearchAgent {
     }
     assert_eq!(turn, self.state.current_turn());
     let mut search = SequentialSearch{
-      num_rollouts: 1000,
+      num_rollouts: 5000,
       stats: Default::default(),
     };
     let mut tree = Tree::new(self.state.clone(), &mut self.prior_policy, &mut self.tree_policy);
-    let (_, action) = search.join(&mut tree, &mut self.prior_policy, &mut self.tree_policy, &mut self.roll_policy);
-    println!("DEBUG: search stats: {:?}", search.stats);
-    action
+    let result = search.join(
+        &mut tree,
+        &mut self.prior_policy,
+        &mut self.tree_policy,
+        &mut self.roll_policy,
+        self.komi,
+        self.result.as_ref());
+    println!("DEBUG: search stats:  {:?}", search.stats);
+    println!("DEBUG: search result: {:?}", result);
+    self.result = Some(result);
+    result.action
   }
 }

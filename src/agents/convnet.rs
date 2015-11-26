@@ -3,6 +3,7 @@ use board::{Board, RuleSet, Stone, Point, Action};
 use convnet::{
   build_action_3layer_arch,
   build_action_6layer_arch,
+  build_action_3layer_19x19x16_arch,
   build_action_6layer_19x19x16_arch,
 };
 use txnstate::{TxnState};
@@ -34,7 +35,8 @@ impl ConvnetAgent {
     let ctx = DeviceContext::new(0);
     //let arch = build_action_3layer_arch(1, &ctx);
     //let arch = build_action_6layer_arch(1, &ctx);
-    let arch = build_action_6layer_19x19x16_arch(1, &ctx);
+    let arch = build_action_3layer_19x19x16_arch(1, &ctx);
+    //let arch = build_action_6layer_19x19x16_arch(1, &ctx);
     ConvnetAgent{
       komi:     0.0,
       player:   None,

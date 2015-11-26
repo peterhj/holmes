@@ -20,7 +20,7 @@ const USAGE: &'static str = "
 measure-holmes-vs-gnu
 
 Usage:
-  measure-holmes-vs-gnu bench --log-path=<log_path> --num-jobs=<num_jobs> --num-trials=<num_trials> [--start-idx=<start_idx>]
+  measure-holmes-vs-gnu bench --log-path=<log_path> --num-jobs=<num_jobs> --num-trials=<num_trials> [--start-idx=<start_idx>] [--device-ids=<device_ids>]
 ";
 
 #[derive(RustcDecodable, Debug)]
@@ -30,6 +30,7 @@ struct Args {
   flag_num_jobs:    usize,
   flag_num_trials:  usize,
   flag_start_idx:   Option<usize>,
+  flag_device_ids:  Option<String>,
 }
 
 fn main() {
@@ -39,6 +40,11 @@ fn main() {
 
   let start_idx = args.flag_start_idx.unwrap_or(0);
   let n = args.flag_num_trials;
+
+  let device_ids: Vec<usize> = match args.flag_device_ids {
+    None => (0 .. 8).collect(),
+    Some(ref device_ids) => device_ids.split(",").map(|s| s.parse().unwrap()).collect(),
+  };
 
   let pool = ThreadPool::new(args.flag_num_jobs);
   let (tx, rx) = channel();
@@ -55,6 +61,7 @@ fn main() {
   }
   for i in (start_idx .. n) {
     let tx = tx.clone();
+    let device_ids = device_ids.clone();
     let mut log_path = log_dir.clone();
     log_path.push(&format!("holmes-vs-gnugo.{}.log", i));
     let mut job_idxs = job_idxs.clone();
@@ -69,7 +76,7 @@ fn main() {
         job_idxs.remove(&job_idx);
         job_idx
       };
-      let device_num = job_idx % 8;
+      let device_num = device_ids[job_idx % device_ids.len()];
       let (b_port, w_port) = (6060 + 2*job_idx, 6060 + 2*job_idx + 1);
       // FIXME(20151123): manually track child process progress.
       /*if false {

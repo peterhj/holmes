@@ -52,6 +52,14 @@ name = "train-2layer-19x19x16"
 path = "tools/train-2layer-19x19x16.rs"
 
 [[bin]]
+name = "train-narrow-3layer-19x19x16"
+path = "tools/train-narrow-3layer-19x19x16.rs"
+
+[[bin]]
+name = "train-3layer-19x19x16"
+path = "tools/train-3layer-19x19x16.rs"
+
+[[bin]]
 name = "train-6layer-19x19x16"
 path = "tools/train-6layer-19x19x16.rs"
 
@@ -129,6 +137,7 @@ rusqlite = "=0.4.0"
 rustc-serialize = "*"
 threadpool = "*"
 time = "*"
+toml = "*"
 vec_map = "*"
 
 [dependencies.array]

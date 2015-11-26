@@ -17,6 +17,7 @@ extern crate byteorder;
 extern crate rand;
 extern crate rustc_serialize;
 extern crate time;
+extern crate toml;
 extern crate vec_map;
 
 pub mod agents;

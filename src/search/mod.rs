@@ -1,6 +1,7 @@
 use array_util::{array_argmax};
 use board::{RuleSet, Board, Stone, Point, Action};
 //use features::{TxnStateFeaturesData};
+use hyper::{PWIDE, PWIDE_MU};
 //use policy::{PriorPolicy, SearchPolicy, RolloutPolicy};
 use random::{XorShift128PlusRng, choose_without_replace};
 use search::policies::{PriorPolicy, TreePolicy, RolloutPolicy};
@@ -24,6 +25,8 @@ pub mod policies;
 #[derive(Default, Debug)]
 pub struct SearchStats {
   pub elapsed_ms:       i64,
+  pub argmax_rank:      i32,
+  pub argmax_trials:    i32,
   pub edge_count:       i32,
   pub inner_edge_count: i32,
   pub term_edge_count:  i32,
@@ -33,6 +36,12 @@ pub struct SearchStats {
   pub nonterm_count:    i32,
 }
 
+#[derive(Clone, Copy)]
+pub struct ProgWideConfig {
+  pub pwide:    bool,
+  pub pwide_mu: f32,
+}
+
 #[derive(Clone)]
 pub struct Trajectory {
   pub backup_triples: Vec<(Rc<RefCell<Node>>, Point, usize)>,
@@ -40,14 +49,14 @@ pub struct Trajectory {
 
   pub rollout:    bool,
   pub sim_state:  TxnState<TxnStateLibFeaturesData>,
-  //pub sim_state:  TxnState<TxnStateNodeData>,
   pub sim_pairs:  Vec<(Stone, Point)>,
 
-  pub score:      Option<f32>,
+  pub raw_score:  Option<f32>,
+  pub adj_score:  Option<[f32; 2]>,
 
   // Temporary variables during rollouts/backups.
   rave_mask:  Vec<BitSet>,
-  dead_mask:  Vec<BitSet>,
+  //dead_mask:  Vec<BitSet>,
 }
 
 impl Trajectory {
@@ -57,17 +66,17 @@ impl Trajectory {
       leaf_node:      None,
       rollout:    false,
       sim_state:  TxnState::new(RuleSet::KgsJapanese.rules(), TxnStateLibFeaturesData::new()),
-      //sim_state:  TxnState::new(RuleSet::KgsJapanese.rules(), TxnStateNodeData::new()),
       sim_pairs:  vec![],
-      score:      None,
+      raw_score:  None,
+      adj_score:  None,
       rave_mask:  vec![
         BitSet::with_capacity(Board::SIZE),
         BitSet::with_capacity(Board::SIZE),
       ],
-      dead_mask:  vec![
+      /*dead_mask:  vec![
         BitSet::with_capacity(Board::SIZE),
         BitSet::with_capacity(Board::SIZE),
-      ],
+      ],*/
     }
   }
 
@@ -77,7 +86,7 @@ impl Trajectory {
     self.rollout = false;
     self.sim_state.reset();
     self.sim_pairs.clear();
-    self.score = None;
+    self.raw_score = None;
     self.rave_mask[0].clear();
     self.rave_mask[1].clear();
   }
@@ -96,19 +105,29 @@ impl Trajectory {
       sim_state.replace_clone_from(state, state.get_data().features.clone());
     }
     self.sim_pairs.clear();
-    self.score = None;
+    self.raw_score = None;
     self.rave_mask[0].clear();
     self.rave_mask[1].clear();
   }
 
-  pub fn score(&mut self) {
+  pub fn score(&mut self, komi: f32, expected_score: f32) {
     if !self.rollout {
       // FIXME(20151114)
-      //unimplemented!();
-      self.score = Some(0.0);
+      self.raw_score = Some(0.0);
+      self.adj_score = Some([0.0, 0.0]);
     } else {
-      // FIXME(20151125): dynamic komi.
-      self.score = Some(self.sim_state.current_score_rollout(6.5));
+      // XXX(20151125): A version of dynamic komi. When the current player is
+      // ahead, the expected score in their favor is deducted into the effective
+      // komi:
+      // - B ahead, expected score < 0.0, komi should be increased
+      // - W ahead, expected score > 0.0, komi should be decreased
+      // This implements the heuristic, "when ahead, stay ahead."
+      // FIXME(20151125): one complication is how dynamic komi interacts with
+      // prior values.
+      self.raw_score = Some(self.sim_state.current_score_rollout(komi));
+      let b_adj_score = self.sim_state.current_score_rollout(komi - 0.0f32.min(expected_score));
+      let w_adj_score = self.sim_state.current_score_rollout(komi - 0.0f32.max(expected_score));
+      self.adj_score = Some([b_adj_score, w_adj_score]);
     }
   }
 }
@@ -131,7 +150,7 @@ pub struct Node {
 }
 
 impl Node {
-  pub fn new(parent_node: Option<&Rc<RefCell<Node>>>, state: TxnState<TxnStateNodeData>, prior_policy: &mut PriorPolicy) -> Node {
+  pub fn new(parent_node: Option<&Rc<RefCell<Node>>>, state: TxnState<TxnStateNodeData>, prior_policy: &mut PriorPolicy, pwide_cfg: &ProgWideConfig) -> Node {
     let mut valid_moves = vec![];
     state.get_data().legality.fill_legal_points(state.current_turn(), &mut valid_moves);
     let num_arms = valid_moves.len();
@@ -145,7 +164,11 @@ impl Node {
     let child_nodes: Vec<_> = repeat(None).take(num_arms).collect();
     let zeros: Vec<_> = repeat(0.0f32).take(num_arms).collect();
     // XXX: Choose a subset of arms to play.
-    let horizon = min(1, num_arms);
+    let horizon = if !pwide_cfg.pwide {
+      num_arms
+    } else {
+      min(1, num_arms)
+    };
     //println!("DEBUG: node horizon: {} top priors: {:?}", horizon, &prior_moves[.. min(10, num_arms)]);
     Node{
       parent_node:  parent_node.map(|node| Rc::downgrade(node)),
@@ -168,12 +191,14 @@ impl Node {
     self.child_nodes.is_empty()
   }
 
-  pub fn update_visits(&mut self) {
-    // FIXME(20151124): read progressive widening mu from hyperparam file.
-    let mu = 2.0f32;
+  pub fn update_visits(&mut self, pwide_cfg: &ProgWideConfig) {
     self.total_trials += 1.0;
     // XXX: Progressive widening.
-    self.horizon = min((1.0 + (1.0 + self.total_trials).ln() / mu.ln()).ceil() as usize, self.prior_moves.len());
+    if !pwide_cfg.pwide {
+      self.horizon = self.prior_moves.len();
+    } else {
+      self.horizon = min((1.0 + (1.0 + self.total_trials).ln() / pwide_cfg.pwide_mu.ln()).ceil() as usize, self.prior_moves.len());
+    }
   }
 
   pub fn update_arm(&mut self, j: usize, score: f32) {
@@ -203,21 +228,31 @@ pub enum WalkResult {
 }
 
 pub struct Tree {
-  root_node:  Rc<RefCell<Node>>,
+  pwide_cfg:    ProgWideConfig,
+  root_node:    Rc<RefCell<Node>>,
 
   // Accumulators across rollouts/backups.
-  dead_count: VecMap<i32>,
+  backup_count:   i32,
+  mean_raw_score: f32,
+  dead_count:     VecMap<i32>,
 }
 
 impl Tree {
   pub fn new(init_state: TxnState<TxnStateNodeData>, prior_policy: &mut PriorPolicy, tree_policy: &mut TreePolicy<R=XorShift128PlusRng>/*, rng: &mut XorShift128PlusRng*/) -> Tree {
-    let mut root_node = Rc::new(RefCell::new(Node::new(None, init_state, prior_policy)));
+    let pwide_cfg = ProgWideConfig{
+      pwide:      PWIDE.with(|x| *x),
+      pwide_mu:   PWIDE_MU.with(|x| *x),
+    };
+    let mut root_node = Rc::new(RefCell::new(Node::new(None, init_state, prior_policy, &pwide_cfg)));
     // FIXME(20151124): calling this in SearchProblem.join() because RNG is
     // initialized there.
     //tree_policy.init_node(&mut *root_node.borrow_mut(), rng);
     Tree{
-      root_node:  root_node,
-      dead_count: VecMap::with_capacity(Board::SIZE),
+      pwide_cfg:    pwide_cfg,
+      root_node:    root_node,
+      backup_count:   0,
+      mean_raw_score: 0.0,
+      dead_count:     VecMap::with_capacity(Board::SIZE),
     }
   }
 
@@ -261,7 +296,7 @@ impl Tree {
                 Ok(_) => { leaf_state.commit(); }
                 Err(e) => { panic!("walk failed due to illegal move: {:?}", e); } // XXX: this means the legal moves features gave an incorrect result.
               }
-              let mut leaf_node = Rc::new(RefCell::new(Node::new(Some(&cursor_node), leaf_state, prior_policy)));
+              let mut leaf_node = Rc::new(RefCell::new(Node::new(Some(&cursor_node), leaf_state, prior_policy, &self.pwide_cfg)));
               tree_policy.init_node(&mut *leaf_node.borrow_mut(), rng);
               cursor_node.borrow_mut().child_nodes[j] = Some(leaf_node.clone());
               cursor_node = leaf_node;
@@ -298,7 +333,8 @@ impl Tree {
     //writeln!(&mut stderr(), "DEBUG: backup idx: {}", i);
     traj.rave_mask[0].clear();
     traj.rave_mask[1].clear();
-    let score = traj.score.unwrap();
+    let raw_score = traj.raw_score.unwrap();
+    let adj_score = traj.adj_score.unwrap();
 
     if traj.sim_pairs.len() >= 1 {
       assert!(traj.rollout);
@@ -311,7 +347,7 @@ impl Tree {
       if leaf_turn == update_turn {
         if let Some(&update_j) = leaf_node.arm_indexes.get(&update_point.idx()) {
           assert_eq!(update_point, leaf_node.prior_moves[update_j].0);
-          leaf_node.update_arm(update_j, score);
+          leaf_node.update_arm(update_j, adj_score[update_turn.offset()]);
         } else {
           writeln!(&mut stderr(), "WARNING: leaf_node arm_indexes does not contain update arm: {:?}", update_point);
           panic!();
@@ -327,7 +363,7 @@ impl Tree {
           let sim_point = Point::from_idx(sim_p);
           if let Some(&sim_j) = leaf_node.arm_indexes.get(&sim_point.idx()) {
             assert_eq!(sim_point, leaf_node.prior_moves[sim_j].0);
-            leaf_node.rave_update_arm(sim_j, score);
+            leaf_node.rave_update_arm(sim_j, adj_score[update_turn.offset()]);
           }
         }
       }
@@ -335,7 +371,7 @@ impl Tree {
 
     {
       let mut leaf_node = traj.leaf_node.as_ref().unwrap().borrow_mut();
-      leaf_node.update_visits();
+      leaf_node.update_visits(&self.pwide_cfg);
       tree_policy.backup_values(&mut *leaf_node, rng);
     }
 
@@ -343,10 +379,10 @@ impl Tree {
       let mut node = node.borrow_mut();
 
       assert_eq!(update_point, node.prior_moves[update_j].0);
-      node.update_arm(update_j, score);
+      let update_turn = node.state.current_turn();
+      node.update_arm(update_j, adj_score[update_turn.offset()]);
 
       if tree_policy.rave() {
-        let update_turn = node.state.current_turn();
         traj.rave_mask[update_turn.offset()].insert(update_point.idx());
         for sim_p in traj.rave_mask[update_turn.offset()].iter() {
           let sim_point = Point::from_idx(sim_p);
@@ -355,15 +391,25 @@ impl Tree {
           }
           if let Some(&sim_j) = node.arm_indexes.get(&sim_point.idx()) {
             assert_eq!(sim_point, node.prior_moves[sim_j].0);
-            node.rave_update_arm(sim_j, score);
+            node.rave_update_arm(sim_j, adj_score[update_turn.offset()]);
           }
         }
       }
 
-      node.update_visits();
+      node.update_visits(&self.pwide_cfg);
       tree_policy.backup_values(&mut *node, rng);
     }
+
+    self.backup_count += 1;
+    self.mean_raw_score += (raw_score - self.mean_raw_score) / self.backup_count as f32;
   }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct SearchResult {
+  pub turn:           Stone,
+  pub action:         Action,
+  pub expected_score: f32,
 }
 
 pub struct SequentialSearch {
@@ -373,23 +419,26 @@ pub struct SequentialSearch {
 
 impl SequentialSearch {
   pub fn join(&mut self,
-      tree: &mut Tree,
+      tree:         &mut Tree,
       prior_policy: &mut PriorPolicy,
-      tree_policy: &mut TreePolicy<R=XorShift128PlusRng>,
-      roll_policy: &mut RolloutPolicy<R=XorShift128PlusRng>)
-      -> (Stone, Action)
+      tree_policy:  &mut TreePolicy<R=XorShift128PlusRng>,
+      roll_policy:  &mut RolloutPolicy<R=XorShift128PlusRng>,
+      komi:         f32,
+      prev_result:  Option<&SearchResult>)
+      -> SearchResult
   {
     let mut slow_rng = thread_rng();
     let mut rng = XorShift128PlusRng::from_seed([slow_rng.next_u64(), slow_rng.next_u64()]);
-    let root_turn = tree.current_turn();
-
-    let start_time = get_time();
 
     // FIXME(20151124): calling this here because RNG is initialized here.
     tree_policy.init_node(&mut *tree.root_node.borrow_mut(), &mut rng);
 
     let batch_size = roll_policy.batch_size();
     assert!(batch_size >= 1);
+    let root_turn = tree.current_turn();
+    let prev_expected_score = prev_result.map_or(0.0, |r| r.expected_score);
+
+    let start_time = get_time();
 
     match batch_size {
       1 => {
@@ -399,14 +448,14 @@ impl SequentialSearch {
             WalkResult::Terminal => {
               self.stats.term_count += 1;
               traj.reset_terminal();
-              traj.score();
+              traj.score(komi, prev_expected_score);
               tree.backup(tree_policy, &mut traj, &mut rng);
             }
             WalkResult::NonTerminal => {
               self.stats.nonterm_count += 1;
               traj.reset_rollout();
               roll_policy.rollout(&mut traj, &mut rng);
-              traj.score();
+              traj.score(komi, prev_expected_score);
               tree.backup(tree_policy, &mut traj, &mut rng);
             }
           }
@@ -437,7 +486,7 @@ impl SequentialSearch {
 
           for batch_idx in (0 .. batch_size) {
             let traj = &mut trajs[batch_idx];
-            traj.score();
+            traj.score(komi, prev_expected_score);
             tree.backup(tree_policy, traj, &mut rng);
           }
         }
@@ -448,16 +497,24 @@ impl SequentialSearch {
     let elapsed_ms = (end_time - start_time).num_milliseconds();
     self.stats.elapsed_ms = elapsed_ms;
 
-    if let Some(argmax_j) = array_argmax(&tree.root_node.borrow().num_trials) {
+    let action = if let Some(argmax_j) = array_argmax(&tree.root_node.borrow().num_trials) {
+      self.stats.argmax_rank = argmax_j as i32;
+      self.stats.argmax_trials = tree.root_node.borrow().num_trials[argmax_j] as i32;
       let root_node = tree.root_node.borrow();
       if root_node.num_succs[argmax_j] / root_node.num_trials[argmax_j] <= 0.001 {
-        (root_turn, Action::Resign)
+        Action::Resign
       } else {
         let argmax_point = root_node.prior_moves[argmax_j].0;
-        (root_turn, Action::Place{point: argmax_point})
+        Action::Place{point: argmax_point}
       }
     } else {
-      (root_turn, Action::Pass)
+      self.stats.argmax_rank = -1;
+      Action::Pass
+    };
+    SearchResult{
+      turn:   root_turn,
+      action: action,
+      expected_score: tree.mean_raw_score,
     }
   }
 }
