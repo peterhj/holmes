@@ -33,3 +33,15 @@
 - arch: input 19x19x10 -> conv 9x9x64 rect -> 4x conv 3x3x64 rect -> conv 3x3x1
   - params: initial LR 0.01, step twice {100K 0.001 200K 0.0001}, minibatch size 256, momentum 0.9, no weight decay
     - convergence is a lot slower than the 19x19x4 arch
+
+- arch: input 19x19x16 -> conv 9x9x16 rect -> conv 3x3x1
+  - KGS validation accuracy: 34.8%
+
+- arch: input 19x19x16 -> conv 9x9x16 rect -> conv 3x3x16 rect -> conv 3x3x1
+  - KGS validation accuracy: 37.0%
+
+- arch: input 19x19x16 -> conv 9x9x128 rect -> conv 3x3x128 rect -> conv 3x3x1
+  - KGS validation accuracy: 43.1%
+
+- arch: input 19x19x16 -> conv 9x9x128 rect -> 4x conv 3x3x128 rect -> conv 3x3x1
+  - KGS validation accuracy: 47.8%

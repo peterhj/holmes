@@ -95,7 +95,8 @@ fn main() {
       }*/
       let mut child = Command::new("./gtpctl-holmes-vs-gnugo.sh")
         .env("CUDA_VISIBLE_DEVICES", &format!("{}", device_num))
-        .env("HYPERPARAM_INSTANCE_PATH", "experiments/hyperparam/ikeda_rave.instance.json")
+        //.env("HYPERPARAM_INSTANCE_PATH", "experiments/hyperparam/ikeda_rave.instance.json")
+        .env("HYPERPARAM_INSTANCE_PATH", "default.toml")
         .arg(&format!("{}", b_port))
         .arg(&format!("{}", w_port))
         .arg(&format!("{}", seed))  // XXX: Need to set seed, otherwise gnugo

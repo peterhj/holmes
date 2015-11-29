@@ -23,6 +23,6 @@ HOLMES_PRELUDE=
 HOLMES="./target/release/holmes-gtp -h 127.0.0.1 -p ${BLACK_PORT}"
 
 RUST_BACKTRACE=1 ./target/release/gtpctl ${BLACK_PORT} ${WHITE_PORT} &
-sleep 1
+sleep 5
 ${GNUGO} &
 RUST_BACKTRACE=1 ${HOLMES_PRELUDE} ${HOLMES}

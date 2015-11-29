@@ -28,6 +28,10 @@ name = "extract-gogod-data"
 path = "tools/extract-gogod-data.rs"
 
 [[bin]]
+name = "extract-gogod-episodes"
+path = "tools/extract-gogod-episodes.rs"
+
+[[bin]]
 name = "measure-holmes-vs-gnugo"
 path = "tools/measure-holmes-vs-gnugo.rs"
 
@@ -131,7 +135,6 @@ byteorder = "*"
 docopt = "*"
 getopts = "*"
 libc = "*"
-#leveldb-rs = "0.0.5"
 rand = "*"
 rusqlite = "=0.4.0"
 rustc-serialize = "*"
@@ -156,8 +159,8 @@ path = "../rembrandt-project/libasync"
 #path = "../../rembrandt-project/libasync_cuda"
 path = "../rembrandt-project/libasync_cuda"
 
-#[dependencies.leveldb-rs]
-#path = "leveldb-rs"
+[dependencies.episodb]
+path = "../episodb"
 
 [dependencies.rembrandt]
 #path = "../../rembrandt-project/rembrandt_new"

@@ -3,6 +3,7 @@ use convnet::{
   build_action_3layer_arch,
   build_action_6layer_arch,
   build_action_2layer_19x19x16_arch,
+  build_action_narrow_3layer_19x19x16_arch,
   build_action_3layer_19x19x16_arch,
   build_action_6layer_19x19x16_arch,
 };
@@ -79,7 +80,8 @@ pub struct BatchConvnetRolloutPolicy {
 impl BatchConvnetRolloutPolicy {
   pub fn new() -> BatchConvnetRolloutPolicy {
     let ctx = DeviceContext::new(0);
-    let arch = build_action_2layer_19x19x16_arch(64, &ctx);
+    //let arch = build_action_2layer_19x19x16_arch(64, &ctx);
+    let arch = build_action_narrow_3layer_19x19x16_arch(64, &ctx);
     BatchConvnetRolloutPolicy{
       ctx:  ctx,
       arch: arch,

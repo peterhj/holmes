@@ -59,6 +59,20 @@ pub struct Trajectory {
   //dead_mask:  Vec<BitSet>,
 }
 
+#[derive(Clone)]
+pub struct RolloutTrajectory {
+  pub rollout:    bool,
+
+  pub sim_state:  TxnState<TxnStateLibFeaturesData>,
+  pub sim_pairs:  Vec<(Stone, Point)>,
+
+  pub raw_score:  Option<f32>,
+  pub adj_score:  Option<[f32; 2]>,
+
+  // Temporary variables during rollouts/backups.
+  rave_mask:  Vec<BitSet>,
+}
+
 impl Trajectory {
   pub fn new() -> Trajectory {
     Trajectory{
