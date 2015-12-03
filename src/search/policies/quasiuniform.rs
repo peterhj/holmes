@@ -1,6 +1,6 @@
 use board::{Stone, Point};
 use random::{XorShift128PlusRng, choose_without_replace};
-use search::{Trajectory};
+use search::{Walk, Trajectory};
 use search::policies::{RolloutPolicy};
 use txnstate::{check_good_move_fast};
 
@@ -13,13 +13,13 @@ pub struct QuasiUniformRolloutPolicy;
 impl RolloutPolicy for QuasiUniformRolloutPolicy {
   //type R = XorShift128PlusRng;
 
-  fn rollout(&self, traj: &mut Trajectory, rng: &mut Self::R) {
+  fn rollout(&self, walk: &Walk, traj: &mut Trajectory, rng: &mut Self::R) {
     //let zero_or_one = Range::new(0, 2);
 
     let mut valid_moves = [vec![], vec![]];
-    traj.leaf_node.as_ref().unwrap().borrow()
+    walk.leaf_node.as_ref().unwrap().borrow()
       .state.get_data().legality.fill_legal_points(Stone::Black, &mut valid_moves[0]);
-    traj.leaf_node.as_ref().unwrap().borrow()
+    walk.leaf_node.as_ref().unwrap().borrow()
       .state.get_data().legality.fill_legal_points(Stone::White, &mut valid_moves[1]);
     let mut sim_turn = traj.sim_state.current_turn();
     let mut sim_pass = [false, false];

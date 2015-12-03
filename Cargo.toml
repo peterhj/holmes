@@ -12,6 +12,10 @@ name = "gtpctl"
 path = "tools/gtpctl.rs"
 
 [[bin]]
+name = "gtp_ref_ctrl"
+path = "tools/gtp_ref_ctrl.rs"
+
+[[bin]]
 name = "gen-pattern-maps"
 path = "tools/gen-pattern-maps.rs"
 
@@ -34,6 +38,10 @@ path = "tools/extract-gogod-episodes.rs"
 [[bin]]
 name = "measure-holmes-vs-gnugo"
 path = "tools/measure-holmes-vs-gnugo.rs"
+
+[[bin]]
+name = "measure-holmes-vs-pachi"
+path = "tools/measure-holmes-vs-pachi.rs"
 
 [[bin]]
 name = "train-mimic-19x19x4"
@@ -66,6 +74,10 @@ path = "tools/train-3layer-19x19x16.rs"
 [[bin]]
 name = "train-6layer-19x19x16"
 path = "tools/train-6layer-19x19x16.rs"
+
+[[bin]]
+name = "train-12layer-19x19x16"
+path = "tools/train-12layer-19x19x16.rs"
 
 [[bin]]
 name = "bench-discrete"

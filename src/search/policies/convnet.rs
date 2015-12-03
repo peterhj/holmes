@@ -1,5 +1,5 @@
 use board::{Board, Stone, Point, Action};
-use convnet::{
+use convnet::arch::{
   build_action_3layer_arch,
   build_action_6layer_arch,
   build_action_2layer_19x19x16_arch,
@@ -9,7 +9,7 @@ use convnet::{
 };
 use discrete::{DiscreteFilter};
 use discrete::bfilter::{BFilter};
-use search::{Trajectory};
+use search::{Walk, Trajectory};
 use search::policies::{PriorPolicy, RolloutPolicy};
 use txnstate::{
   TxnState,
@@ -37,8 +37,8 @@ impl ConvnetPriorPolicy {
     let ctx = DeviceContext::new(0);
     //let arch = build_action_3layer_arch(1, &ctx);
     //let arch = build_action_6layer_arch(1, &ctx);
-    let arch = build_action_3layer_19x19x16_arch(1, &ctx);
-    //let arch = build_action_6layer_19x19x16_arch(1, &ctx);
+    //let arch = build_action_3layer_19x19x16_arch(1, &ctx);
+    let arch = build_action_6layer_19x19x16_arch(1, &ctx);
     ConvnetPriorPolicy{
       ctx:  ctx,
       arch: arch,
@@ -73,16 +73,18 @@ impl PriorPolicy for ConvnetPriorPolicy {
 }
 
 pub struct BatchConvnetRolloutPolicy {
+  batch_size: usize,
   ctx:  DeviceContext,
   arch: LinearNetArch,
 }
 
 impl BatchConvnetRolloutPolicy {
-  pub fn new() -> BatchConvnetRolloutPolicy {
+  pub fn new(batch_size: usize) -> BatchConvnetRolloutPolicy {
     let ctx = DeviceContext::new(0);
-    //let arch = build_action_2layer_19x19x16_arch(64, &ctx);
-    let arch = build_action_narrow_3layer_19x19x16_arch(64, &ctx);
+    let arch = build_action_2layer_19x19x16_arch(64, &ctx);
+    //let arch = build_action_narrow_3layer_19x19x16_arch(batch_size, &ctx);
     BatchConvnetRolloutPolicy{
+      batch_size: batch_size,
       ctx:  ctx,
       arch: arch,
     }
@@ -90,15 +92,19 @@ impl BatchConvnetRolloutPolicy {
 }
 
 impl RolloutPolicy for BatchConvnetRolloutPolicy {
-  fn rollout(&self, traj: &mut Trajectory, rng: &mut Self::R) {
+  fn rollout(&self, walk: &Walk, traj: &mut Trajectory, rng: &mut Self::R) {
     unimplemented!();
   }
 
-  fn batch_size(&self) -> usize {
-    64
+  fn do_batch(&self) -> bool {
+    true
   }
 
-  fn rollout_batch(&mut self, trajs: &mut [Trajectory], rng: &mut Self::R) {
+  fn batch_size(&self) -> usize {
+    self.batch_size
+  }
+
+  fn rollout_batch(&mut self, walks: &[Walk], trajs: &mut [Trajectory], rng: &mut Self::R) {
     let batch_size = self.batch_size();
     assert_eq!(batch_size, trajs.len());
 
@@ -108,7 +114,7 @@ impl RolloutPolicy for BatchConvnetRolloutPolicy {
     let mut num_both_passed = 0;
     let mut filters = vec![];
     for idx in (0 .. batch_size) {
-      let leaf_node = trajs[idx].leaf_node.as_ref().unwrap().borrow();
+      let leaf_node = walks[idx].leaf_node.as_ref().unwrap().borrow();
       valid_moves[0].push(leaf_node.state.get_data().legality.legal_points(Stone::Black));
       valid_moves[1].push(leaf_node.state.get_data().legality.legal_points(Stone::White));
       bad_moves[0].push(vec![]);

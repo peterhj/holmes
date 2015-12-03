@@ -476,7 +476,7 @@ pub trait GtpClient {
 // TODO: Below is a simple GTP controller server for connecting two bots running
 // on the same host.
 
-fn create_command_string(id: u32, command: &[Entity]) -> Vec<u8> {
+pub fn create_command_string(id: u32, command: &[Entity]) -> Vec<u8> {
   //let mut prefix = Vec::new();
   let prefix = id.to_string().as_bytes().to_vec();
   let mut cmd_str: Vec<u8> = command.iter()
@@ -519,13 +519,13 @@ fn read_client_response_string(buffered_stream: &mut BufStream<TcpStream>) -> Ve
   res_str
 }
 
-struct Response {
-  has_error: bool,
-  id: Option<u32>,
-  lines: Vec<Vec<Vec<u8>>>,
+pub struct Response {
+  pub has_error: bool,
+  pub id: Option<u32>,
+  pub lines: Vec<Vec<Vec<u8>>>,
 }
 
-fn parse_response_string(res_str: &[u8]) -> Response {
+pub fn parse_response_string(res_str: &[u8]) -> Response {
   //println!("DEBUG: server: parsing response:");
   //print!("{}", String::from_utf8_lossy(res_str));
   let mut res_buf = BufReader::new(res_str);
@@ -620,7 +620,7 @@ impl GtpId {
   }
 }
 
-enum GtpMessage {
+pub enum GtpMessage {
   Wakeup,
   AckWakeup(u32), //(Arc<RefCell<GtpId>>),
   Shutdown,
@@ -629,7 +629,7 @@ enum GtpMessage {
   Response(Vec<u8>),
 }
 
-fn handle_client_stream(color: Player, to_ctl_tx: Sender<GtpMessage>, from_ctl_rx: Receiver<GtpMessage>, stream: TcpStream) {
+pub fn handle_client_stream(to_ctl_tx: Sender<GtpMessage>, from_ctl_rx: Receiver<GtpMessage>, stream: TcpStream) {
   let mut buffered_stream = BufStream::new(stream);
   println!("DEBUG: client: requesting wakeup");
   to_ctl_tx.send(GtpMessage::Wakeup)
@@ -696,8 +696,8 @@ fn handle_client_stream(color: Player, to_ctl_tx: Sender<GtpMessage>, from_ctl_r
   }
 }
 
-struct ClientState {
-  previous_move: Option<Move>,
+pub struct ClientState {
+  pub previous_move: Option<Move>,
 }
 
 impl ClientState {
@@ -779,8 +779,8 @@ impl GtpController {
     let cmd_str = create_command_string(self.id.increment(), &[
       StringEntity(b"komi".to_vec()),
       // FIXME: fixed sample komi for now.
-      //FloatEntity(7.5),
-      FloatEntity(6.5),
+      //FloatEntity(6.5),
+      FloatEntity(7.5),
     ]);
     ctl_to_client_tx.send(GtpMessage::Command(cmd_str))
       .unwrap();
@@ -825,18 +825,20 @@ impl GtpController {
   }
 
   fn play_client(&mut self, player: Player, client_to_ctl_rx: &Receiver<GtpMessage>, ctl_to_client_tx: &Sender<GtpMessage>) -> Move {
-    let cmd_str = create_command_string(self.id.increment(), &[
-      StringEntity(b"showboard".to_vec()),
-    ]);
-    ctl_to_client_tx.send(GtpMessage::Command(cmd_str))
-      .unwrap();
-    match client_to_ctl_rx.recv()
-      .ok().expect("FATAL: TODO")
-    {
-      GtpMessage::Response(res_str) => {
-        // TODO
-      },
-      _ => (),
+    if let Player::White = player {
+      let cmd_str = create_command_string(self.id.increment(), &[
+        StringEntity(b"showboard".to_vec()),
+      ]);
+      ctl_to_client_tx.send(GtpMessage::Command(cmd_str))
+        .unwrap();
+      match client_to_ctl_rx.recv()
+        .ok().expect("FATAL: TODO")
+      {
+        GtpMessage::Response(res_str) => {
+          // TODO
+        },
+        _ => (),
+      }
     }
     let cmd_str = create_command_string(self.id.increment(), &[
       StringEntity(b"genmove".to_vec()),
@@ -922,7 +924,7 @@ impl GtpController {
         for stream in black_listener.incoming() {
           match stream {
             Ok(stream) => {
-              handle_client_stream(Player::Black, black_to_ctl_tx, ctl_to_black_rx, stream);
+              handle_client_stream(black_to_ctl_tx, ctl_to_black_rx, stream);
               break;
             },
             Err(_) => (),
@@ -933,7 +935,7 @@ impl GtpController {
         for stream in white_listener.incoming() {
           match stream {
             Ok(stream) => {
-              handle_client_stream(Player::White, white_to_ctl_tx, ctl_to_white_rx, stream);
+              handle_client_stream(white_to_ctl_tx, ctl_to_white_rx, stream);
               break;
             },
             Err(_) => (),

@@ -3,13 +3,14 @@ use toml;
 use rustc_serialize::json;
 use std::collections::{BTreeMap};
 use std::env;
+use std::fmt::{Debug};
 use std::fs::{File};
 use std::io::{Read};
 use std::path::{PathBuf};
 
-//thread_local!(static HYPERPARAM_INSTANCE: BTreeMap<String, json::Json> = {
-thread_local!(static HYPERPARAM_INSTANCE: BTreeMap<String, toml::Value> = {
-  let path = match env::var("HYPERPARAM_INSTANCE_PATH") {
+//thread_local!(static HYPERPARAM_MAP: BTreeMap<String, json::Json> = {
+thread_local!(static HYPERPARAM_MAP: BTreeMap<String, toml::Value> = {
+  let path = match env::var("HYPERPARAM_PATH") {
     Ok(path)  => PathBuf::from(&path),
     Err(e)    => panic!("no env variable for hyperparam instance path: {:?}", e),
   };
@@ -76,8 +77,8 @@ impl Hyperparam for f32 {
   }
 }
 
-pub fn load_hyperparam<T>(key: &str) -> T where T: Hyperparam {
-  let res = HYPERPARAM_INSTANCE.with(|instance| {
+pub fn load_hyperparam<T>(key: &str) -> T where T: Hyperparam + Debug {
+  let res = HYPERPARAM_MAP.with(|instance| {
     let value = match instance.get(key) {
       Some(value) => value,
       None => panic!("failed to find hyperparam: '{}'", key)
@@ -86,7 +87,10 @@ pub fn load_hyperparam<T>(key: &str) -> T where T: Hyperparam {
     Hyperparam::from_toml(value)
   });
   match res {
-    Some(x) => x,
+    Some(x) => {
+      println!("DEBUG: hyperparam: key: '{}' value: {:?}", key, x);
+      x
+    }
     None => panic!("failed to load parameter: '{}'", key),
   }
 }

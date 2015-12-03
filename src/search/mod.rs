@@ -27,6 +27,7 @@ pub struct SearchStats {
   pub elapsed_ms:       i64,
   pub argmax_rank:      i32,
   pub argmax_trials:    i32,
+  pub max_ply:          i32,
   pub edge_count:       i32,
   pub inner_edge_count: i32,
   pub term_edge_count:  i32,
@@ -43,9 +44,29 @@ pub struct ProgWideConfig {
 }
 
 #[derive(Clone)]
-pub struct Trajectory {
+pub struct Walk {
   pub backup_triples: Vec<(Rc<RefCell<Node>>, Point, usize)>,
   pub leaf_node:      Option<Rc<RefCell<Node>>>,
+}
+
+impl Walk {
+  pub fn new() -> Walk {
+    Walk{
+      backup_triples: vec![],
+      leaf_node:      None,
+    }
+  }
+
+  pub fn reset(&mut self) {
+    self.backup_triples.clear();
+    self.leaf_node = None;
+  }
+}
+
+#[derive(Clone)]
+pub struct Trajectory {
+  /*pub backup_triples: Vec<(Rc<RefCell<Node>>, Point, usize)>,
+  pub leaf_node:      Option<Rc<RefCell<Node>>>,*/
 
   pub rollout:    bool,
   pub sim_state:  TxnState<TxnStateLibFeaturesData>,
@@ -59,25 +80,11 @@ pub struct Trajectory {
   //dead_mask:  Vec<BitSet>,
 }
 
-#[derive(Clone)]
-pub struct RolloutTrajectory {
-  pub rollout:    bool,
-
-  pub sim_state:  TxnState<TxnStateLibFeaturesData>,
-  pub sim_pairs:  Vec<(Stone, Point)>,
-
-  pub raw_score:  Option<f32>,
-  pub adj_score:  Option<[f32; 2]>,
-
-  // Temporary variables during rollouts/backups.
-  rave_mask:  Vec<BitSet>,
-}
-
 impl Trajectory {
   pub fn new() -> Trajectory {
     Trajectory{
-      backup_triples: vec![],
-      leaf_node:      None,
+      /*backup_triples: vec![],
+      leaf_node:      None,*/
       rollout:    false,
       sim_state:  TxnState::new(RuleSet::KgsJapanese.rules(), TxnStateLibFeaturesData::new()),
       sim_pairs:  vec![],
@@ -95,8 +102,8 @@ impl Trajectory {
   }
 
   pub fn reset(&mut self) {
-    self.backup_triples.clear();
-    self.leaf_node = None;
+    /*self.backup_triples.clear();
+    self.leaf_node = None;*/
     self.rollout = false;
     self.sim_state.reset();
     self.sim_pairs.clear();
@@ -110,13 +117,13 @@ impl Trajectory {
     self.sim_pairs.clear();
   }
 
-  pub fn reset_rollout(&mut self) {
+  pub fn reset_rollout(&mut self, walk: &Walk) {
     self.rollout = true;
     {
-      let &mut Trajectory{ref leaf_node, ref mut sim_state, .. } = self;
+      //let &mut Trajectory{ref leaf_node, ref mut sim_state, .. } = self;
       //sim_state.shrink_clone_from(&self.leaf_node.as_ref().unwrap().borrow().state);
-      let state = &self.leaf_node.as_ref().unwrap().borrow().state;
-      sim_state.replace_clone_from(state, state.get_data().features.clone());
+      let state = &walk.leaf_node.as_ref().unwrap().borrow().state;
+      self.sim_state.replace_clone_from(state, state.get_data().features.clone());
     }
     self.sim_pairs.clear();
     self.raw_score = None;
@@ -277,14 +284,19 @@ impl Tree {
   pub fn walk(&mut self,
       prior_policy: &mut PriorPolicy,
       tree_policy: &mut TreePolicy<R=XorShift128PlusRng>,
-      traj: &mut Trajectory, stats: &mut SearchStats,
+      //traj: &mut Trajectory,
+      walk: &mut Walk,
+      stats: &mut SearchStats,
       rng: &mut XorShift128PlusRng)
       -> WalkResult
   {
-    traj.reset();
+    walk.reset();
 
+    let mut ply = 0;
     let mut cursor_node = self.root_node.clone();
     loop {
+      ply += 1;
+
       // At the cursor node, decide to walk or rollout depending on the total
       // number of trials.
       let cursor_trials = cursor_node.borrow().total_trials;
@@ -294,7 +306,7 @@ impl Tree {
         let res = tree_policy.execute_search(&*cursor_node.borrow(), rng);
         match res {
           Some((place_point, j)) => {
-            traj.backup_triples.push((cursor_node.clone(), place_point, j));
+            walk.backup_triples.push((cursor_node.clone(), place_point, j));
             let has_child = cursor_node.borrow().child_nodes[j].is_some();
             if has_child {
               // Existing inner node, simply update the cursor.
@@ -332,7 +344,8 @@ impl Tree {
 
     // TODO(20151111): if the cursor node is terminal, score it now and backup;
     // otherwise do a rollout and then backup.
-    traj.leaf_node = Some(cursor_node.clone());
+    stats.max_ply = max(stats.max_ply, ply);
+    walk.leaf_node = Some(cursor_node.clone());
     let terminal = cursor_node.borrow().is_terminal();
     if terminal {
       //WalkResult::Terminal(cursor_node.clone())
@@ -343,7 +356,7 @@ impl Tree {
     }
   }
 
-  pub fn backup(&mut self, tree_policy: &mut TreePolicy<R=XorShift128PlusRng>, traj: &mut Trajectory, rng: &mut XorShift128PlusRng) {
+  pub fn backup(&mut self, tree_policy: &mut TreePolicy<R=XorShift128PlusRng>, walk: &Walk, traj: &mut Trajectory, rng: &mut XorShift128PlusRng) {
     //writeln!(&mut stderr(), "DEBUG: backup idx: {}", i);
     traj.rave_mask[0].clear();
     traj.rave_mask[1].clear();
@@ -352,7 +365,7 @@ impl Tree {
 
     if traj.sim_pairs.len() >= 1 {
       assert!(traj.rollout);
-      let mut leaf_node = traj.leaf_node.as_ref().unwrap().borrow_mut();
+      let mut leaf_node = walk.leaf_node.as_ref().unwrap().borrow_mut();
       let leaf_turn = leaf_node.state.current_turn();
 
       // XXX(20151120): Currently not tracking pass pairs, so need to check that
@@ -384,12 +397,12 @@ impl Tree {
     }
 
     {
-      let mut leaf_node = traj.leaf_node.as_ref().unwrap().borrow_mut();
+      let mut leaf_node = walk.leaf_node.as_ref().unwrap().borrow_mut();
       leaf_node.update_visits(&self.pwide_cfg);
       tree_policy.backup_values(&mut *leaf_node, rng);
     }
 
-    for &(ref node, update_point, update_j) in traj.backup_triples.iter().rev() {
+    for &(ref node, update_point, update_j) in walk.backup_triples.iter().rev() {
       let mut node = node.borrow_mut();
 
       assert_eq!(update_point, node.prior_moves[update_j].0);
@@ -426,12 +439,19 @@ pub struct SearchResult {
   pub expected_score: f32,
 }
 
-pub struct SequentialSearch {
+pub struct Search {
   pub num_rollouts: usize,
   pub stats:        SearchStats,
 }
 
-impl SequentialSearch {
+impl Search {
+  pub fn new(num_rollouts: usize) -> Search {
+    Search{
+      num_rollouts: num_rollouts,
+      stats:        Default::default(),
+    }
+  }
+
   pub fn join(&mut self,
       tree:         &mut Tree,
       prior_policy: &mut PriorPolicy,
@@ -447,61 +467,67 @@ impl SequentialSearch {
     // FIXME(20151124): calling this here because RNG is initialized here.
     tree_policy.init_node(&mut *tree.root_node.borrow_mut(), &mut rng);
 
-    let batch_size = roll_policy.batch_size();
-    assert!(batch_size >= 1);
+    let do_batch = roll_policy.do_batch();
     let root_turn = tree.current_turn();
     let prev_expected_score = prev_result.map_or(0.0, |r| r.expected_score);
 
     let start_time = get_time();
 
-    match batch_size {
-      1 => {
+    match do_batch {
+      false => {
+        let mut walk = Walk::new();
         let mut traj = Trajectory::new();
+
         for i in (0 .. self.num_rollouts) {
-          match tree.walk(prior_policy, tree_policy, &mut traj, &mut self.stats, &mut rng) {
+          match tree.walk(prior_policy, tree_policy, &mut walk, &mut self.stats, &mut rng) {
             WalkResult::Terminal => {
               self.stats.term_count += 1;
               traj.reset_terminal();
               traj.score(komi, prev_expected_score);
-              tree.backup(tree_policy, &mut traj, &mut rng);
+              tree.backup(tree_policy, &walk, &mut traj, &mut rng);
             }
             WalkResult::NonTerminal => {
               self.stats.nonterm_count += 1;
-              traj.reset_rollout();
-              roll_policy.rollout(&mut traj, &mut rng);
+              traj.reset_rollout(&walk);
+              roll_policy.rollout(&walk, &mut traj, &mut rng);
               traj.score(komi, prev_expected_score);
-              tree.backup(tree_policy, &mut traj, &mut rng);
+              tree.backup(tree_policy, &walk, &mut traj, &mut rng);
             }
           }
         }
       }
 
-      batch_size => {
+      true  => {
+        let batch_size = roll_policy.batch_size();
+        assert!(batch_size >= 1);
+        let mut walks: Vec<_> = repeat(Walk::new()).take(batch_size).collect();
         let mut trajs: Vec<_> = repeat(Trajectory::new()).take(batch_size).collect();
 
         let num_batches = (self.num_rollouts + batch_size - 1) / batch_size;
         for batch in (0 .. num_batches) {
           // TODO(20151125): walks can happen in parallel within a batch.
           for batch_idx in (0 .. batch_size) {
+            let walk = &mut walks[batch_idx];
             let traj = &mut trajs[batch_idx];
-            match tree.walk(prior_policy, tree_policy, traj, &mut self.stats, &mut rng) {
+            match tree.walk(prior_policy, tree_policy, walk, &mut self.stats, &mut rng) {
               WalkResult::Terminal => {
                 self.stats.term_count += 1;
                 traj.reset_terminal();
               }
               WalkResult::NonTerminal => {
                 self.stats.nonterm_count += 1;
-                traj.reset_rollout();
+                traj.reset_rollout(walk);
               }
             }
           }
 
-          roll_policy.rollout_batch(&mut trajs, &mut rng);
+          roll_policy.rollout_batch(&walks, &mut trajs, &mut rng);
 
           for batch_idx in (0 .. batch_size) {
+            let walk = &walks[batch_idx];
             let traj = &mut trajs[batch_idx];
             traj.score(komi, prev_expected_score);
-            tree.backup(tree_policy, traj, &mut rng);
+            tree.backup(tree_policy, walk, traj, &mut rng);
           }
         }
       }

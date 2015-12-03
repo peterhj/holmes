@@ -1,6 +1,6 @@
 use agents::{Agent};
 use board::{Board, RuleSet, Stone, Point, Action};
-use search::{Tree, Trajectory, SequentialSearch, SearchResult};
+use search::{Tree, Trajectory, Search, SearchResult};
 use search::policies::convnet::{ConvnetPriorPolicy, BatchConvnetRolloutPolicy};
 use search::policies::quasiuniform::{QuasiUniformRolloutPolicy};
 use search::policies::thompson_rave::{ThompsonRaveTreePolicy};
@@ -35,7 +35,7 @@ impl SearchAgent {
     //let mut tree_policy = UctRaveTreePolicy::new();
     let mut tree_policy = ThompsonRaveTreePolicy::new();
     //let mut roll_policy = QuasiUniformRolloutPolicy;
-    let mut roll_policy = BatchConvnetRolloutPolicy::new();
+    let mut roll_policy = BatchConvnetRolloutPolicy::new(64);
     SearchAgent{
       komi:     0.0,
       player:   None,
@@ -104,10 +104,7 @@ impl Agent for SearchAgent {
       self.state.set_turn(turn);
     }
     assert_eq!(turn, self.state.current_turn());
-    let mut search = SequentialSearch{
-      num_rollouts: 5000,
-      stats: Default::default(),
-    };
+    let mut search = Search::new(5120);
     let mut tree = Tree::new(self.state.clone(), &mut self.prior_policy, &mut self.tree_policy);
     let result = search.join(
         &mut tree,

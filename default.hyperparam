@@ -1,0 +1,9 @@
+ucb_c       = 0.9
+pbias_c     = 0.8
+pbias_equiv = 600.0
+pwide       = true
+pwide_mu    = 1.8
+
+rave        = true
+rave_equiv  = 3000.0
+prior_equiv = 100.0

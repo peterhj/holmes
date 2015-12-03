@@ -7,6 +7,7 @@
 
 extern crate array;
 extern crate async_cuda;
+extern crate episodb;
 extern crate rembrandt;
 extern crate statistics_avx2;
 
@@ -32,6 +33,7 @@ pub mod game;
 pub mod gtp;
 pub mod gtp_board;
 pub mod gtp_client;
+pub mod gtp_ctrl;
 pub mod hyper;
 pub mod pattern;
 pub mod random;

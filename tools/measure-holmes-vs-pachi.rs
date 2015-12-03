@@ -63,7 +63,7 @@ fn main() {
     let tx = tx.clone();
     let device_ids = device_ids.clone();
     let mut log_path = log_dir.clone();
-    log_path.push(&format!("holmes-vs-gnugo.{}.log", i));
+    log_path.push(&format!("trial.{}.log", i));
     let mut job_idxs = job_idxs.clone();
     let seed: u32 = thread_rng().gen();
     pool.execute(move || {
@@ -77,31 +77,17 @@ fn main() {
         job_idx
       };
       let device_num = device_ids[job_idx % device_ids.len()];
-      let (b_port, w_port) = (6060 + 2*job_idx, 6060 + 2*job_idx + 1);
-      // FIXME(20151123): manually track child process progress.
-      /*if false {
-        let mut ctl_child = Command::new("target/release/gtpctl")
-        ;
-        let mut gnugo_child = Command::new("../bin/gnugo-3.8")
-          .arg("--level=10")
-          .arg("--chinese-rules")
-          .arg("--mode=gtp")
-          .arg(&format!("--gtp-connect=127.0.0.1:{}", w_port))
-        ;
-        let mut holmes_child = Command::new("target/release/holmes-gtp")
-          .arg("-h").arg("127.0.0.1")
-          .arg("-p").arg(&format!("{}", b_port))
-        ;
-      }*/
-      let mut child = Command::new("./gtpctl-holmes-vs-gnugo.sh")
+      let (b_port, w_port, r_port) = (6060 + 3*job_idx, 6060 + 3*job_idx + 1, 6060 + 3*job_idx + 2);
+      let mut child = Command::new("./gtp_ref_ctrl-holmes-vs-pachi10k-with-gnugo.sh")
         .env("CUDA_VISIBLE_DEVICES", &format!("{}", device_num))
-        //.env("HYPERPARAM_INSTANCE_PATH", "experiments/hyperparam/ikeda_rave.instance.json")
         .env("HYPERPARAM_PATH", "default.hyperparam")
         .arg(&format!("{}", b_port))
         .arg(&format!("{}", w_port))
+        .arg(&format!("{}", r_port))
         .arg(&format!("{}", seed))  // XXX: Need to set seed, otherwise gnugo
                                     // tends to make the same moves.
         .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn().unwrap();
       let output = child.wait_with_output().unwrap();
       let mut file = File::create(&log_path).unwrap();
@@ -114,7 +100,7 @@ fn main() {
     });
   }
 
-  for _ in rx.iter().take(n) {
+  for _ in rx.iter().take(n - start_idx) {
   }
 }
 

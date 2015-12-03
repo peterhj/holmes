@@ -1,6 +1,6 @@
 use agents::{Agent};
 use board::{Board, RuleSet, Stone, Point, Action};
-use convnet::{
+use convnet::arch::{
   build_action_3layer_arch,
   build_action_6layer_arch,
   build_action_3layer_19x19x16_arch,

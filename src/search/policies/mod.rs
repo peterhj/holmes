@@ -1,6 +1,6 @@
 use board::{Stone, Point};
 use random::{XorShift128PlusRng};
-use search::{Trajectory, Node};
+use search::{Walk, Trajectory, Node};
 use txnstate::{TxnState};
 use txnstate::extras::{TxnStateNodeData};
 use txnstate::features::{TxnStateFeaturesData};
@@ -30,8 +30,9 @@ pub trait TreePolicy {
 pub trait RolloutPolicy {
   type R: Rng = XorShift128PlusRng;
 
-  fn rollout(&self, traj: &mut Trajectory, rng: &mut Self::R);
+  fn rollout(&self, walk: &Walk, traj: &mut Trajectory, rng: &mut Self::R);
 
+  fn do_batch(&self) -> bool { false }
   fn batch_size(&self) -> usize { 1 }
-  fn rollout_batch(&mut self, trajs: &mut [Trajectory], rng: &mut Self::R) { unimplemented!(); }
+  fn rollout_batch(&mut self, walks: &[Walk], trajs: &mut [Trajectory], rng: &mut Self::R) { unimplemented!(); }
 }

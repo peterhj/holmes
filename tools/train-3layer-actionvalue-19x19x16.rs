@@ -7,10 +7,12 @@ use rembrandt::data::{DatasetConfiguration, DataSourceBuilder};
 use rembrandt::layer::{
   Layer,
   ParamsInitialization, ActivationFunction,
-  DataLayerConfig, Conv2dLayerConfig, SoftmaxLossLayerConfig,
+  DataLayerConfig, Conv2dLayerConfig,
+  SoftmaxLossLayerConfig,
+  BinaryLogisticKLLossLayerConfig,
 };
 use rembrandt::layer::{
-  DataLayer, Conv2dLayer, SoftmaxLossLayer,
+  DataLayer, Conv2dLayer, SoftmaxLossLayer, BinaryLogisticKLLossLayer,
 };
 use rembrandt::net::{NetArch, LinearNetArch};
 use rembrandt::opt::{
@@ -81,36 +83,36 @@ fn train_simba_2_layers() {
     act_fun: ActivationFunction::Identity,
     init_weights: ParamsInitialization::Uniform{half_range: 0.05},
   };
-  let loss_layer_cfg = SoftmaxLossLayerConfig{
+  /*let loss_layer_cfg = SoftmaxLossLayerConfig{
     num_categories: 361,
     do_mask: false,
+  };*/
+  let loss_layer_cfg = BinaryLogisticKLLossLayerConfig{
+    num_categories: 361,
   };
 
   let data_layer = DataLayer::new(0, data_layer_cfg, batch_size);
   let conv1_layer = Conv2dLayer::new(0, conv1_layer_cfg, batch_size, Some(&data_layer), &ctx);
   let conv2_layer = Conv2dLayer::new(0, hidden_conv_layer_cfg, batch_size, Some(&conv1_layer), &ctx);
-  let conv3_layer = Conv2dLayer::new(0, hidden_conv_layer_cfg, batch_size, Some(&conv2_layer), &ctx);
-  let conv4_layer = Conv2dLayer::new(0, hidden_conv_layer_cfg, batch_size, Some(&conv3_layer), &ctx);
-  let conv5_layer = Conv2dLayer::new(0, hidden_conv_layer_cfg, batch_size, Some(&conv4_layer), &ctx);
-  let conv6_layer = Conv2dLayer::new(0, final_conv_layer_cfg, batch_size, Some(&conv5_layer), &ctx);
-  let softmax_layer = SoftmaxLossLayer::new(0, loss_layer_cfg, batch_size, Some(&conv6_layer));
+  let conv3_layer = Conv2dLayer::new(0, final_conv_layer_cfg, batch_size, Some(&conv2_layer), &ctx);
+  //let loss_layer = SoftmaxLossLayer::new(0, loss_layer_cfg, batch_size, Some(&conv3_layer));
+  let loss_layer = BinaryLogisticKLLossLayer::new(0, loss_layer_cfg, batch_size, Some(&conv3_layer));
   let mut arch = LinearNetArch::new(
-      PathBuf::from("experiments/models/tmp_action_6layer_19x19x16.v2"),
+      //PathBuf::from("experiments/models/action_3layer_19x19x16.v2"),
+      PathBuf::from("experiments/models/actionvalue_3layer_19x19x16.v2"),
       batch_size,
       data_layer,
-      Box::new(softmax_layer),
+      Box::new(loss_layer),
       vec![
         Box::new(conv1_layer),
         Box::new(conv2_layer),
         Box::new(conv3_layer),
-        Box::new(conv4_layer),
-        Box::new(conv5_layer),
-        Box::new(conv6_layer),
       ],
   );
   arch.initialize_layer_params(&ctx);
 
-  let dataset_cfg = DatasetConfiguration::open(&PathBuf::from("experiments/gogodb_19x19x16.v2.data"));
+  //let dataset_cfg = DatasetConfiguration::open(&PathBuf::from("experiments/gogodb_19x19x16.v2.data"));
+  let dataset_cfg = DatasetConfiguration::open(&PathBuf::from("experiments/gogodb_actionvalue_19x19x16.v2.data"));
   let mut train_data_source = if let Some(&(ref name, ref cfg)) = dataset_cfg.datasets.get("train") {
     DataSourceBuilder::build(name, cfg.clone())
   } else {
