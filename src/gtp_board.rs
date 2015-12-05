@@ -109,7 +109,7 @@ impl Coord {
   }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub enum Vertex {
   Resign,
   Pass,

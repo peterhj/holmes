@@ -80,16 +80,21 @@ impl DataSource for CyclicRandomEpisodeSamples {
   }
 
   fn each_sample(&mut self, label_cfg: SampleLabelConfig, f: &mut FnMut(usize, &SampleDatum, Option<SampleLabel>)) {
+    println!("DEBUG: cyclic: begin epoch: {} {}", self.num_episodes(), self.num_samples());
     let mut epoch_idx = 0;
+    let mut num_skipped = 0;
     let num_eps = self.num_episodes();
-    for _ in (0 .. self.num_samples()) {
-      let ep_idx = epoch_idx % num_eps;
+    for i in (0 .. self.num_samples()) {
+      let ep_idx = i % num_eps;
       let (start_idx, end_idx) = self.data.get_episode_range(ep_idx);
       let sample_idx = self.rng.gen_range(start_idx, end_idx);
       if let Some((datum, maybe_label)) = self.data.get_episode_sample(label_cfg, ep_idx, sample_idx) {
         f(epoch_idx, &datum, maybe_label);
         epoch_idx += 1;
+      } else {
+        num_skipped += 1;
       }
     }
+    println!("DEBUG: cyclic: end epoch: {} {}", epoch_idx, num_skipped);
   }
 }

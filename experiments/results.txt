@@ -34,14 +34,19 @@
   - params: initial LR 0.01, step twice {100K 0.001 200K 0.0001}, minibatch size 256, momentum 0.9, no weight decay
     - convergence is a lot slower than the 19x19x4 arch
 
-- arch: input 19x19x16 -> conv 9x9x16 rect -> conv 3x3x1
+- arch: 2 layer: input 19x19x16 -> conv 9x9x16 rect -> conv 3x3x1
   - KGS validation accuracy: 34.8%
 
-- arch: input 19x19x16 -> conv 9x9x16 rect -> conv 3x3x16 rect -> conv 3x3x1
+- arch: 3 layer: input 19x19x16 -> conv 9x9x16 rect -> conv 3x3x16 rect -> conv 3x3x1
   - KGS validation accuracy: 37.0%
 
-- arch: input 19x19x16 -> conv 9x9x128 rect -> conv 3x3x128 rect -> conv 3x3x1
+- arch: 3 layer: input 19x19x16 -> conv 9x9x128 rect -> conv 3x3x128 rect -> conv 3x3x1
   - KGS validation accuracy: 43.1%
 
-- arch: input 19x19x16 -> conv 9x9x128 rect -> 4x conv 3x3x128 rect -> conv 3x3x1
+- arch: 6 layer: input 19x19x16 -> conv 9x9x128 rect -> 4x conv 3x3x128 rect -> conv 3x3x1
   - KGS validation accuracy: 47.8%
+
+- arch: 19x19x16 12 layer convnet:
+  - near the end of 10-th epoch (iteration 520000, interval 12085760/12103424):
+    - KGS validation accuracy: 50.3%
+  - trained with constant learning rate 0.05, no momentum, batch size 256

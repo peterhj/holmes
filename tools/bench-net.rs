@@ -124,7 +124,7 @@ fn bench_net() {
     let host_input_view = host_input_buf.as_view();
     let mut device_input_view = device_input_buf.as_mut_view_2d((361*num_planes, 256));
     device_input_view.sync_load(&host_input_view, &ctx);
-    arch.evaluate(OptPhase::Evaluation, &ctx);
+    arch.evaluate(OptPhase::Inference, &ctx);
     //let _ = arch.predict_labels(&ctx);
     let _ = arch.loss_layer().predict_probs(batch_size, &ctx);
     /*let device_output_view = device_output_buf.as_view_2d((361, 256));

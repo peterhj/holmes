@@ -13,9 +13,9 @@ pub struct Client {
   port:             u16,
   should_shutdown:  bool,
 
-  pre_game:         PreGame,
-  //agent:            ConvnetAgent,
-  agent:            SearchAgent,
+  pre_game: PreGame,
+  //agent:    ConvnetAgent,
+  agent:    SearchAgent,
 }
 
 impl Client {

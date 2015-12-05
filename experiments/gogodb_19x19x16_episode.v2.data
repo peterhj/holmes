@@ -1,0 +1,9 @@
+[dataset.train]
+source        = "episodb"
+data_path     = "/data0/go/gogodb-preproc/train_frames_19x19x16.v2.episodb"
+labels_path   = "/data0/go/gogodb-preproc/train_action_labels_19x19x16.v2.episodb"
+
+[dataset.valid]
+source        = "episodb"
+data_path     = "/data0/go/kgs-ugo-preproc/valid_frames_19x19x16.v2.episodb"
+labels_path   = "/data0/go/kgs-ugo-preproc/valid_action_labels_19x19x16.v2.episodb"

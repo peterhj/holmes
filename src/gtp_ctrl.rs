@@ -294,15 +294,25 @@ impl GtpRefereedController {
         let result = match current_player {
           Player::Black => {
             let referee_move = self.play_client(Player::Black, &referee_to_ctl_rx, &ctl_to_referee_tx);
-            self.undo_client(&referee_to_ctl_rx, &ctl_to_referee_tx);
-            let current_move = if let Vertex::Pass = referee_move.vertex {
-              self.update_client(referee_move, &black_to_ctl_rx, &ctl_to_black_tx);
-              referee_move
-            } else {
-              self.play_client(Player::Black, &black_to_ctl_rx, &ctl_to_black_tx)
+            if Vertex::Resign != referee_move.vertex {
+              self.undo_client(&referee_to_ctl_rx, &ctl_to_referee_tx);
+            }
+            let current_move = match referee_move.vertex {
+              Vertex::Pass => {
+                self.update_client(referee_move, &black_to_ctl_rx, &ctl_to_black_tx);
+                referee_move
+              }
+              Vertex::Resign => {
+                referee_move
+              }
+              _ => {
+                self.play_client(Player::Black, &black_to_ctl_rx, &ctl_to_black_tx)
+              }
             };
-            self.update_client(current_move, &white_to_ctl_rx, &ctl_to_white_tx);
-            let result = self.update_client(current_move, &referee_to_ctl_rx, &ctl_to_referee_tx);
+            let result = self.update_client(current_move, &white_to_ctl_rx, &ctl_to_white_tx);
+            if Vertex::Resign != referee_move.vertex {
+              self.update_client(current_move, &referee_to_ctl_rx, &ctl_to_referee_tx);
+            }
             self.show_board(&referee_to_ctl_rx, &ctl_to_referee_tx);
             black_state.previous_move = Some(current_move);
             if let Vertex::Resign = current_move.vertex {
@@ -312,15 +322,25 @@ impl GtpRefereedController {
           },
           Player::White => {
             let referee_move = self.play_client(Player::White, &referee_to_ctl_rx, &ctl_to_referee_tx);
-            self.undo_client(&referee_to_ctl_rx, &ctl_to_referee_tx);
-            let current_move = if let Vertex::Pass = referee_move.vertex {
-              self.update_client(referee_move, &white_to_ctl_rx, &ctl_to_white_tx);
-              referee_move
-            } else {
-              self.play_client(Player::White, &white_to_ctl_rx, &ctl_to_white_tx)
+            if Vertex::Resign != referee_move.vertex {
+              self.undo_client(&referee_to_ctl_rx, &ctl_to_referee_tx);
+            }
+            let current_move = match referee_move.vertex {
+              Vertex::Pass => {
+                self.update_client(referee_move, &white_to_ctl_rx, &ctl_to_white_tx);
+                referee_move
+              }
+              Vertex::Resign => {
+                referee_move
+              }
+              _ => {
+                self.play_client(Player::White, &white_to_ctl_rx, &ctl_to_white_tx)
+              }
             };
-            self.update_client(current_move, &black_to_ctl_rx, &ctl_to_black_tx);
-            let result = self.update_client(current_move, &referee_to_ctl_rx, &ctl_to_referee_tx);
+            let result = self.update_client(current_move, &black_to_ctl_rx, &ctl_to_black_tx);
+            if Vertex::Resign != referee_move.vertex {
+              self.update_client(current_move, &referee_to_ctl_rx, &ctl_to_referee_tx);
+            }
             self.show_board(&referee_to_ctl_rx, &ctl_to_referee_tx);
             white_state.previous_move = Some(current_move);
             if let Vertex::Resign = current_move.vertex {

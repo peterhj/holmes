@@ -5,6 +5,7 @@ use convnet::arch::{
   build_action_6layer_arch,
   build_action_3layer_19x19x16_arch,
   build_action_6layer_19x19x16_arch,
+  build_action_12layer_19x19x16_arch,
 };
 use txnstate::{TxnState};
 use txnstate::features::{
@@ -35,8 +36,9 @@ impl ConvnetAgent {
     let ctx = DeviceContext::new(0);
     //let arch = build_action_3layer_arch(1, &ctx);
     //let arch = build_action_6layer_arch(1, &ctx);
-    let arch = build_action_3layer_19x19x16_arch(1, &ctx);
+    //let arch = build_action_3layer_19x19x16_arch(1, &ctx);
     //let arch = build_action_6layer_19x19x16_arch(1, &ctx);
+    let arch = build_action_12layer_19x19x16_arch(1, &ctx);
     ConvnetAgent{
       komi:     0.0,
       player:   None,
@@ -99,7 +101,7 @@ impl Agent for ConvnetAgent {
       ref mut state, ref ctx, ref mut arch, .. } = self;
     state.get_data().extract_relative_features(turn, arch.data_layer().expose_host_frame_buf(0));
     arch.data_layer().load_frames(1, ctx);
-    arch.evaluate(OptPhase::Evaluation, ctx);
+    arch.evaluate(OptPhase::Inference, ctx);
     arch.loss_layer().store_ranked_labels(1, ctx);
     let ranked_labels = arch.loss_layer().predict_ranked_labels(1);
     let mut action = Action::Pass;

@@ -6,6 +6,7 @@ use convnet::arch::{
   build_action_narrow_3layer_19x19x16_arch,
   build_action_3layer_19x19x16_arch,
   build_action_6layer_19x19x16_arch,
+  build_action_12layer_19x19x16_arch,
 };
 use discrete::{DiscreteFilter};
 use discrete::bfilter::{BFilter};
@@ -38,7 +39,8 @@ impl ConvnetPriorPolicy {
     //let arch = build_action_3layer_arch(1, &ctx);
     //let arch = build_action_6layer_arch(1, &ctx);
     //let arch = build_action_3layer_19x19x16_arch(1, &ctx);
-    let arch = build_action_6layer_19x19x16_arch(1, &ctx);
+    //let arch = build_action_6layer_19x19x16_arch(1, &ctx);
+    let arch = build_action_12layer_19x19x16_arch(1, &ctx);
     ConvnetPriorPolicy{
       ctx:  ctx,
       arch: arch,
@@ -55,7 +57,7 @@ impl PriorPolicy for ConvnetPriorPolicy {
     node_state.get_data().features.extract_relative_features(
         turn, self.arch.data_layer().expose_host_frame_buf(0));
     self.arch.data_layer().load_frames(1, ctx);
-    self.arch.evaluate(OptPhase::Evaluation, ctx);*/
+    self.arch.evaluate(OptPhase::Inference, ctx);*/
   }*/
 
   fn fill_prior_probs(&mut self, state: &TxnState<TxnStateNodeData>, valid_moves: &[Point], prior_moves: &mut Vec<(Point, f32)>) {
@@ -63,7 +65,7 @@ impl PriorPolicy for ConvnetPriorPolicy {
     let turn = state.current_turn();
     state.get_data().features.extract_relative_features(turn, self.arch.data_layer().expose_host_frame_buf(0));
     self.arch.data_layer().load_frames(1, &self.ctx);
-    self.arch.evaluate(OptPhase::Evaluation, &self.ctx);
+    self.arch.evaluate(OptPhase::Inference, &self.ctx);
     self.arch.loss_layer().store_probs(1, &self.ctx);
     let pred_probs = self.arch.loss_layer().predict_probs(1, &self.ctx);
     for &point in valid_moves.iter() {
@@ -148,7 +150,7 @@ impl RolloutPolicy for BatchConvnetRolloutPolicy {
       self.arch.data_layer().load_frames(batch_size, &self.ctx);
       // FIXME(20151125): mask softmax output with valid moves.
       //self.arch.loss_layer().load_masks(batch_size, &self.ctx);
-      self.arch.evaluate(OptPhase::Evaluation, &self.ctx);
+      self.arch.evaluate(OptPhase::Inference, &self.ctx);
       self.arch.loss_layer().store_probs(batch_size, &self.ctx);
 
       {
