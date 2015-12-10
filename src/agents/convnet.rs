@@ -52,7 +52,7 @@ impl ConvnetAgent {
 
 impl Agent for ConvnetAgent {
   fn reset(&mut self) {
-    self.komi = 6.5;
+    self.komi = 7.5;
     self.player = None;
 
     self.history.clear();

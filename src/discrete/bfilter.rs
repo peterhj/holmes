@@ -268,8 +268,24 @@ impl DiscreteFilter for BFilter {
       match (self.marks.get(self.mark_left_idx(idx)).unwrap(), self.marks.get(self.mark_right_idx(idx)).unwrap()) {
         (false, false) => {
           let value = self.heap.data[idx];
-          let left_value = self.heap.data[left_idx];
           //assert!(value > 0.0); // XXX: Range already checks this.
+          //println!("DEBUG: gen_range value: {}", value);
+          if !(value > 0.0) {
+            fn bfs_zero(filter: &mut BFilter, idx: usize) {
+              let leaf_idx = filter.leaf_idx;
+              if idx >= leaf_idx {
+                filter.zero(idx - leaf_idx);
+              } else {
+                let left_idx = filter.heap.left(idx);
+                let right_idx = filter.heap.right(idx);
+                bfs_zero(filter, left_idx);
+                bfs_zero(filter, right_idx);
+              }
+            };
+            bfs_zero(self, idx);
+            return self.sample(rng);
+          }
+          let left_value = self.heap.data[left_idx];
           let u = rng.gen_range(0.0, value);
           if u < left_value {
             idx = left_idx;

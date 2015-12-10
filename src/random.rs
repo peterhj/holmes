@@ -1,5 +1,5 @@
-use statistics_avx2::array::{array_binary_search};
-use statistics_avx2::random::{StreamRng};
+//use statistics_avx2::array::{array_binary_search};
+//use statistics_avx2::random::{StreamRng};
 
 use std::cmp::{min};
 use std::num::Wrapping as Wrap;
@@ -51,18 +51,23 @@ pub fn choose_without_replace<T: Copy, R: Rng>(xs: &mut Vec<T>, rng: &mut R) -> 
 }
 
 pub fn sample_discrete_cdf<R>(cdf: &[f32], rng: &mut R) -> usize where R: Rng {
-  let u: f32 = rng.gen_range(0.0, 1.0);
+  // FIXME(20151207)
+  unimplemented!();
+  /*let u: f32 = rng.gen_range(0.0, 1.0);
   let j = array_binary_search(cdf, u);
   assert!(j < cdf.len());
   assert!(cdf[j] <= u);
   if j < cdf.len() - 1 {
     assert!(u < cdf[j+1]);
   }
-  j
+  j*/
 }
 
-pub fn sample_discrete_cdf_scaled<R>(cdf: &[f32], rng: &mut R) -> usize where R: StreamRng {
-  let mut u = [0.0f32];
+//pub fn sample_discrete_cdf_scaled<R>(cdf: &[f32], rng: &mut R) -> usize where R: StreamRng {
+pub fn sample_discrete_cdf_scaled<R>(cdf: &[f32], rng: &mut R) -> usize where R: Rng {
+  // FIXME(20151207)
+  unimplemented!();
+  /*let mut u = [0.0f32];
   rng.sample_uniform_f32(&mut u);
   let scale = cdf[cdf.len() - 1];
   let j = array_binary_search(cdf, scale * u[0]);
@@ -71,10 +76,11 @@ pub fn sample_discrete_cdf_scaled<R>(cdf: &[f32], rng: &mut R) -> usize where R:
   if j < cdf.len() - 1 {
     assert!(u[0] < cdf[j+1]);
   }
-  j
+  j*/
 }
 
-pub fn batch_sample_discrete_cdfs<R>(batch_cdf: &[f32], rng: &mut R) where R: StreamRng {
+//pub fn batch_sample_discrete_cdfs<R>(batch_cdf: &[f32], rng: &mut R) where R: StreamRng {
+pub fn batch_sample_discrete_cdfs<R>(batch_cdf: &[f32], rng: &mut R) where R: Rng {
   // TODO(20151019)
   unimplemented!();
 }

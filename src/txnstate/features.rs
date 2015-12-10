@@ -398,9 +398,8 @@ impl TxnStateData for TxnStateLibFeaturesData {
 
 #[derive(Clone)]
 pub struct TxnStateExtLibFeatsData {
-  time_step:  usize,
+  //time_step:  usize,
   features:   Vec<u8>,
-
   tmp_mark:   BitSet,
 }
 
@@ -411,69 +410,95 @@ impl TxnStateExtLibFeatsData {
   pub const BLACK_AIR_3_PLANE:  usize = 3 * Board::SIZE;
   pub const BLACK_KO_PLANE:     usize = 4 * Board::SIZE;
   pub const BLACK_HIST_PLANE:   usize = 5 * Board::SIZE;
-  pub const WHITE_PLANE:        usize = 6 * Board::SIZE;
-  pub const WHITE_ATARI_PLANE:  usize = 7 * Board::SIZE;
-  pub const WHITE_AIR_2_PLANE:  usize = 8 * Board::SIZE;
-  pub const WHITE_AIR_3_PLANE:  usize = 9 * Board::SIZE;
-  pub const WHITE_KO_PLANE:     usize = 10 * Board::SIZE;
-  pub const WHITE_HIST_PLANE:   usize = 11 * Board::SIZE;
-  pub const NUM_PLANES:         usize = 12;
-  pub const NUM_TIME_STEPS:     usize = 1;
+  pub const BLACK_RANK_1_PLANE: usize = 6 * Board::SIZE;
+  pub const BLACK_RANK_2_PLANE: usize = 7 * Board::SIZE;
+  pub const BLACK_RANK_3_PLANE: usize = 8 * Board::SIZE;
+  pub const BLACK_RANK_4_PLANE: usize = 9 * Board::SIZE;
+  pub const BLACK_RANK_5_PLANE: usize = 10 * Board::SIZE;
+  pub const BLACK_RANK_6_PLANE: usize = 11 * Board::SIZE;
+  pub const BLACK_RANK_7_PLANE: usize = 12 * Board::SIZE;
+  pub const BLACK_RANK_8_PLANE: usize = 13 * Board::SIZE;
+  pub const BLACK_RANK_9_PLANE: usize = 14 * Board::SIZE;
+
+  pub const WHITE_PLANE:        usize = 15 * Board::SIZE;
+  pub const WHITE_ATARI_PLANE:  usize = 16 * Board::SIZE;
+  pub const WHITE_AIR_2_PLANE:  usize = 17 * Board::SIZE;
+  pub const WHITE_AIR_3_PLANE:  usize = 18 * Board::SIZE;
+  pub const WHITE_KO_PLANE:     usize = 19 * Board::SIZE;
+  pub const WHITE_HIST_PLANE:   usize = 20 * Board::SIZE;
+  pub const WHITE_RANK_1_PLANE: usize = 21 * Board::SIZE;
+  pub const WHITE_RANK_2_PLANE: usize = 22 * Board::SIZE;
+  pub const WHITE_RANK_3_PLANE: usize = 23 * Board::SIZE;
+  pub const WHITE_RANK_4_PLANE: usize = 24 * Board::SIZE;
+  pub const WHITE_RANK_5_PLANE: usize = 25 * Board::SIZE;
+  pub const WHITE_RANK_6_PLANE: usize = 26 * Board::SIZE;
+  pub const WHITE_RANK_7_PLANE: usize = 27 * Board::SIZE;
+  pub const WHITE_RANK_8_PLANE: usize = 28 * Board::SIZE;
+  pub const WHITE_RANK_9_PLANE: usize = 29 * Board::SIZE;
+
+  pub const NUM_PLANES:         usize = 30;
+  //pub const NUM_TIME_STEPS:     usize = 1;
 
   pub fn new() -> TxnStateExtLibFeatsData {
     TxnStateExtLibFeatsData{
-      time_step: 0,
-      features: repeat(0).take(Self::NUM_TIME_STEPS * Self::NUM_PLANES * Board::SIZE).collect(),
+      //time_step: 0,
+      features: repeat(0).take(Self::NUM_PLANES * Board::SIZE).collect(),
       tmp_mark: BitSet::with_capacity(Board::SIZE),
     }
   }
 
   pub fn current_feature(&self, plane_idx: usize, point: Point) -> u8 {
     let slice_sz = Self::NUM_PLANES * Board::SIZE;
-    let time_step = self.time_step;
-    let offset = time_step * slice_sz;
+    /*let time_step = self.time_step;
+    let offset = time_step * slice_sz;*/
+    let offset = slice_sz;
     self.features[offset + plane_idx * Board::SIZE + point.idx()]
   }
 
   pub fn feature_dims(&self) -> (usize, usize, usize) {
-    (Board::DIM, Board::DIM, Self::NUM_TIME_STEPS * Self::NUM_PLANES)
+    (Board::DIM, Board::DIM, Self::NUM_PLANES)
   }
 
   pub fn extract_relative_features(&self, turn: Stone, dst_buf: &mut [u8]) {
     let slice_sz = Self::NUM_PLANES * Board::SIZE;
     let half_slice_sz = slice_sz / 2;
-    let init_time_step = self.time_step;
+    //let init_time_step = self.time_step;
+    let init_time_step = 0;
     let mut time_step = init_time_step;
     let mut dst_time_step = 0;
-    loop {
+    /*loop {
       let src_offset = time_step * slice_sz;
-      let dst_offset = dst_time_step * slice_sz;
-      match turn {
-        Stone::Black => {
-          copy_memory(
-              &self.features[src_offset .. src_offset + slice_sz],
-              &mut dst_buf[dst_offset .. dst_offset + slice_sz],
-          );
-        }
-        Stone::White => {
-          copy_memory(
-              &self.features[src_offset + Self::BLACK_PLANE .. src_offset + Self::BLACK_PLANE + half_slice_sz],
-              &mut dst_buf[dst_offset + Self::WHITE_PLANE .. dst_offset + Self::WHITE_PLANE + half_slice_sz],
-          );
-          copy_memory(
-              &self.features[src_offset + Self::WHITE_PLANE .. src_offset + Self::WHITE_PLANE + half_slice_sz],
-              &mut dst_buf[dst_offset + Self::BLACK_PLANE .. dst_offset + Self::BLACK_PLANE + half_slice_sz],
-          );
-        }
-        _ => unreachable!(),
+      let dst_offset = dst_time_step * slice_sz;*/
+
+    let src_offset = 0;
+    let dst_offset = 0;
+    match turn {
+      Stone::Black => {
+        copy_memory(
+            &self.features[src_offset .. src_offset + slice_sz],
+            &mut dst_buf[dst_offset .. dst_offset + slice_sz],
+        );
       }
-      time_step = (time_step + Self::NUM_TIME_STEPS - 1) % Self::NUM_TIME_STEPS;
+      Stone::White => {
+        copy_memory(
+            &self.features[src_offset + Self::BLACK_PLANE .. src_offset + Self::BLACK_PLANE + half_slice_sz],
+            &mut dst_buf[dst_offset + Self::WHITE_PLANE .. dst_offset + Self::WHITE_PLANE + half_slice_sz],
+        );
+        copy_memory(
+            &self.features[src_offset + Self::WHITE_PLANE .. src_offset + Self::WHITE_PLANE + half_slice_sz],
+            &mut dst_buf[dst_offset + Self::BLACK_PLANE .. dst_offset + Self::BLACK_PLANE + half_slice_sz],
+        );
+      }
+      _ => unreachable!(),
+    }
+
+      /*time_step = (time_step + Self::NUM_TIME_STEPS - 1) % Self::NUM_TIME_STEPS;
       dst_time_step += 1;
       if time_step == init_time_step {
         assert_eq!(Self::NUM_TIME_STEPS, dst_time_step);
         break;
       }
-    }
+    }*/
   }
 
   fn update_point(tmp_mark: &mut BitSet, features: &mut [u8], position: &TxnPosition, chains: &TxnChainsList, point: Point) {
@@ -533,8 +558,8 @@ impl TxnStateExtLibFeatsData {
 
 impl TxnStateData for TxnStateExtLibFeatsData {
   fn reset(&mut self) {
-    self.time_step = 0;
-    assert_eq!(Self::NUM_TIME_STEPS * Self::NUM_PLANES * Board::SIZE, self.features.len());
+    //self.time_step = 0;
+    assert_eq!(Self::NUM_PLANES * Board::SIZE, self.features.len());
     for p in (0 .. self.features.len()) {
       self.features[p] = 0;
     }
@@ -542,13 +567,14 @@ impl TxnStateData for TxnStateExtLibFeatsData {
 
   fn update(&mut self, position: &TxnPosition, chains: &TxnChainsList, update_turn: Stone, update_action: Action) {
     // XXX: Before anything else, increment the time step.
-    self.time_step = (self.time_step + 1) % Self::NUM_TIME_STEPS;
+    //self.time_step = (self.time_step + 1) % Self::NUM_TIME_STEPS;
 
     // TODO(20151124): for sparse features, how to compute diffs efficiently?
 
     let slice_sz = Self::NUM_PLANES * Board::SIZE;
+    let next_slice_idx = 0;
     // FIXME(20151123): following only works when there are 2 time steps.
-    let next_slice_idx = self.time_step;
+    /*let next_slice_idx = self.time_step;
     if Self::NUM_TIME_STEPS > 1 {
       let prev_slice_idx = (self.time_step + Self::NUM_TIME_STEPS - 1) % Self::NUM_TIME_STEPS;
       let (src_feats, mut dst_feats) = slice_twice_mut(
@@ -557,7 +583,7 @@ impl TxnStateData for TxnStateExtLibFeatsData {
           next_slice_idx * slice_sz, (next_slice_idx + 1) * slice_sz,
       );
       copy_memory(src_feats, &mut dst_feats);
-    }
+    }*/
 
     self.tmp_mark.clear();
 

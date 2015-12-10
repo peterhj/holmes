@@ -35,7 +35,8 @@ impl SearchAgent {
     //let mut tree_policy = UctRaveTreePolicy::new();
     let mut tree_policy = ThompsonRaveTreePolicy::new();
     //let mut roll_policy = QuasiUniformRolloutPolicy;
-    let mut roll_policy = BatchConvnetRolloutPolicy::new(64);
+    let batch_size = 256;
+    let mut roll_policy = BatchConvnetRolloutPolicy::new(batch_size);
     SearchAgent{
       komi:     0.0,
       player:   None,
@@ -52,7 +53,7 @@ impl SearchAgent {
 
 impl Agent for SearchAgent {
   fn reset(&mut self) {
-    self.komi = 6.5;
+    self.komi = 7.5;
     self.player = None;
 
     self.history.clear();

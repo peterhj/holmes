@@ -7,6 +7,8 @@ use convnet::arch::{
   build_action_3layer_19x19x16_arch,
   build_action_6layer_19x19x16_arch,
   build_action_12layer_19x19x16_arch,
+  build_action3_narrow_3layer_19x19x16_arch,
+  build_action3_12layer_19x19x16_arch,
 };
 use discrete::{DiscreteFilter};
 use discrete::bfilter::{BFilter};
@@ -41,6 +43,7 @@ impl ConvnetPriorPolicy {
     //let arch = build_action_3layer_19x19x16_arch(1, &ctx);
     //let arch = build_action_6layer_19x19x16_arch(1, &ctx);
     let arch = build_action_12layer_19x19x16_arch(1, &ctx);
+    //let arch = build_action3_12layer_19x19x16_arch(1, &ctx);
     ConvnetPriorPolicy{
       ctx:  ctx,
       arch: arch,
@@ -83,8 +86,9 @@ pub struct BatchConvnetRolloutPolicy {
 impl BatchConvnetRolloutPolicy {
   pub fn new(batch_size: usize) -> BatchConvnetRolloutPolicy {
     let ctx = DeviceContext::new(0);
-    let arch = build_action_2layer_19x19x16_arch(64, &ctx);
+    let arch = build_action_2layer_19x19x16_arch(batch_size, &ctx);
     //let arch = build_action_narrow_3layer_19x19x16_arch(batch_size, &ctx);
+    //let arch = build_action3_narrow_3layer_19x19x16_arch(batch_size, &ctx);
     BatchConvnetRolloutPolicy{
       batch_size: batch_size,
       ctx:  ctx,
@@ -202,7 +206,8 @@ impl RolloutPolicy for BatchConvnetRolloutPolicy {
               }
             }
           } else {
-            unreachable!();
+            // XXX(20151207): Remaining moves were deemed to have probability zero.
+            break;
           }
         }
         /*println!("DEBUG: BatchConvnetRolloutPolicy: iter {}: idx {}: spin count: {}",

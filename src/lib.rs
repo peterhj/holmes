@@ -9,7 +9,7 @@ extern crate array;
 extern crate async_cuda;
 extern crate episodb;
 extern crate rembrandt;
-extern crate statistics_avx2;
+//extern crate statistics_avx2;
 
 extern crate bit_set;
 extern crate bit_vec;

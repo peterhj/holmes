@@ -2,6 +2,7 @@
 name = "holmes"
 version = "0.2.0"
 authors = ["Peter Jin <peterhaijin@gmail.com>"]
+build = "build-cuda7.rs"
 
 [lib]
 name = "holmes"
@@ -78,6 +79,14 @@ path = "tools/train-6layer-19x19x16.rs"
 [[bin]]
 name = "train-12layer-19x19x16"
 path = "tools/train-12layer-19x19x16.rs"
+
+[[bin]]
+name = "train-action3-narrow-3layer-19x19x16"
+path = "tools/train-action3-narrow-3layer-19x19x16.rs"
+
+[[bin]]
+name = "train-action3-3layer-19x19x16"
+path = "tools/train-action3-3layer-19x19x16.rs"
 
 [[bin]]
 name = "train-action3-12layer-19x19x16"
