@@ -89,6 +89,12 @@ impl RuleSet {
   }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub enum PlayerRank {
+  Kyu(u8),
+  Dan(u8),
+}
+
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub enum Stone {
   Black = 0,

@@ -5,7 +5,7 @@ extern crate rand;
 //extern crate statistics_avx2;
 
 //use holmes::fastboard::{Stone, Action, FastBoard, FastBoardWork};
-use holmes::board::{RuleSet, Stone, Point, Action};
+use holmes::board::{RuleSet, PlayerRank, Stone, Point, Action};
 use holmes::discrete::bfilter::{BFilter};
 use holmes::random::{XorShift128PlusRng, choose_without_replace};
 use holmes::txnstate::{TxnState};
@@ -28,7 +28,11 @@ fn main() {
   rng.shuffle(&mut valid_coords);
 
   //let mut state = TxnState::new(RuleSet::KgsJapanese.rules(), ());
-  let mut state = TxnState::new(RuleSet::KgsJapanese.rules(), TxnStateLegalityData::new());
+  let mut state = TxnState::new(
+      [PlayerRank::Dan(9), PlayerRank::Dan(9)],
+      RuleSet::KgsJapanese.rules(),
+      TxnStateLegalityData::new(),
+  );
   //let mut state = TxnState::new(RuleSet::KgsJapanese.rules(), TxnStateFeaturesData::new());
 
   //let mut final_cdf_norm = 0.0;

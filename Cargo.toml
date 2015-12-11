@@ -2,7 +2,8 @@
 name = "holmes"
 version = "0.2.0"
 authors = ["Peter Jin <peterhaijin@gmail.com>"]
-build = "build-cuda7.rs"
+#build = "build-cuda7.rs"
+build = "build-cuda7_5.rs"
 
 [lib]
 name = "holmes"
@@ -183,6 +184,9 @@ path = "../rembrandt-project/libasync"
 [dependencies.async_cuda]
 #path = "../../rembrandt-project/libasync_cuda"
 path = "../rembrandt-project/libasync_cuda"
+
+[dependencies.cuda]
+path = "../rembrandt-project/libcuda"
 
 [dependencies.episodb]
 path = "../episodb"

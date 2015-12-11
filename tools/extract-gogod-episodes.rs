@@ -4,12 +4,13 @@ extern crate episodb;
 extern crate holmes;
 extern crate rustc_serialize;
 
-use holmes::board::{RuleSet, Coord, Stone, Point, Action};
+use holmes::board::{RuleSet, Coord, PlayerRank, Stone, Point, Action};
 use holmes::sgf::{Sgf, parse_raw_sgf};
 use holmes::txnstate::{TxnState};
 use holmes::txnstate::features::{
   TxnStateFeaturesData,
   TxnStateLibFeaturesData,
+  TxnStateExtLibFeatsData,
 };
 
 use array::{NdArrayFormat, ArrayDeserialize, ArraySerialize, Array3d};
@@ -45,7 +46,8 @@ fn main() {
   //let serial_frame_sz = <Array3d<u8> as ArrayDeserialize<u8, NdArrayFormat>>::serial_size((19, 19, 4));
   //let serial_frame_sz = <Array3d<u8> as ArrayDeserialize<u8, NdArrayFormat>>::serial_size((19, 19, 10));
 
-  let expected_dims = (19, 19, 16);
+  //let expected_dims = (19, 19, 16);
+  let expected_dims = (19, 19, 30);
   let expected_frame_sz = <Array3d<u8> as ArrayDeserialize<u8, NdArrayFormat>>::serial_size(expected_dims);
 
   let n = sgf_paths.len();
@@ -73,6 +75,82 @@ fn main() {
     let raw_sgf = parse_raw_sgf(&text);
     let sgf = Sgf::from_raw(&raw_sgf);
 
+    fn parse_rank(text: &str, upgrade_ama: bool, sgf_path: &PathBuf) -> Vec<PlayerRank> {
+      if text.contains("&") {
+        let rank_texts: Vec<_> = text.split("&").collect();
+        println!("WARNING: relay game, using first player ranks: {:?}", sgf_path);
+        parse_rank(rank_texts[0].trim(), false, sgf_path)
+      } else if text.contains(",") {
+        let rank_texts: Vec<_> = text.split(",").collect();
+        println!("WARNING: relay game, using first player ranks: {:?}", sgf_path);
+        parse_rank(rank_texts[0].trim(), false, sgf_path)
+      } else if text.contains("ama") {
+        vec![PlayerRank::Dan(1)]
+      } else if text.contains("prov") {
+        let rank_texts: Vec<_> = text.splitn(2, "prov").collect();
+        parse_rank(rank_texts[0].trim(), false, sgf_path)
+      } else if text.contains("pro") {
+        let rank_texts: Vec<_> = text.splitn(2, "pro").collect();
+        parse_rank(rank_texts[0].trim(), false, sgf_path)
+      } else if text.contains("Ex") {
+        let rank_texts: Vec<_> = text.splitn(2, "Ex").collect();
+        parse_rank(rank_texts[1].trim(), false, sgf_path)
+      } else if text.contains("Insei") {
+        vec![PlayerRank::Dan(1)]
+      } else if text.is_empty() {
+        vec![]
+      } else {
+        vec![match text {
+          "Ama" | "Amateur" => PlayerRank::Dan(1),
+          "Gisung" |
+          "Gosei" |
+          "Honinbo" |
+          "Judan" |
+          "Kisei" |
+          "Meijin" | "Mingren" | "Myungin" |
+          "Oza" |
+          "Tengen" => PlayerRank::Dan(9),
+          "?" => PlayerRank::Dan(1),
+          "1a" | "2a" | "3a" | "4a" | "5a" |
+          "6a" | "7a" | "8a" | "9a" => PlayerRank::Dan(1),
+          "1k" | "2k" | "3k" | "4k" | "5k" |
+          "6k" | "7k" | "8k" | "9k" | "10k" |
+          "11k" | "12k" | "13k" | "14k" | "15k" |
+          "16k" | "17k" | "18k" | "19k" | "20k" => PlayerRank::Dan(1),
+          "1d" => PlayerRank::Dan(1),
+          "2d" => PlayerRank::Dan(2),
+          "3d" => PlayerRank::Dan(3),
+          "4d" => PlayerRank::Dan(4),
+          "5d" => PlayerRank::Dan(5),
+          "6d" => PlayerRank::Dan(6),
+          "7d" => PlayerRank::Dan(7),
+          "8d" => PlayerRank::Dan(8),
+          "9d" => PlayerRank::Dan(9),
+          s => {
+            panic!("sgf_path: {:?}, unimplemented player rank: \"{}\"", sgf_path, s);
+          }
+        }]
+      }
+    }
+
+    let b_ranks = parse_rank(&sgf.black_rank, true, sgf_path);
+    let w_ranks = parse_rank(&sgf.white_rank, true, sgf_path);
+    let ranks = match (b_ranks.len(), w_ranks.len()) {
+      (1, 1) => vec![b_ranks[0], w_ranks[0]],
+      (1, 0) => vec![b_ranks[0], PlayerRank::Dan(1)],
+      (0, 1) => vec![PlayerRank::Dan(1), w_ranks[0]],
+      (0, 0) => vec![PlayerRank::Dan(1), PlayerRank::Dan(1)],
+      /*(2, 2) => vec![b_ranks[0], w_ranks[0]],
+      (2, 0) => b_ranks,
+      (0, 2) => w_ranks,*/
+      (_, _) => {
+      panic!("sgf_path: {:?}, unexpected number of player ranks: {:?} {:?}",
+          sgf_path, b_ranks, w_ranks);
+      }
+    };
+    let b_rank = ranks[0];
+    let w_rank = ranks[1];
+
     let outcome = {
       let result_toks: Vec<_> = sgf.result.split("+").collect();
       //println!("DEBUG: outcome tokens: {:?}", result_toks);
@@ -91,7 +169,7 @@ fn main() {
             None
           }
           _ => {
-            println!("WARNING: extract: unimplemented outcome: '{}'", sgf.result);
+            println!("WARNING: extract: unimplemented outcome: \"{}\"", sgf.result);
             None
           }
         }
@@ -103,7 +181,12 @@ fn main() {
     }
 
     let mut history = vec![];
-    let mut state = TxnState::new(RuleSet::KgsJapanese.rules(), TxnStateLibFeaturesData::new());
+    let mut state = TxnState::new(
+        [b_rank, w_rank],
+        RuleSet::KgsJapanese.rules(),
+        //TxnStateLibFeaturesData::new(),
+        TxnStateExtLibFeatsData::new(),
+    );
     state.reset();
     for &(ref player, ref mov) in sgf.moves.iter() {
       let turn = match player as &str {
@@ -138,6 +221,13 @@ fn main() {
     value_labels_db.append_episode();
 
     for (t, &(turn, action, ref state, outcome)) in history.iter().enumerate() {
+      if t >= 1 {
+        // XXX(20151209): if 2 turns in a row, skip the rest of this game.
+        if history[t-1].0 == turn {
+          num_skipped += history.len() - t;
+          break;
+        }
+      }
       let action_label = match action {
         Action::Place{point} => point.0 as i32,
         Action::Pass => -1,

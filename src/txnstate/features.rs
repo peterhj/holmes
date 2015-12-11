@@ -1,4 +1,4 @@
-use board::{Board, Stone, Point, Action};
+use board::{Board, PlayerRank, Stone, Point, Action};
 use txnstate::{
   TxnStateData, TxnState, TxnPosition, TxnChainsList,
   for_each_adjacent,
@@ -501,7 +501,7 @@ impl TxnStateExtLibFeatsData {
     }*/
   }
 
-  fn update_point(tmp_mark: &mut BitSet, features: &mut [u8], position: &TxnPosition, chains: &TxnChainsList, point: Point) {
+  fn update_point_libs(tmp_mark: &mut BitSet, features: &mut [u8], position: &TxnPosition, chains: &TxnChainsList, point: Point) {
     let p = point.idx();
     if tmp_mark.contains(&p) {
       return;
@@ -554,6 +554,154 @@ impl TxnStateExtLibFeatsData {
     }
     tmp_mark.insert(p);
   }
+
+  fn update_point_ko(features: &mut [u8], position: &TxnPosition, ko_turn: Stone, ko_point: Point, is_ko: bool) {
+    let p = ko_point.idx();
+    match ko_turn {
+      Stone::Black => {
+        if is_ko {
+          features[Self::BLACK_KO_PLANE + p] = 1;
+        } else {
+          features[Self::BLACK_KO_PLANE + p] = 0;
+        }
+      }
+      Stone::White => {
+        if is_ko {
+          features[Self::WHITE_KO_PLANE + p] = 1;
+        } else {
+          features[Self::WHITE_KO_PLANE + p] = 0;
+        }
+      }
+      _ => {}
+    }
+  }
+
+  fn update_points_history(features: &mut [u8], position: &TxnPosition) {
+    for p in (0 .. Board::SIZE) {
+      match position.stones[p] {
+        Stone::Black => {
+          let t = (position.epoch - position.stone_epochs[p]) as f32;
+          assert!(t >= 0.0);
+          features[Self::BLACK_HIST_PLANE + p] = ((-0.1 * t).exp() * 255.0).round() as u8;
+        }
+        Stone::White => {
+          let t = (position.epoch - position.stone_epochs[p]) as f32;
+          assert!(t >= 0.0);
+          features[Self::WHITE_HIST_PLANE + p] = ((-0.1 * t).exp() * 255.0).round() as u8;
+        }
+        _ => {}
+      }
+    }
+  }
+
+  fn update_points_rank(features: &mut [u8], position: &TxnPosition) {
+    match position.ranks[0] {
+      PlayerRank::Kyu(_) | PlayerRank::Dan(1) => {
+        for p in (0 .. Board::SIZE) {
+          features[Self::BLACK_RANK_1_PLANE + p] = 1;
+        }
+      }
+      PlayerRank::Dan(dan) => {
+        assert!(dan >= 2 && dan <= 9);
+        match dan {
+          2 => {
+            for p in (0 .. Board::SIZE) {
+              features[Self::BLACK_RANK_2_PLANE + p] = 1;
+            }
+          }
+          3 => {
+            for p in (0 .. Board::SIZE) {
+              features[Self::BLACK_RANK_3_PLANE + p] = 1;
+            }
+          }
+          4 => {
+            for p in (0 .. Board::SIZE) {
+              features[Self::BLACK_RANK_4_PLANE + p] = 1;
+            }
+          }
+          5 => {
+            for p in (0 .. Board::SIZE) {
+              features[Self::BLACK_RANK_5_PLANE + p] = 1;
+            }
+          }
+          6 => {
+            for p in (0 .. Board::SIZE) {
+              features[Self::BLACK_RANK_6_PLANE + p] = 1;
+            }
+          }
+          7 => {
+            for p in (0 .. Board::SIZE) {
+              features[Self::BLACK_RANK_7_PLANE + p] = 1;
+            }
+          }
+          8 => {
+            for p in (0 .. Board::SIZE) {
+              features[Self::BLACK_RANK_8_PLANE + p] = 1;
+            }
+          }
+          9 => {
+            for p in (0 .. Board::SIZE) {
+              features[Self::BLACK_RANK_9_PLANE + p] = 1;
+            }
+          }
+          _ => unreachable!(),
+        }
+      }
+    }
+    match position.ranks[1] {
+      PlayerRank::Kyu(_) | PlayerRank::Dan(1) => {
+        for p in (0 .. Board::SIZE) {
+          features[Self::WHITE_RANK_1_PLANE + p] = 1;
+        }
+      }
+      PlayerRank::Dan(dan) => {
+        assert!(dan >= 2 && dan <= 9);
+        match dan {
+          2 => {
+            for p in (0 .. Board::SIZE) {
+              features[Self::WHITE_RANK_2_PLANE + p] = 1;
+            }
+          }
+          3 => {
+            for p in (0 .. Board::SIZE) {
+              features[Self::WHITE_RANK_3_PLANE + p] = 1;
+            }
+          }
+          4 => {
+            for p in (0 .. Board::SIZE) {
+              features[Self::WHITE_RANK_4_PLANE + p] = 1;
+            }
+          }
+          5 => {
+            for p in (0 .. Board::SIZE) {
+              features[Self::WHITE_RANK_5_PLANE + p] = 1;
+            }
+          }
+          6 => {
+            for p in (0 .. Board::SIZE) {
+              features[Self::WHITE_RANK_6_PLANE + p] = 1;
+            }
+          }
+          7 => {
+            for p in (0 .. Board::SIZE) {
+              features[Self::WHITE_RANK_7_PLANE + p] = 1;
+            }
+          }
+          8 => {
+            for p in (0 .. Board::SIZE) {
+              features[Self::WHITE_RANK_8_PLANE + p] = 1;
+            }
+          }
+          9 => {
+            for p in (0 .. Board::SIZE) {
+              features[Self::WHITE_RANK_9_PLANE + p] = 1;
+            }
+          }
+          _ => unreachable!(),
+        }
+      }
+    }
+  }
 }
 
 impl TxnStateData for TxnStateExtLibFeatsData {
@@ -594,6 +742,8 @@ impl TxnStateData for TxnStateExtLibFeatsData {
       // repr.
       let &mut TxnStateExtLibFeatsData{ref mut features, ref mut tmp_mark, .. } = self;
       let mut features = &mut features[next_start .. next_end];
+
+      // Update stone features.
       if let Some((stone, point)) = position.last_placed {
         let p = point.idx();
         match stone {
@@ -614,37 +764,51 @@ impl TxnStateData for TxnStateExtLibFeatsData {
         features[Self::WHITE_PLANE + p] = 0;
       }
 
-      // XXX(20151123): Iterate over placed, adjacent, ko, captured stones, and
-      // pseudolibs; see TxnStateLegalityData.
+      // XXX(20151123): Update liberty features by iterating over placed,
+      // adjacent, ko, captured stones, and pseudolibs; see TxnStateLegalityData.
       if let Some((_, place_point)) = position.last_placed {
-        Self::update_point(tmp_mark, features, position, chains, place_point);
+        Self::update_point_libs(tmp_mark, features, position, chains, place_point);
         for_each_adjacent(place_point, |adj_point| {
-          Self::update_point(tmp_mark, features, position, chains, adj_point);
+          Self::update_point_libs(tmp_mark, features, position, chains, adj_point);
         });
       }
       if let Some((_, ko_point)) = position.ko {
-        Self::update_point(tmp_mark, features, position, chains, ko_point);
+        Self::update_point_libs(tmp_mark, features, position, chains, ko_point);
       }
       if let Some((_, prev_ko_point)) = position.prev_ko {
-        Self::update_point(tmp_mark, features, position, chains, prev_ko_point);
+        Self::update_point_libs(tmp_mark, features, position, chains, prev_ko_point);
       }
       for &kill_point in position.last_killed[0].iter().chain(position.last_killed[1].iter()) {
-        Self::update_point(tmp_mark, features, position, chains, kill_point);
+        Self::update_point_libs(tmp_mark, features, position, chains, kill_point);
       }
       for &head in chains.last_mut_heads.iter() {
         let mut is_valid_head = false;
         if let Some(chain) = chains.get_chain(head) {
           is_valid_head = true;
           /*for &lib in chain.ps_libs.iter() {
-            Self::update_point(tmp_mark, features, position, chains, lib);
+            Self::update_point_libs(tmp_mark, features, position, chains, lib);
           }*/
         }
         if is_valid_head {
           chains.iter_chain(head, |ch_pt| {
-            Self::update_point(tmp_mark, features, position, chains, ch_pt);
+            Self::update_point_libs(tmp_mark, features, position, chains, ch_pt);
           });
         }
       }
+
+      // Update the ko features.
+      if let Some((prev_ko_turn, prev_ko_point)) = position.prev_ko {
+        Self::update_point_ko(features, position, prev_ko_turn, prev_ko_point, false);
+      }
+      if let Some((ko_turn, ko_point)) = position.ko {
+        Self::update_point_ko(features, position, ko_turn, ko_point, true);
+      }
+
+      // Update the quantized history features.
+      Self::update_points_history(features, position);
+
+      // Update the player rank features.
+      Self::update_points_rank(features, position);
     }
   }
 }

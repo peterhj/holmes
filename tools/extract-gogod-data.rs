@@ -7,7 +7,7 @@ extern crate rustc_serialize;
 //use holmes::fastboard::{Action};
 //use holmes::game::{GameHistory};
 //use holmes::sgf::{Sgf, Property, RootProperty, GameInfoProperty, parse_raw_sgf};
-use holmes::board::{RuleSet, Coord, Stone, Point, Action};
+use holmes::board::{RuleSet, Coord, PlayerRank, Stone, Point, Action};
 use holmes::sgf::{Sgf, parse_raw_sgf};
 use holmes::txnstate::{TxnState};
 use holmes::txnstate::features::{
@@ -111,7 +111,11 @@ fn main() {
 
     let mut history = vec![];
     //let mut state = TxnState::new(RuleSet::KgsJapanese.rules(), TxnStateFeaturesData::new());
-    let mut state = TxnState::new(RuleSet::KgsJapanese.rules(), TxnStateLibFeaturesData::new());
+    let mut state = TxnState::new(
+        [PlayerRank::Dan(9), PlayerRank::Dan(9)],
+        RuleSet::KgsJapanese.rules(),
+        TxnStateLibFeaturesData::new(),
+    );
     state.reset();
     for &(ref player, ref mov) in sgf.moves.iter() {
       let turn = match player as &str {

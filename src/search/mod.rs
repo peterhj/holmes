@@ -1,5 +1,5 @@
 use array_util::{array_argmax};
-use board::{RuleSet, Board, Stone, Point, Action};
+use board::{Board, RuleSet, PlayerRank, Stone, Point, Action};
 //use features::{TxnStateFeaturesData};
 use hyper::{PWIDE, PWIDE_MU};
 //use policy::{PriorPolicy, SearchPolicy, RolloutPolicy};
@@ -86,7 +86,11 @@ impl Trajectory {
       /*backup_triples: vec![],
       leaf_node:      None,*/
       rollout:    false,
-      sim_state:  TxnState::new(RuleSet::KgsJapanese.rules(), TxnStateLibFeaturesData::new()),
+      sim_state:  TxnState::new(
+          [PlayerRank::Dan(9), PlayerRank::Dan(9)],
+          RuleSet::KgsJapanese.rules(),
+          TxnStateLibFeaturesData::new(),
+      ),
       sim_pairs:  vec![],
       raw_score:  None,
       adj_score:  None,

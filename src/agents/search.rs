@@ -1,7 +1,11 @@
 use agents::{Agent};
-use board::{Board, RuleSet, Stone, Point, Action};
+use board::{Board, RuleSet, PlayerRank, Stone, Point, Action};
 use search::{Tree, Trajectory, Search, SearchResult};
-use search::policies::convnet::{ConvnetPriorPolicy, BatchConvnetRolloutPolicy};
+use search::policies::convnet::{
+  ConvnetPriorPolicy,
+  BatchConvnetRolloutPolicy,
+  ParallelBatchConvnetRolloutPolicy,
+};
 use search::policies::quasiuniform::{QuasiUniformRolloutPolicy};
 use search::policies::thompson_rave::{ThompsonRaveTreePolicy};
 use search::policies::uct_rave::{UctRaveTreePolicy};
@@ -25,7 +29,8 @@ pub struct SearchAgent {
   //tree_policy:  UctRaveTreePolicy,
   tree_policy:  ThompsonRaveTreePolicy,
   //roll_policy:  QuasiUniformRolloutPolicy,
-  roll_policy:  BatchConvnetRolloutPolicy,
+  //roll_policy:  BatchConvnetRolloutPolicy,
+  roll_policy:  ParallelBatchConvnetRolloutPolicy,
 }
 
 impl SearchAgent {
@@ -34,14 +39,19 @@ impl SearchAgent {
     let mut prior_policy = ConvnetPriorPolicy::new();
     //let mut tree_policy = UctRaveTreePolicy::new();
     let mut tree_policy = ThompsonRaveTreePolicy::new();
-    //let mut roll_policy = QuasiUniformRolloutPolicy;
     let batch_size = 256;
-    let mut roll_policy = BatchConvnetRolloutPolicy::new(batch_size);
+    //let mut roll_policy = QuasiUniformRolloutPolicy;
+    //let mut roll_policy = BatchConvnetRolloutPolicy::new(batch_size);
+    let mut roll_policy = ParallelBatchConvnetRolloutPolicy::new(batch_size);
     SearchAgent{
       komi:     0.0,
       player:   None,
       history:  vec![],
-      state:    TxnState::new(RuleSet::KgsJapanese.rules(), TxnStateNodeData::new()),
+      state:    TxnState::new(
+          [PlayerRank::Dan(9), PlayerRank::Dan(9)],
+          RuleSet::KgsJapanese.rules(),
+          TxnStateNodeData::new(),
+      ),
       result:   None,
       //ctx:      ctx,
       prior_policy: prior_policy,

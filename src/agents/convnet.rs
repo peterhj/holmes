@@ -1,5 +1,5 @@
 use agents::{Agent};
-use board::{Board, RuleSet, Stone, Point, Action};
+use board::{Board, RuleSet, PlayerRank, Stone, Point, Action};
 use convnet::arch::{
   build_action_3layer_arch,
   build_action_6layer_arch,
@@ -43,7 +43,11 @@ impl ConvnetAgent {
       komi:     0.0,
       player:   None,
       history:  vec![],
-      state:    TxnState::new(RuleSet::KgsJapanese.rules(), TxnStateLibFeaturesData::new()),
+      state:    TxnState::new(
+          [PlayerRank::Dan(9), PlayerRank::Dan(9)],
+          RuleSet::KgsJapanese.rules(),
+          TxnStateLibFeaturesData::new(),
+      ),
       ctx:      ctx,
       arch:     arch,
     }

@@ -1,4 +1,4 @@
-use board::{Board, Rules, RuleSet, Coord, Stone, Point, Action};
+use board::{Board, Rules, RuleSet, Coord, PlayerRank, Stone, Point, Action};
 use gtp_board::{dump_xcoord};
 use pattern::{Pattern3x3};
 
@@ -216,9 +216,13 @@ impl TxnStateData for () {
 
 #[derive(Clone, Debug)]
 pub struct TxnPosition {
+  pub ranks:    [PlayerRank; 2],
+
   turn:         Stone,
+  epoch:        i16,
   num_stones:   [usize; 2],
   stones:       Vec<Stone>,
+  stone_epochs: Vec<i16>,
 
   // State that depends on the previously placed point.
   // FIXME(20151120)
@@ -771,8 +775,9 @@ impl TxnState<()> {
 }
 
 impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
-  pub fn new(rules: Rules, data: Data) -> TxnState<Data> {
-    let mut stones: Vec<Stone> = repeat(Stone::Empty).take(Board::SIZE).collect();
+  pub fn new(ranks: [PlayerRank; 2], rules: Rules, data: Data) -> TxnState<Data> {
+    let stones: Vec<Stone> = repeat(Stone::Empty).take(Board::SIZE).collect();
+    let stone_epochs: Vec<i16> = repeat(0).take(Board::SIZE).collect();
     TxnState{
       rules: rules,
       in_soft_txn: false,
@@ -782,9 +787,12 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
       passed: [false, false],
       num_captures: [0, 0],
       position: TxnPosition{
+        ranks:        ranks,
         turn:         Stone::Black,
+        epoch:        0,
         num_stones:   [0, 0],
         stones:       stones,
+        stone_epochs: stone_epochs,
         prev_play:    None,
         ko:           None,
         prev_ko:      None,
@@ -817,6 +825,33 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
     }
   }
 
+  pub fn reset(&mut self) {
+    // TODO(20151105)
+    self.in_soft_txn = false;
+    self.in_txn = false;
+    self.txn_mut = false;
+    self.resigned = None;
+    self.passed[0] = false;
+    self.passed[1] = false;
+    self.num_captures[0] = 0;
+    self.num_captures[1] = 0;
+    self.position.turn = Stone::Black;
+    self.position.epoch = 0;
+    self.position.num_stones[0] = 0;
+    self.position.num_stones[1] = 0;
+    for p in (0 .. Board::SIZE) {
+      self.position.stones[p] = Stone::Empty;
+      self.position.stone_epochs[p] = 0;
+    }
+    self.position.prev_play = None;
+    self.position.ko = None;
+    self.position.prev_ko = None;
+    self.position.prev_self_atari = false;
+    self.position.prev_oppo_atari = false;
+    self.chains.reset();
+    self.data.reset();
+  }
+
   pub fn replace_clone_from<OtherData>(&mut self, other: &TxnState<OtherData>, data: Data) where OtherData: TxnStateData + Clone {
     assert!(!self.in_txn);
     assert!(!other.in_txn);
@@ -831,31 +866,6 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
     self.proposal     = other.proposal.clone();
     self.chains       = other.chains.clone();
     self.data         = data;
-  }
-
-  pub fn reset(&mut self) {
-    // TODO(20151105)
-    self.in_soft_txn = false;
-    self.in_txn = false;
-    self.txn_mut = false;
-    self.resigned = None;
-    self.passed[0] = false;
-    self.passed[1] = false;
-    self.num_captures[0] = 0;
-    self.num_captures[1] = 0;
-    self.position.turn = Stone::Black;
-    self.position.num_stones[0] = 0;
-    self.position.num_stones[1] = 0;
-    for p in (0 .. Board::SIZE) {
-      self.position.stones[p] = Stone::Empty;
-    }
-    self.position.prev_play = None;
-    self.position.ko = None;
-    self.position.prev_ko = None;
-    self.position.prev_self_atari = false;
-    self.position.prev_oppo_atari = false;
-    self.chains.reset();
-    self.data.reset();
   }
 
   pub fn shrink_clone(&self) -> TxnState<()> {
@@ -1323,6 +1333,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
   pub fn commit(&mut self) {
     // Roll forward the current turn.
     self.position.turn = self.proposal.next_turn;
+    self.position.epoch += 1;
 
     // Roll forward information about this turn (now the previous turn).
     self.position.prev_play = match self.position.last_move {
@@ -1340,6 +1351,10 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
       self.position.prev_oppo_atari = false;
     } else {
       assert!(self.in_txn);
+
+      if let Some((_, update_point)) = self.position.prev_play {
+        self.position.stone_epochs[update_point.idx()] = self.position.epoch - 1;
+      }
 
       // Commit more stateful changes to the position.
       if self.position.last_atari[update_turn.offset()].len() > 0 {
