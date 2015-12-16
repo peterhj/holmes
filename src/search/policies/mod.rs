@@ -1,6 +1,6 @@
 use board::{Stone, Point};
 use random::{XorShift128PlusRng};
-use search::{Walk, Trajectory, Node};
+use search::tree::{Walk, Trajectory, Node};
 use txnstate::{TxnState};
 use txnstate::extras::{TxnStateNodeData};
 use txnstate::features::{TxnStateFeaturesData};

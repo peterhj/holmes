@@ -1,6 +1,6 @@
 use board::{Stone, Point};
 use random::{XorShift128PlusRng, choose_without_replace};
-use search::{Walk, Trajectory};
+use search::tree::{Walk, Trajectory};
 use search::policies::{RolloutPolicy};
 use txnstate::{check_good_move_fast};
 

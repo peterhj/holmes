@@ -6,7 +6,7 @@ use hyper::{
   RAVE_EQUIV,
   PBIAS_EQUIV,
 };
-use search::{Node};
+use search::tree::{Node};
 use search::policies::{TreePolicy};
 
 pub struct UctRaveTreePolicy {

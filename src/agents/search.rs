@@ -1,6 +1,7 @@
 use agents::{Agent};
 use board::{Board, RuleSet, PlayerRank, Stone, Point, Action};
-use search::{Tree, Trajectory, Search, SearchResult};
+use search::{SearchResult};
+use search::tree::{Tree, Trajectory, Search};
 use search::policies::convnet::{
   ConvnetPriorPolicy,
   BatchConvnetRolloutPolicy,

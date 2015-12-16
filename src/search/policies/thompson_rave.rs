@@ -5,7 +5,7 @@ use hyper::{
   RAVE_EQUIV,
   PRIOR_EQUIV,
 };
-use search::{Node};
+use search::tree::{Node};
 use search::policies::{TreePolicy};
 
 use rand::{Rng};

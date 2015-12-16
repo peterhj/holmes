@@ -8,30 +8,32 @@ use gtp_board::{Player, Coord, Vertex, TimeSystem, MoveResult, UndoResult, dump_
 
 use std::str::{from_utf8};
 
-pub struct Client {
+pub struct Client<A> where A: Agent {
   host:             String,
   port:             u16,
   should_shutdown:  bool,
 
   pre_game: PreGame,
   //agent:    ConvnetAgent,
-  agent:    SearchAgent,
+  //agent:    SearchAgent,
+  agent:    A,
 }
 
-impl Client {
-  pub fn new(host: String, port: u16, _player: Option<Player>) -> Client {
+impl<A> Client<A> where A: Agent {
+  pub fn new(agent: A, host: String, port: u16, _player: Option<Player>) -> Client<A> {
     Client{
       host: host,
       port: port,
       should_shutdown: false,
       pre_game: Default::default(),
       //agent: ConvnetAgent::new(),
-      agent: SearchAgent::new(),
+      //agent: SearchAgent::new(),
+      agent: agent,
     }
   }
 }
 
-impl GtpClient for Client {
+impl<A> GtpClient for Client<A> where A: Agent {
   fn get_address(&self) -> (String, u16) {
     (self.host.clone(), self.port)
   }

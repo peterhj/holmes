@@ -20,11 +20,13 @@ pub struct GtpRefereedController {
   black_listener:   TcpListener,
   white_listener:   TcpListener,
   referee_listener: TcpListener,
+  komi:             f32,
+  allow_pass:       bool,
   id: GtpId,
 }
 
 impl GtpRefereedController {
-  pub fn new(b_port: u16, w_port: u16, r_port: u16) -> GtpRefereedController {
+  pub fn new(b_port: u16, w_port: u16, r_port: u16, komi: f32, allow_pass: bool) -> GtpRefereedController {
     //sleep(Duration::seconds(3));
     let black_listener = TcpListener::bind(&format!("127.0.0.1:{}", b_port) as &str)
       .ok().expect("FATAL: server: failed to bind address (black)");
@@ -36,6 +38,8 @@ impl GtpRefereedController {
       black_listener:   black_listener,
       white_listener:   white_listener,
       referee_listener: referee_listener,
+      komi:             komi,
+      allow_pass:       allow_pass,
       id: GtpId::new(),
     }
   }
@@ -90,9 +94,7 @@ impl GtpRefereedController {
     // Set the komi level.
     let cmd_str = create_command_string(self.id.increment(), &[
       StringEntity(b"komi".to_vec()),
-      // FIXME: fixed sample komi for now.
-      //FloatEntity(6.5),
-      FloatEntity(7.5),
+      FloatEntity(self.komi),
     ]);
     ctl_to_client_tx.send(GtpMessage::Command(cmd_str))
       .unwrap();
@@ -116,10 +118,10 @@ impl GtpRefereedController {
       // FIXME(20151020): "blitz" settings for fast testing.
       // Main time in seconds.
       //IntEntity(300),
-      IntEntity(15),
+      IntEntity(5400),
       // Byo-yomi time in seconds.
       //IntEntity(40),
-      IntEntity(15),
+      IntEntity(30),
       // Byo-yomi stones (Canadian) or periods (Japanese).
       IntEntity(1), // 5
     ]);
@@ -297,20 +299,24 @@ impl GtpRefereedController {
             if Vertex::Resign != referee_move.vertex {
               self.undo_client(&referee_to_ctl_rx, &ctl_to_referee_tx);
             }
-            let current_move = match referee_move.vertex {
-              Vertex::Pass => {
-                self.update_client(referee_move, &black_to_ctl_rx, &ctl_to_black_tx);
-                referee_move
+            let current_move = if self.allow_pass {
+              match referee_move.vertex {
+                Vertex::Pass => {
+                  self.update_client(referee_move, &black_to_ctl_rx, &ctl_to_black_tx);
+                  referee_move
+                }
+                Vertex::Resign => {
+                  referee_move
+                }
+                _ => {
+                  self.play_client(Player::Black, &black_to_ctl_rx, &ctl_to_black_tx)
+                }
               }
-              Vertex::Resign => {
-                referee_move
-              }
-              _ => {
-                self.play_client(Player::Black, &black_to_ctl_rx, &ctl_to_black_tx)
-              }
+            } else {
+              self.play_client(Player::Black, &black_to_ctl_rx, &ctl_to_black_tx)
             };
             let result = self.update_client(current_move, &white_to_ctl_rx, &ctl_to_white_tx);
-            if Vertex::Resign != referee_move.vertex {
+            if Vertex::Resign != current_move.vertex {
               self.update_client(current_move, &referee_to_ctl_rx, &ctl_to_referee_tx);
             }
             self.show_board(&referee_to_ctl_rx, &ctl_to_referee_tx);
@@ -325,20 +331,24 @@ impl GtpRefereedController {
             if Vertex::Resign != referee_move.vertex {
               self.undo_client(&referee_to_ctl_rx, &ctl_to_referee_tx);
             }
-            let current_move = match referee_move.vertex {
-              Vertex::Pass => {
-                self.update_client(referee_move, &white_to_ctl_rx, &ctl_to_white_tx);
-                referee_move
+            let current_move = if self.allow_pass {
+              match referee_move.vertex {
+                Vertex::Pass => {
+                  self.update_client(referee_move, &white_to_ctl_rx, &ctl_to_white_tx);
+                  referee_move
+                }
+                Vertex::Resign => {
+                  referee_move
+                }
+                _ => {
+                  self.play_client(Player::White, &white_to_ctl_rx, &ctl_to_white_tx)
+                }
               }
-              Vertex::Resign => {
-                referee_move
-              }
-              _ => {
-                self.play_client(Player::White, &white_to_ctl_rx, &ctl_to_white_tx)
-              }
+            } else {
+              self.play_client(Player::White, &white_to_ctl_rx, &ctl_to_white_tx)
             };
             let result = self.update_client(current_move, &black_to_ctl_rx, &ctl_to_black_tx);
-            if Vertex::Resign != referee_move.vertex {
+            if Vertex::Resign != current_move.vertex {
               self.update_client(current_move, &referee_to_ctl_rx, &ctl_to_referee_tx);
             }
             self.show_board(&referee_to_ctl_rx, &ctl_to_referee_tx);

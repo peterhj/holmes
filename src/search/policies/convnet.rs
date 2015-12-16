@@ -12,7 +12,7 @@ use convnet::arch::{
 };
 use discrete::{DiscreteFilter};
 use discrete::bfilter::{BFilter};
-use search::{Walk, Trajectory};
+use search::tree::{Walk, Trajectory};
 use search::policies::{PriorPolicy, RolloutPolicy};
 use txnstate::{
   TxnState,

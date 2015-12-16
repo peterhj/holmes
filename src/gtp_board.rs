@@ -67,6 +67,28 @@ impl Coord {
     Coord{x: x, y: y}
   }
 
+  pub fn parse_code_str(code_str: &str) -> Option<Coord> {
+    let code = code_str.as_bytes();
+    if code.len() < 1 {
+      return None;
+    }
+    let raw_x = code[0];
+    let x = match raw_x {
+      b'A' ... b'H' => raw_x - b'A',
+      b'J' ... b'T' => raw_x - b'A' - 1,
+      _ => return None,
+    };
+    let raw_y: u8 = match from_utf8(&code[1 ..]) {
+      Ok(result) => match result.parse() {
+        Ok(result) => result,
+        Err(_) => return None,
+      },
+      Err(_) => return None,
+    };
+    let y = raw_y - 1;
+    Some(Coord{x: x, y: y})
+  }
+
   pub fn from_code_str(code_str: &str) -> Coord {
     Coord::from_code(code_str.as_bytes())
   }

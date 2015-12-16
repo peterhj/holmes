@@ -8,6 +8,7 @@
 extern crate array;
 extern crate async_cuda;
 extern crate cuda;
+extern crate gsl;
 extern crate episodb;
 extern crate rembrandt;
 //extern crate statistics_avx2;
@@ -18,6 +19,7 @@ extern crate bufstream;
 extern crate byteorder;
 extern crate rand;
 extern crate rustc_serialize;
+extern crate threadpool;
 extern crate time;
 extern crate toml;
 extern crate vec_map;

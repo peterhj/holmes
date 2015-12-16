@@ -18,6 +18,10 @@ name = "gtp_ref_ctrl"
 path = "tools/gtp_ref_ctrl.rs"
 
 [[bin]]
+name = "gtp_ref_ctrl_nopass"
+path = "tools/gtp_ref_ctrl_nopass.rs"
+
+[[bin]]
 name = "gen-pattern-maps"
 path = "tools/gen-pattern-maps.rs"
 
@@ -150,6 +154,10 @@ name = "train-move"
 path = "tools/train-move.rs"
 
 [[bin]]
+name = "manual-gtp"
+path = "tools/manual-gtp.rs"
+
+[[bin]]
 name = "holmes-gtp"
 path = "tools/holmes-gtp.rs"
 
@@ -190,6 +198,9 @@ path = "../rembrandt-project/libcuda"
 
 [dependencies.episodb]
 path = "../episodb"
+
+[dependencies.gsl]
+path = "../gsl"
 
 [dependencies.rembrandt]
 #path = "../../rembrandt-project/rembrandt_new"

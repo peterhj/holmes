@@ -10,5 +10,5 @@ fn main() {
   let w_port: u16 = args[2].parse().unwrap();
   let r_port: u16 = args[3].parse().unwrap();
   let komi: f32 = args[4].parse().unwrap();
-  GtpRefereedController::new(b_port, w_port, r_port, komi, true).runloop();
+  GtpRefereedController::new(b_port, w_port, r_port, komi, false).runloop();
 }

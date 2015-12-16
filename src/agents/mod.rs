@@ -1,6 +1,7 @@
 use board::{Coord, Stone, Point, Action};
 
 pub mod convnet;
+pub mod manual;
 pub mod search;
 
 pub trait Agent {

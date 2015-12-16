@@ -1,6 +1,8 @@
 extern crate getopts;
 extern crate holmes;
 
+use holmes::agents::convnet::{ConvnetAgent};
+use holmes::agents::search::{SearchAgent};
 use holmes::gtp::{GtpEngine};
 use holmes::gtp_board::{Player};
 use holmes::gtp_client::{Client};
@@ -31,6 +33,8 @@ fn main() {
     "white" => Some(Player::White),
     _ => panic!("FATAL: holmes: invalid player: {}", player_str),
   };*/
-  let client = Client::new(host, port, None);
+  //let agent = ConvnetAgent::new();
+  let agent = SearchAgent::new();
+  let client = Client::new(agent, host, port, None);
   GtpEngine::new(client).runloop();
 }
