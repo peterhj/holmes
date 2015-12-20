@@ -86,6 +86,10 @@ name = "train-12layer-19x19x16"
 path = "tools/train-12layer-19x19x16.rs"
 
 [[bin]]
+name = "train-12layer384-19x19x16"
+path = "tools/train-12layer384-19x19x16.rs"
+
+[[bin]]
 name = "train-action3-narrow-3layer-19x19x16"
 path = "tools/train-action3-narrow-3layer-19x19x16.rs"
 
@@ -96,6 +100,10 @@ path = "tools/train-action3-3layer-19x19x16.rs"
 [[bin]]
 name = "train-action3-12layer-19x19x16"
 path = "tools/train-action3-12layer-19x19x16.rs"
+
+[[bin]]
+name = "train-action3-12layer-19x19x30"
+path = "tools/train-action3-12layer-19x19x30.rs"
 
 [[bin]]
 name = "bench-discrete"
@@ -181,6 +189,9 @@ vec_map = "*"
 #path = "../../rembrandt-project/libarray"
 path = "../rembrandt-project/libarray"
 
+[dependencies.array_cuda]
+path = "../rembrandt-project/libarray_cuda"
+
 [dependencies.arraydb]
 #path = "../../rembrandt-project/arraydb"
 path = "../rembrandt-project/arraydb"
@@ -200,11 +211,11 @@ path = "../rembrandt-project/libcuda"
 path = "../episodb"
 
 [dependencies.gsl]
-path = "../gsl"
+path = "../libgsl"
 
 [dependencies.rembrandt]
 #path = "../../rembrandt-project/rembrandt_new"
 path = "../rembrandt-project/rembrandt_new"
 
-[dependencies.statistics_avx2]
-path = "libstatistics_avx2"
+#[dependencies.statistics_avx2]
+#path = "libstatistics_avx2"

@@ -17,6 +17,9 @@ impl SearchPolicyWorkerBuilder for ConvnetPolicyWorkerBuilder {
 
 pub struct ConvnetPolicyWorker;
 
+impl ConvnetPolicyWorker {
+}
+
 impl SearchPolicyWorker for ConvnetPolicyWorker {
   fn prior_policy(&mut self) -> &mut PriorPolicy {
     unimplemented!();
@@ -30,3 +33,7 @@ impl SearchPolicyWorker for ConvnetPolicyWorker {
     unimplemented!();
   }
 }
+
+pub struct ConvnetPriorPolicy;
+
+pub struct ConvnetRolloutPolicy;

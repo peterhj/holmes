@@ -6,6 +6,7 @@
 #![feature(wrapping)]
 
 extern crate array;
+extern crate array_cuda;
 extern crate async_cuda;
 extern crate cuda;
 extern crate gsl;
@@ -17,6 +18,7 @@ extern crate bit_set;
 extern crate bit_vec;
 extern crate bufstream;
 extern crate byteorder;
+extern crate libc;
 extern crate rand;
 extern crate rustc_serialize;
 extern crate threadpool;
@@ -39,6 +41,7 @@ pub mod gtp_client;
 pub mod gtp_ctrl;
 pub mod hyper;
 pub mod pattern;
+pub mod pg;
 pub mod random;
 pub mod search;
 pub mod sgf;

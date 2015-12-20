@@ -135,15 +135,15 @@ fn main() {
           "6k" | "7k" | "8k" | "9k" | "10k" |
           "11k" | "12k" | "13k" | "14k" | "15k" |
           "16k" | "17k" | "18k" | "19k" | "20k" => PlayerRank::Dan(1),
-          "1d" => PlayerRank::Dan(1),
-          "2d" => PlayerRank::Dan(2),
-          "3d" => PlayerRank::Dan(3),
-          "4d" => PlayerRank::Dan(4),
-          "5d" => PlayerRank::Dan(5),
-          "6d" => PlayerRank::Dan(6),
-          "7d" => PlayerRank::Dan(7),
-          "8d" => PlayerRank::Dan(8),
-          "9d" => PlayerRank::Dan(9),
+          "1d" | "1p" => PlayerRank::Dan(1),
+          "2d" | "2p" => PlayerRank::Dan(2),
+          "3d" | "3p" => PlayerRank::Dan(3),
+          "4d" | "4p" => PlayerRank::Dan(4),
+          "5d" | "5p" => PlayerRank::Dan(5),
+          "6d" | "6p" => PlayerRank::Dan(6),
+          "7d" | "7p" => PlayerRank::Dan(7),
+          "8d" | "8p" => PlayerRank::Dan(8),
+          "9d" | "9p" => PlayerRank::Dan(9),
           s => {
             panic!("sgf_path: {:?}, unimplemented player rank: \"{}\"", sgf_path, s);
           }

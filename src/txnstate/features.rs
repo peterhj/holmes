@@ -510,7 +510,7 @@ impl TxnStateExtLibFeatsData {
     if stone != Stone::Empty {
       let bw_value: u8 = match stone {
         Stone::Black => 0,
-        Stone::White => 1,
+        Stone::White => 255,
         _ => unreachable!(),
       };
       let head = chains.find_chain(point);
@@ -519,7 +519,7 @@ impl TxnStateExtLibFeatsData {
       match chain.approx_count_libs_up_to_3() {
         0 => { unreachable!(); }
         1 => {
-          features[Self::BLACK_ATARI_PLANE + p] = 1 - bw_value;
+          features[Self::BLACK_ATARI_PLANE + p] = 255 - bw_value;
           features[Self::BLACK_AIR_2_PLANE + p] = 0;
           features[Self::BLACK_AIR_3_PLANE + p] = 0;
           features[Self::WHITE_ATARI_PLANE + p] = bw_value;
@@ -528,7 +528,7 @@ impl TxnStateExtLibFeatsData {
         }
         2 => {
           features[Self::BLACK_ATARI_PLANE + p] = 0;
-          features[Self::BLACK_AIR_2_PLANE + p] = 1 - bw_value;
+          features[Self::BLACK_AIR_2_PLANE + p] = 255 - bw_value;
           features[Self::BLACK_AIR_3_PLANE + p] = 0;
           features[Self::WHITE_ATARI_PLANE + p] = 0;
           features[Self::WHITE_AIR_2_PLANE + p] = bw_value;
@@ -537,7 +537,7 @@ impl TxnStateExtLibFeatsData {
         3 => {
           features[Self::BLACK_ATARI_PLANE + p] = 0;
           features[Self::BLACK_AIR_2_PLANE + p] = 0;
-          features[Self::BLACK_AIR_3_PLANE + p] = 1 - bw_value;
+          features[Self::BLACK_AIR_3_PLANE + p] = 255 - bw_value;
           features[Self::WHITE_ATARI_PLANE + p] = 0;
           features[Self::WHITE_AIR_2_PLANE + p] = 0;
           features[Self::WHITE_AIR_3_PLANE + p] = bw_value;
@@ -560,14 +560,14 @@ impl TxnStateExtLibFeatsData {
     match ko_turn {
       Stone::Black => {
         if is_ko {
-          features[Self::BLACK_KO_PLANE + p] = 1;
+          features[Self::BLACK_KO_PLANE + p] = 255;
         } else {
           features[Self::BLACK_KO_PLANE + p] = 0;
         }
       }
       Stone::White => {
         if is_ko {
-          features[Self::WHITE_KO_PLANE + p] = 1;
+          features[Self::WHITE_KO_PLANE + p] = 255;
         } else {
           features[Self::WHITE_KO_PLANE + p] = 0;
         }
@@ -598,7 +598,7 @@ impl TxnStateExtLibFeatsData {
     match position.ranks[0] {
       PlayerRank::Kyu(_) | PlayerRank::Dan(1) => {
         for p in (0 .. Board::SIZE) {
-          features[Self::BLACK_RANK_1_PLANE + p] = 1;
+          features[Self::BLACK_RANK_1_PLANE + p] = 255;
         }
       }
       PlayerRank::Dan(dan) => {
@@ -606,42 +606,42 @@ impl TxnStateExtLibFeatsData {
         match dan {
           2 => {
             for p in (0 .. Board::SIZE) {
-              features[Self::BLACK_RANK_2_PLANE + p] = 1;
+              features[Self::BLACK_RANK_2_PLANE + p] = 255;
             }
           }
           3 => {
             for p in (0 .. Board::SIZE) {
-              features[Self::BLACK_RANK_3_PLANE + p] = 1;
+              features[Self::BLACK_RANK_3_PLANE + p] = 255;
             }
           }
           4 => {
             for p in (0 .. Board::SIZE) {
-              features[Self::BLACK_RANK_4_PLANE + p] = 1;
+              features[Self::BLACK_RANK_4_PLANE + p] = 255;
             }
           }
           5 => {
             for p in (0 .. Board::SIZE) {
-              features[Self::BLACK_RANK_5_PLANE + p] = 1;
+              features[Self::BLACK_RANK_5_PLANE + p] = 255;
             }
           }
           6 => {
             for p in (0 .. Board::SIZE) {
-              features[Self::BLACK_RANK_6_PLANE + p] = 1;
+              features[Self::BLACK_RANK_6_PLANE + p] = 255;
             }
           }
           7 => {
             for p in (0 .. Board::SIZE) {
-              features[Self::BLACK_RANK_7_PLANE + p] = 1;
+              features[Self::BLACK_RANK_7_PLANE + p] = 255;
             }
           }
           8 => {
             for p in (0 .. Board::SIZE) {
-              features[Self::BLACK_RANK_8_PLANE + p] = 1;
+              features[Self::BLACK_RANK_8_PLANE + p] = 255;
             }
           }
           9 => {
             for p in (0 .. Board::SIZE) {
-              features[Self::BLACK_RANK_9_PLANE + p] = 1;
+              features[Self::BLACK_RANK_9_PLANE + p] = 255;
             }
           }
           _ => unreachable!(),
@@ -651,7 +651,7 @@ impl TxnStateExtLibFeatsData {
     match position.ranks[1] {
       PlayerRank::Kyu(_) | PlayerRank::Dan(1) => {
         for p in (0 .. Board::SIZE) {
-          features[Self::WHITE_RANK_1_PLANE + p] = 1;
+          features[Self::WHITE_RANK_1_PLANE + p] = 255;
         }
       }
       PlayerRank::Dan(dan) => {
@@ -659,42 +659,42 @@ impl TxnStateExtLibFeatsData {
         match dan {
           2 => {
             for p in (0 .. Board::SIZE) {
-              features[Self::WHITE_RANK_2_PLANE + p] = 1;
+              features[Self::WHITE_RANK_2_PLANE + p] = 255;
             }
           }
           3 => {
             for p in (0 .. Board::SIZE) {
-              features[Self::WHITE_RANK_3_PLANE + p] = 1;
+              features[Self::WHITE_RANK_3_PLANE + p] = 255;
             }
           }
           4 => {
             for p in (0 .. Board::SIZE) {
-              features[Self::WHITE_RANK_4_PLANE + p] = 1;
+              features[Self::WHITE_RANK_4_PLANE + p] = 255;
             }
           }
           5 => {
             for p in (0 .. Board::SIZE) {
-              features[Self::WHITE_RANK_5_PLANE + p] = 1;
+              features[Self::WHITE_RANK_5_PLANE + p] = 255;
             }
           }
           6 => {
             for p in (0 .. Board::SIZE) {
-              features[Self::WHITE_RANK_6_PLANE + p] = 1;
+              features[Self::WHITE_RANK_6_PLANE + p] = 255;
             }
           }
           7 => {
             for p in (0 .. Board::SIZE) {
-              features[Self::WHITE_RANK_7_PLANE + p] = 1;
+              features[Self::WHITE_RANK_7_PLANE + p] = 255;
             }
           }
           8 => {
             for p in (0 .. Board::SIZE) {
-              features[Self::WHITE_RANK_8_PLANE + p] = 1;
+              features[Self::WHITE_RANK_8_PLANE + p] = 255;
             }
           }
           9 => {
             for p in (0 .. Board::SIZE) {
-              features[Self::WHITE_RANK_9_PLANE + p] = 1;
+              features[Self::WHITE_RANK_9_PLANE + p] = 255;
             }
           }
           _ => unreachable!(),
@@ -748,12 +748,12 @@ impl TxnStateData for TxnStateExtLibFeatsData {
         let p = point.idx();
         match stone {
           Stone::Black => {
-            features[Self::BLACK_PLANE + p] = 1;
+            features[Self::BLACK_PLANE + p] = 255;
             features[Self::WHITE_PLANE + p] = 0;
           }
           Stone::White => {
             features[Self::BLACK_PLANE + p] = 0;
-            features[Self::WHITE_PLANE + p] = 1;
+            features[Self::WHITE_PLANE + p] = 255;
           }
           Stone::Empty => { unreachable!(); }
         }

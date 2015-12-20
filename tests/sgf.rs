@@ -2,7 +2,7 @@ extern crate holmes;
 extern crate rusqlite;
 extern crate rustc_serialize;
 
-use holmes::board::{RuleSet, Board, Stone, Point, Action};
+use holmes::board::{RuleSet, Board, PlayerRank, Stone, Point, Action};
 use holmes::sgf::{Sgf};
 use holmes::txnstate::{TxnState, TxnResult};
 use holmes::txnstate::extras::{TxnStateAllData};
@@ -116,11 +116,15 @@ fn test_sgf_correctness() {
         _ => unimplemented!(),
       };
       assert_eq!(RuleSet::KgsJapanese, ruleset);
-      let rules = ruleset.rules();
+      //let rules = ruleset.rules();
       /*println!("DEBUG: sgf:");
       println!("{}", sgf_entry.sgf_body);*/
 
-      let mut state = TxnState::new(rules, TxnStateAllData::new());
+      let mut state = TxnState::new(
+          [PlayerRank::Dan(9), PlayerRank::Dan(9)],
+          ruleset.rules(),
+          TxnStateAllData::new(),
+      );
       state.reset();
       for (j, &(ref turn_code, ref move_code)) in sgf.moves.iter().enumerate() {
         let turn = Stone::from_code_str(&turn_code);
