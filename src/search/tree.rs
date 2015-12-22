@@ -88,6 +88,7 @@ impl Trajectory {
     self.sim_state.reset();
     self.sim_pairs.clear();
     self.raw_score = None;
+    self.adj_score = None;
     self.rave_mask[0].clear();
     self.rave_mask[1].clear();
   }
@@ -107,6 +108,7 @@ impl Trajectory {
     }
     self.sim_pairs.clear();
     self.raw_score = None;
+    self.adj_score = None;
     self.rave_mask[0].clear();
     self.rave_mask[1].clear();
   }

@@ -3,6 +3,7 @@ use search::parallel_policies::{
   SearchPolicyWorkerBuilder, SearchPolicyWorker,
   PriorPolicy, TreePolicy, RolloutPolicy,
 };
+use search::parallel_policies::thompson::{ThompsonTreePolicy};
 
 #[derive(Clone, Copy)]
 pub struct ConvnetPolicyWorkerBuilder;
@@ -15,9 +16,20 @@ impl SearchPolicyWorkerBuilder for ConvnetPolicyWorkerBuilder {
   }
 }
 
-pub struct ConvnetPolicyWorker;
+pub struct ConvnetPolicyWorker {
+  prior_policy:     ConvnetPriorPolicy,
+  tree_policy:      ThompsonTreePolicy,
+  rollout_policy:   ConvnetRolloutPolicy,
+}
 
 impl ConvnetPolicyWorker {
+  pub fn new() -> ConvnetPolicyWorker {
+    ConvnetPolicyWorker{
+      prior_policy:     ConvnetPriorPolicy,
+      tree_policy:      ThompsonTreePolicy,
+      rollout_policy:   ConvnetRolloutPolicy,
+    }
+  }
 }
 
 impl SearchPolicyWorker for ConvnetPolicyWorker {
@@ -26,6 +38,10 @@ impl SearchPolicyWorker for ConvnetPolicyWorker {
   }
 
   fn tree_policy(&mut self) -> &mut TreePolicy<R=XorShift128PlusRng> {
+    unimplemented!();
+  }
+
+  fn prior_and_tree_policies(&mut self) -> (&mut PriorPolicy, &mut TreePolicy<R=XorShift128PlusRng>) {
     unimplemented!();
   }
 

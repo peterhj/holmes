@@ -21,9 +21,9 @@ path = "tools/gtp_ref_ctrl.rs"
 name = "gtp_ref_ctrl_nopass"
 path = "tools/gtp_ref_ctrl_nopass.rs"
 
-[[bin]]
-name = "gen-pattern-maps"
-path = "tools/gen-pattern-maps.rs"
+#[[bin]]
+#name = "gen-pattern-maps"
+#path = "tools/gen-pattern-maps.rs"
 
 [[bin]]
 name = "prepare-position-testsuite-data"
@@ -90,6 +90,10 @@ name = "train-12layer384-19x19x16"
 path = "tools/train-12layer384-19x19x16.rs"
 
 [[bin]]
+name = "new-train-12layer384-19x19x16"
+path = "tools/new-train-12layer384-19x19x16.rs"
+
+[[bin]]
 name = "train-action3-narrow-3layer-19x19x16"
 path = "tools/train-action3-narrow-3layer-19x19x16.rs"
 
@@ -113,9 +117,9 @@ path = "tools/bench-discrete.rs"
 name = "bench-txnstate"
 path = "tools/bench-txnstate.rs"
 
-[[bin]]
-name = "test-book"
-path = "tools/test-book.rs"
+#[[bin]]
+#name = "test-book"
+#path = "tools/test-book.rs"
 
 [[bin]]
 name = "test-sgf"
@@ -129,9 +133,9 @@ path = "tools/test-sgf.rs"
 #name = "bench-tree"
 #path = "tools/bench-tree.rs"
 
-[[bin]]
-name = "bench-net"
-path = "tools/bench-net.rs"
+#[[bin]]
+#name = "bench-net"
+#path = "tools/bench-net.rs"
 
 [[bin]]
 name = "compare-arraydb"
@@ -145,21 +149,21 @@ path = "tools/filter-gogod-data.rs"
 name = "filter-kgs-data"
 path = "tools/filter-kgs-data.rs"
 
-[[bin]]
-name = "preproc-gogod-data"
-path = "tools/preproc-gogod-data.rs"
+#[[bin]]
+#name = "preproc-gogod-data"
+#path = "tools/preproc-gogod-data.rs"
 
-[[bin]]
-name = "train-simba-19x19x4"
-path = "tools/train-simba-19x19x4.rs"
+#[[bin]]
+#name = "train-simba-19x19x4"
+#path = "tools/train-simba-19x19x4.rs"
 
-[[bin]]
-name = "train-simba-19x19x10"
-path = "tools/train-simba-19x19x10.rs"
+#[[bin]]
+#name = "train-simba-19x19x10"
+#path = "tools/train-simba-19x19x10.rs"
 
-[[bin]]
-name = "train-move"
-path = "tools/train-move.rs"
+#[[bin]]
+#name = "train-move"
+#path = "tools/train-move.rs"
 
 [[bin]]
 name = "manual-gtp"
@@ -180,6 +184,7 @@ libc = "*"
 rand = "*"
 rusqlite = "=0.4.0"
 rustc-serialize = "*"
+scoped_threadpool = "*"
 threadpool = "*"
 time = "*"
 toml = "*"

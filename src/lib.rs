@@ -2,6 +2,7 @@
 #![feature(associated_type_defaults)]
 #![feature(clone_from_slice)]
 #![feature(drain)]
+#![feature(drop_in_place)] // XXX(20151222): used by `AtomicUniquePtr` for atomic tree node insertion.
 #![feature(slice_bytes)]
 #![feature(wrapping)]
 

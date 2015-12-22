@@ -3,7 +3,7 @@ use txnstate::{TxnState};
 use txnstate::features::{TxnStateLibFeaturesData};
 
 use array_cuda::device::{DeviceCtxRef};
-use rembrandt::arch_new::{ArchWorker, PipelineArchWorker};
+use rembrandt::arch_new::{AtomicData, ArchWorker, PipelineArchWorker};
 use rembrandt::layer_new::{Phase};
 
 pub struct Trace {
@@ -17,7 +17,7 @@ pub struct PolicyBalanceMachine {
   grad_minibatch_size:  usize,
   learning_rate:        f32,
 
-  arch:     PipelineArchWorker,
+  arch:     PipelineArchWorker<()>,
   trace:    Trace,
 
   target_value: f32,
