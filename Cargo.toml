@@ -215,6 +215,9 @@ path = "../rembrandt-project/libcuda"
 [dependencies.episodb]
 path = "../episodb"
 
+[dependencies.float]
+path = "../libfloat"
+
 [dependencies.gsl]
 path = "../libgsl"
 

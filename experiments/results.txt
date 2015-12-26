@@ -50,3 +50,7 @@
   - near the end of 10-th epoch (iteration 520000, interval 12085760/12103424):
     - KGS validation accuracy: 50.3%
   - trained with constant learning rate 0.05, no momentum, batch size 256
+
+no progressive widening:
+- batch size 256, 12 layer prior, 2 layer rollouts: about 60+3% accuracy (down
+  from 68+3%)

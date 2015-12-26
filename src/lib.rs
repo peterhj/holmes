@@ -2,7 +2,6 @@
 #![feature(associated_type_defaults)]
 #![feature(clone_from_slice)]
 #![feature(drain)]
-#![feature(drop_in_place)] // XXX(20151222): used by `AtomicUniquePtr` for atomic tree node insertion.
 #![feature(slice_bytes)]
 #![feature(wrapping)]
 
@@ -10,6 +9,7 @@ extern crate array;
 extern crate array_cuda;
 extern crate async_cuda;
 extern crate cuda;
+extern crate float;
 extern crate gsl;
 extern crate episodb;
 extern crate rembrandt;
@@ -33,6 +33,7 @@ pub mod board;
 pub mod book;
 pub mod contains;
 pub mod convnet;
+pub mod convnet_new;
 pub mod discrete;
 pub mod fastboard;
 pub mod game;

@@ -12,7 +12,7 @@ pub mod thompson;
 pub trait SearchPolicyWorkerBuilder: Send + Clone {
   type Worker: SearchPolicyWorker;
 
-  fn build_worker(&self) -> Self::Worker;
+  fn build_worker(&self, tid: usize, worker_batch_size: usize) -> Self::Worker;
 }
 
 pub trait SearchPolicyWorker {
@@ -23,15 +23,13 @@ pub trait SearchPolicyWorker {
 }
 
 pub trait PriorPolicy {
-  fn fill_prior_values(&mut self, state: &TxnState<TxnStateNodeData>, valid_moves: &[Point], prior_values: &mut Vec<f32>);
+  fn fill_prior_values(&mut self, state: &TxnState<TxnStateNodeData>, valid_moves: &[Point], prior_values: &mut Vec<(Point, f32)>);
 }
 
 pub trait TreePolicy {
   type R: Rng = XorShift128PlusRng;
 
-  fn init_node(&mut self, node: &mut Node, rng: &mut Self::R);
   fn execute_search(&mut self, node: &Node, rng: &mut Self::R) -> Option<(Point, usize)>;
-  fn backup_values(&mut self, node: &Node, rng: &mut Self::R);
 }
 
 pub trait RolloutPolicy {

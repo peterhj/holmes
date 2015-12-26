@@ -33,12 +33,12 @@ thread_local!(static HYPERPARAM_MAP: BTreeMap<String, toml::Value> = {
 thread_local!(pub static UCB_C:       f32   = load_hyperparam("ucb_c"));
 thread_local!(pub static PBIAS_C:     f32   = load_hyperparam("pbias_c"));
 thread_local!(pub static PBIAS_EQUIV: f32   = load_hyperparam("pbias_equiv"));
+
+thread_local!(pub static PRIOR_EQUIV: f32   = load_hyperparam("prior_equiv"));
 thread_local!(pub static PWIDE:       bool  = load_hyperparam("pwide"));
 thread_local!(pub static PWIDE_MU:    f32   = load_hyperparam("pwide_mu"));
-
 thread_local!(pub static RAVE:        bool  = load_hyperparam("rave"));
 thread_local!(pub static RAVE_EQUIV:  f32   = load_hyperparam("rave_equiv"));
-thread_local!(pub static PRIOR_EQUIV: f32   = load_hyperparam("prior_equiv"));
 
 pub trait Hyperparam {
   fn from_json(js: &json::Json) -> Option<Self> where Self: Sized;
