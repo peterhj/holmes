@@ -1,29 +1,21 @@
 use agents::{Agent};
 use board::{Board, RuleSet, PlayerRank, Stone, Point, Action};
 use search::{SearchResult};
-/*use search::tree::{Tree, Trajectory, Search};
-use search::policies::convnet::{
-  ConvnetPriorPolicy,
-  BatchConvnetRolloutPolicy,
-  ParallelBatchConvnetRolloutPolicy,
-};
-use search::policies::quasiuniform::{QuasiUniformRolloutPolicy};
-use search::policies::thompson_rave::{ThompsonRaveTreePolicy};
-use search::policies::uct_rave::{UctRaveTreePolicy};*/
 use search::parallel_policies::convnet::{
   ConvnetPolicyWorkerBuilder, ConvnetPolicyWorker,
 };
 use search::parallel_tree::{
-  ParallelSearchServer, ParallelSearch,
+  ParallelMonteCarloSearchServer, ParallelMonteCarloSearch,
 };
 use txnstate::{TxnState};
 use txnstate::extras::{TxnStateNodeData};
 
 use async_cuda::context::{DeviceContext};
+use rng::xorshift::{Xorshiftplus128Rng};
 
 use std::path::{PathBuf};
 
-pub struct ParallelSearchAgent {
+pub struct ParallelMonteCarloSearchAgent {
   komi:     f32,
   player:   Option<Stone>,
 
@@ -31,13 +23,13 @@ pub struct ParallelSearchAgent {
   state:    TxnState<TxnStateNodeData>,
   result:   Option<SearchResult>,
 
-  server:   ParallelSearchServer<ConvnetPolicyWorker>,
+  server:   ParallelMonteCarloSearchServer<ConvnetPolicyWorker>,
 }
 
-impl ParallelSearchAgent {
-  pub fn new(num_workers: usize) -> ParallelSearchAgent {
+impl ParallelMonteCarloSearchAgent {
+  pub fn new(num_workers: usize) -> ParallelMonteCarloSearchAgent {
     let batch_size = 256;
-    ParallelSearchAgent{
+    ParallelMonteCarloSearchAgent{
       komi:     0.0,
       player:   None,
       history:  vec![],
@@ -47,12 +39,12 @@ impl ParallelSearchAgent {
           TxnStateNodeData::new(),
       ),
       result:   None,
-      server:   ParallelSearchServer::new(num_workers, batch_size / num_workers, ConvnetPolicyWorkerBuilder),
+      server:   ParallelMonteCarloSearchServer::new(num_workers, batch_size / num_workers, ConvnetPolicyWorkerBuilder),
     }
   }
 }
 
-impl Agent for ParallelSearchAgent {
+impl Agent for ParallelMonteCarloSearchAgent {
   fn reset(&mut self) {
     self.komi = 7.5;
     self.player = None;
@@ -121,7 +113,7 @@ impl Agent for ParallelSearchAgent {
     self.result = Some(result);
     result.action*/
 
-    let mut search = ParallelSearch::new();
+    let mut search = ParallelMonteCarloSearch::new();
     //search.join();
 
     // TODO(20151225)

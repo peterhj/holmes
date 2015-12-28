@@ -1,7 +1,7 @@
 use array_util::{array_argmax};
 use board::{Board, RuleSet, PlayerRank, Stone, Point, Action};
 use hyper::{load_hyperparam};
-use random::{XorShift128PlusRng};
+//use random::{XorShift128PlusRng};
 use search::{SearchResult, SearchStats};
 use search::parallel_policies::{
   SearchPolicyWorkerBuilder, SearchPolicyWorker,
@@ -12,6 +12,7 @@ use txnstate::extras::{TxnStateNodeData};
 use txnstate::features::{TxnStateLibFeaturesData};
 
 use float::ord::{F32InfNan};
+use rng::xorshift::{Xorshiftplus128Rng};
 use threadpool::{ThreadPool};
 
 use bit_set::{BitSet};
@@ -211,26 +212,26 @@ impl Node {
   }
 
   pub fn update_visits(&self) {
-    self.values.total_trials.fetch_add(1, Ordering::SeqCst);
+    self.values.total_trials.fetch_add(1, Ordering::AcqRel);
   }
 
   pub fn update_arm(&self, j: usize, score: f32) {
     let turn = self.state.current_turn();
-    self.values.num_trials[j].fetch_add(1, Ordering::SeqCst);
+    self.values.num_trials[j].fetch_add(1, Ordering::AcqRel);
     if (Stone::White == turn && score >= 0.0) ||
         (Stone::Black == turn && score < 0.0)
     {
-      self.values.num_succs[j].fetch_add(1, Ordering::SeqCst);
+      self.values.num_succs[j].fetch_add(1, Ordering::AcqRel);
     }
   }
 
   pub fn rave_update_arm(&self, j: usize, score: f32) {
     let turn = self.state.current_turn();
-    self.values.num_trials_rave[j].fetch_add(1, Ordering::SeqCst);
+    self.values.num_trials_rave[j].fetch_add(1, Ordering::AcqRel);
     if (Stone::White == turn && score >= 0.0) ||
         (Stone::Black == turn && score < 0.0)
     {
-      self.values.num_succs_rave[j].fetch_add(1, Ordering::SeqCst);
+      self.values.num_succs_rave[j].fetch_add(1, Ordering::AcqRel);
     }
   }
 }
@@ -276,9 +277,9 @@ impl Tree {
   pub fn walk(&self,
       tree_traj: &mut TreeTraj,
       prior_policy: &mut PriorPolicy,
-      tree_policy: &mut TreePolicy<R=XorShift128PlusRng>,
+      tree_policy: &mut TreePolicy<R=Xorshiftplus128Rng>,
       stats: &mut SearchStats,
-      rng: &mut XorShift128PlusRng)
+      rng: &mut Xorshiftplus128Rng)
       -> TreeResult
   {
     tree_traj.reset();
@@ -289,7 +290,7 @@ impl Tree {
       // At the cursor node, decide to walk or rollout depending on the total
       // number of trials.
       ply += 1;
-      let cursor_trials = cursor_node.read().unwrap().values.total_trials.load(Ordering::SeqCst);
+      let cursor_trials = cursor_node.read().unwrap().values.total_trials.load(Ordering::Acquire);
       if cursor_trials >= 1 {
         // Try to walk through the current node using the exploration policy.
         stats.edge_count += 1;
@@ -348,7 +349,7 @@ impl Tree {
     }
   }
 
-  pub fn backup(&self, tree_traj: &TreeTraj, rollout_traj: &mut RolloutTraj, rng: &mut XorShift128PlusRng) {
+  pub fn backup(&self, tree_traj: &TreeTraj, rollout_traj: &mut RolloutTraj, rng: &mut Xorshiftplus128Rng) {
     rollout_traj.rave_mask[0].clear();
     rollout_traj.rave_mask[1].clear();
     let raw_score = rollout_traj.raw_score.unwrap();
@@ -424,7 +425,7 @@ pub struct SearchWorkerConfig {
   pub batch_size:   usize,
 }
 
-pub struct ParallelSearchServer<W> where W: SearchPolicyWorker {
+pub struct ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
   num_workers:          usize,
   worker_batch_size:    usize,
   barrier:  Arc<Barrier>,
@@ -434,8 +435,8 @@ pub struct ParallelSearchServer<W> where W: SearchPolicyWorker {
   _marker:  PhantomData<W>,
 }
 
-impl<W> ParallelSearchServer<W> where W: SearchPolicyWorker {
-  pub fn new<B>(num_workers: usize, worker_batch_size: usize, worker_builder: B) -> ParallelSearchServer<W>
+impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
+  pub fn new<B>(num_workers: usize, worker_batch_size: usize, worker_builder: B) -> ParallelMonteCarloSearchServer<W>
   where B: 'static + SearchPolicyWorkerBuilder<Worker=W> {
     let barrier = Arc::new(Barrier::new(num_workers + 1));
     let pool = ThreadPool::new(num_workers);
@@ -451,7 +452,7 @@ impl<W> ParallelSearchServer<W> where W: SearchPolicyWorker {
       in_txs.push(in_tx);
 
       pool.execute(move || {
-        let mut rng = XorShift128PlusRng::from_seed([123, 456]);
+        let mut rng = Xorshiftplus128Rng::from_seed([123, 456]);
         let mut worker = builder.build_worker(tid, worker_batch_size);
         let barrier = barrier;
         let in_rx = in_rx;
@@ -501,7 +502,7 @@ impl<W> ParallelSearchServer<W> where W: SearchPolicyWorker {
       });
     }
 
-    ParallelSearchServer{
+    ParallelMonteCarloSearchServer{
       num_workers:          num_workers,
       worker_batch_size:    worker_batch_size,
       barrier:  barrier,
@@ -535,18 +536,18 @@ impl<W> ParallelSearchServer<W> where W: SearchPolicyWorker {
 }
 
 #[derive(Default)]
-pub struct ParallelSearchStats {
+pub struct ParallelMonteCarloSearchStats {
   pub argmax_j:         AtomicUsize,
   pub argmax_ntrials:   AtomicUsize,
 }
 
-pub struct ParallelSearch {
+pub struct ParallelMonteCarloSearch {
   pub stats:        Arc<SearchStats>,
 }
 
-impl ParallelSearch {
-  pub fn new() -> ParallelSearch {
-    ParallelSearch{
+impl ParallelMonteCarloSearch {
+  pub fn new() -> ParallelMonteCarloSearch {
+    ParallelMonteCarloSearch{
       stats:        Arc::new(Default::default()),
     }
   }
@@ -554,9 +555,9 @@ impl ParallelSearch {
   pub fn join<W>(&mut self,
       //total_batch_size:   usize,
       total_num_rollouts: usize,
-      server:   &ParallelSearchServer<W>,
+      server:   &ParallelMonteCarloSearchServer<W>,
       tree:     Tree,
-      rng:      &mut XorShift128PlusRng)
+      rng:      &mut Xorshiftplus128Rng)
       -> SearchResult
       where W: SearchPolicyWorker
   {

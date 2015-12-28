@@ -1,5 +1,4 @@
 extern crate array_cuda;
-extern crate holmes;
 extern crate rembrandt;
 //extern crate rand;
 extern crate scoped_threadpool;
@@ -12,7 +11,8 @@ use rembrandt::arch_new::{
 };
 use rembrandt::data_new::{
   SampleLabelConfig, DatasetConfig, DataSource,
-  RandomEpisodeIterator, SequentialIterator, PartitionDataSource,
+  SampleIterator, RandomEpisodeIterator, CyclicEpisodeIterator,
+  PartitionDataSource,
 };
 use rembrandt::layer_new::{
   LayerConfig, ActivationFunction, ParamsInitialization,
@@ -32,10 +32,10 @@ use std::path::{PathBuf};
 use std::sync::{Arc};
 
 fn main() {
-  train_simba_2_layers();
+  train();
 }
 
-fn train_simba_2_layers() {
+fn train() {
   //let mut rng = thread_rng();
 
   let batch_size = 256;
@@ -96,7 +96,7 @@ fn train_simba_2_layers() {
     conv_stride:    1,
     conv_pad:       1,
     out_channels:   1,
-    act_func:       ActivationFunction::Rect,
+    act_func:       ActivationFunction::Identity,
     init_weights:   ParamsInitialization::Uniform{half_range: 0.05},
   };
   let loss_layer_cfg = CategoricalLossLayerConfig{
@@ -147,12 +147,14 @@ fn train_simba_2_layers() {
 
         let dataset_cfg = DatasetConfig::open(&PathBuf::from("experiments/gogodb_19x19x16_episode.v2.data"));
         let mut train_data =
-            RandomEpisodeIterator::new(
+            //SampleIterator::new(
+            CyclicEpisodeIterator::new(
+            //RandomEpisodeIterator::new(
               //Box::new(PartitionDataSource::new(tid, num_workers, dataset_cfg.build("train")))
               dataset_cfg.build("train")
             );
         let mut valid_data =
-            SequentialIterator::new(
+            SampleIterator::new(
               //Box::new(PartitionDataSource::new(tid, num_workers, dataset_cfg.build("valid")))
               dataset_cfg.build("valid")
             );

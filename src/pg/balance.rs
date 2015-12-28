@@ -12,7 +12,8 @@ pub struct Trace {
   reward:   Option<f32>,
 }
 
-pub struct PolicyBalanceMachine {
+pub struct PgBalanceMachine {
+  target_num_rollouts:  usize,
   value_minibatch_size: usize,
   grad_minibatch_size:  usize,
   learning_rate:        f32,
@@ -24,7 +25,7 @@ pub struct PolicyBalanceMachine {
   mean_value:   f32,
 }
 
-impl PolicyBalanceMachine {
+impl PgBalanceMachine {
   pub fn estimate(&mut self, initial_state: &TxnState<TxnStateLibFeaturesData>, ctx: &DeviceCtxRef) {
     // TODO(20151219): estimate target value using search.
 

@@ -1,8 +1,10 @@
 use array_util::{array_argmax};
 use board::{Board, Point};
-use random::{XorShift128PlusRng};
+//use random::{XorShift128PlusRng};
 use search::parallel_policies::{TreePolicy};
 use search::parallel_tree::{Node};
+
+use rng::xorshift::{Xorshiftplus128Rng};
 
 use rand::distributions::{IndependentSample};
 use rand::distributions::gamma::{Gamma};
@@ -29,7 +31,7 @@ impl ThompsonTreePolicy {
 }
 
 impl TreePolicy for ThompsonTreePolicy {
-  fn execute_search(&mut self, node: &Node, rng: &mut XorShift128PlusRng) -> Option<(Point, usize)> {
+  fn execute_search(&mut self, node: &Node, rng: &mut Xorshiftplus128Rng) -> Option<(Point, usize)> {
     for j in (0 .. node.horizon) {
       let n = node.values.num_trials[j].load(Ordering::Acquire) as f32;
       let s = node.values.num_succs[j].load(Ordering::Acquire) as f32;

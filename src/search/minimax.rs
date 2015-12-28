@@ -43,6 +43,9 @@ impl MinimaxSearchServer {
   fn fail_soft_alpha_beta(&mut self, node: Rc<RefCell<MinimaxNode>>, min_bound: f32, max_bound: f32, depth: usize) -> f32 {
     if depth == 0 {
       // TODO(20151226): call parallel search evaluation.
+      let mut node = node.borrow_mut();
+      node.value = 0.5;
+      node.action = None;
       return 0.5;
     }
     let mut node = node.borrow_mut();

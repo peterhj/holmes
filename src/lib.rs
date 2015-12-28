@@ -13,6 +13,7 @@ extern crate float;
 extern crate gsl;
 extern crate episodb;
 extern crate rembrandt;
+extern crate rng;
 //extern crate statistics_avx2;
 
 extern crate bit_set;
