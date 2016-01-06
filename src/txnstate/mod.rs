@@ -88,7 +88,7 @@ pub fn is_eyeish(position: &TxnPosition, chains: &TxnChainsList, stone: Stone, p
       let adj_head = chains.find_chain(adj_point);
       assert!(adj_head != TOMBSTONE);
       let adj_chain = chains.get_chain(adj_head).unwrap();
-      if adj_chain.approx_count_libs() <= 1 {
+      if adj_chain.count_libs_up_to_2() <= 1 {
         eyeish = false;
       }
     }
@@ -165,7 +165,7 @@ pub fn check_legal_move_simple(position: &TxnPosition, chains: &TxnChainsList, t
     if adj_stone == turn {
       let adj_head = chains.find_chain(adj_point);
       let adj_chain = chains.get_chain(adj_head).unwrap();
-      if adj_chain.approx_count_libs() == 1 {
+      if adj_chain.count_libs_up_to_2() == 1 {
         no_adj_atari = false;
       }
     }
@@ -288,7 +288,7 @@ impl Chain {
   }
 
   /// Returns 0, 1, or 2.
-  pub fn approx_count_libs(&self) -> usize {
+  pub fn count_libs_up_to_2(&self) -> usize {
     let mut prev_lib = None;
     for &lib in self.ps_libs.iter() {
       match prev_lib {
@@ -305,7 +305,7 @@ impl Chain {
   }
 
   /// Returns 0, 1, 2, or 3.
-  pub fn approx_count_libs_up_to_3(&self) -> usize {
+  pub fn count_libs_up_to_3(&self) -> usize {
     let mut prev_lib = None;
     let mut prev2_lib = None;
     for &lib in self.ps_libs.iter() {
@@ -325,6 +325,38 @@ impl Chain {
       (None, None) => 0,
       (Some(_), None) => 1,
       (Some(_), Some(_)) => 2,
+      _ => unreachable!(),
+    }
+  }
+
+  /// Returns 0, 1, 2, 3, or 4.
+  pub fn count_libs_up_to_4(&self) -> usize {
+    let mut prev_lib = None;
+    let mut prev2_lib = None;
+    let mut prev3_lib = None;
+    for &lib in self.ps_libs.iter() {
+      match prev_lib {
+        None => prev_lib = Some(lib),
+        Some(prev_lib) => if prev_lib != lib {
+          match prev2_lib {
+            None => prev2_lib = Some(lib),
+            Some(prev2_lib) => if prev2_lib != lib {
+              match prev3_lib {
+                None => prev3_lib = Some(lib),
+                Some(prev3_lib) => if prev3_lib != lib {
+                  return 4;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    match (prev_lib, prev2_lib, prev3_lib) {
+      (None, None, None) => 0,
+      (Some(_), None, None) => 1,
+      (Some(_), Some(_), None) => 2,
+      (Some(_), Some(_), Some(_)) => 3,
       _ => unreachable!(),
     }
   }
@@ -937,7 +969,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
       0
     } else {
       let chain = self.chains.get_chain(head).unwrap();
-      chain.approx_count_libs_up_to_3()
+      chain.count_libs_up_to_3()
     }
   }
 
@@ -1071,7 +1103,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
         let adj_head = self.chains.find_chain(adj_point);
         assert!(adj_head != TOMBSTONE);
         let adj_chain = self.chains.get_chain(adj_head).unwrap();
-        if adj_chain.approx_count_libs() <= 1 {
+        if adj_chain.count_libs_up_to_2() <= 1 {
           capture = true;
         }
       }
@@ -1091,7 +1123,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
         // - otherwise, adjacent stones must have at least two liberties
         let adj_ko_head = self.chains.find_chain(adj_ko_point);
         let adj_ko_chain = self.chains.get_chain(adj_ko_head).unwrap();
-        let adj_ko_libs = adj_ko_chain.approx_count_libs();
+        let adj_ko_libs = adj_ko_chain.count_libs_up_to_2();
         if adj_ko_point == place_point {
           let adj_ko_size = adj_ko_chain.size;
           match (adj_ko_libs, adj_ko_size) {
@@ -1299,7 +1331,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
       let place_head = self.chains.find_chain(place_point);
       if place_head != TOMBSTONE {
         let place_chain = self.chains.get_chain(place_head).unwrap();
-        if place_chain.approx_count_libs() == 1 {
+        if place_chain.count_libs_up_to_2() == 1 {
           self.position.last_atari[turn.offset()].push(place_head);
         }
       }
@@ -1308,7 +1340,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
         let adj_head = self.chains.find_chain(adj_point);
         if adj_head != TOMBSTONE {
           let adj_chain = self.chains.get_chain(adj_head).unwrap();
-          if adj_chain.approx_count_libs() == 1 {
+          if adj_chain.count_libs_up_to_2() == 1 {
             self.position.last_atari[adj_stone.offset()].push(adj_head);
           }
         }
@@ -1510,7 +1542,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
         let chain = self.chains.get_chain(chain_head).unwrap();
         s.push_str(&format!(" ({}, {})",
             chain.size,
-            chain.approx_count_libs(),
+            chain.count_libs_up_to_2(),
         ));
         self.chains.iter_chain(chain_head, |ch_point| {
           s.push_str(&format!(" {}", ch_point.to_coord().to_string()));

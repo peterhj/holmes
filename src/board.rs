@@ -89,9 +89,10 @@ impl RuleSet {
   }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PlayerRank {
   Kyu(u8),
+  AmaDan(u8),
   Dan(u8),
 }
 

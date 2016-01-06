@@ -1,13 +1,27 @@
 use board::{Action};
+use search::parallel_policies::{
+  SearchPolicyWorker,
+};
+use search::parallel_policies::convnet::{
+  ConvnetPolicyWorker,
+};
+use search::parallel_tree::{
+  ParallelMonteCarloSearch,
+  ParallelMonteCarloSearchServer,
+};
 use txnstate::{TxnState};
-use txnstate::features::{TxnStateLibFeaturesData};
+use txnstate::extras::{TxnStateNodeData};
+use txnstate::features::{TxnStateExtLibFeatsData};
 
 use array_cuda::device::{DeviceCtxRef};
 use rembrandt::arch_new::{AtomicData, ArchWorker, PipelineArchWorker};
 use rembrandt::layer_new::{Phase};
+use rng::xorshift::{Xorshiftplus128Rng};
+
+use rand::{Rng};
 
 pub struct Trace {
-  pairs:    Vec<(TxnState<TxnStateLibFeaturesData>, Action)>,
+  pairs:    Vec<(TxnState<TxnStateExtLibFeatsData>, Action)>,
   _score:   Option<f32>,
   reward:   Option<f32>,
 }
@@ -18,6 +32,8 @@ pub struct PgBalanceMachine {
   grad_minibatch_size:  usize,
   learning_rate:        f32,
 
+  rng:              Xorshiftplus128Rng,
+  search_server:    ParallelMonteCarloSearchServer<ConvnetPolicyWorker>,
   arch:     PipelineArchWorker<()>,
   trace:    Trace,
 
@@ -26,8 +42,10 @@ pub struct PgBalanceMachine {
 }
 
 impl PgBalanceMachine {
-  pub fn estimate(&mut self, initial_state: &TxnState<TxnStateLibFeaturesData>, ctx: &DeviceCtxRef) {
-    // TODO(20151219): estimate target value using search.
+  pub fn estimate(&mut self, initial_state: &TxnState<TxnStateNodeData>, ctx: &DeviceCtxRef) {
+    // Estimate target value using search.
+    let search = ParallelMonteCarloSearch::new();
+    search.join(5120, &self.search_server, initial_state, &mut self.rng);
 
     let mut mean_value_accum = 0.0;
     for i in (0 .. self.value_minibatch_size) {

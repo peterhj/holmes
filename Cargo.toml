@@ -94,6 +94,10 @@ name = "new-train-12layer384-19x19x16"
 path = "tools/new-train-12layer384-19x19x16.rs"
 
 [[bin]]
+name = "new-train-12layer384-19x19x28"
+path = "tools/new-train-12layer384-19x19x28.rs"
+
+[[bin]]
 name = "train-action3-narrow-3layer-19x19x16"
 path = "tools/train-action3-narrow-3layer-19x19x16.rs"
 
@@ -179,8 +183,11 @@ bit-vec = "*"
 bufstream = "*"
 byteorder = "*"
 docopt = "*"
+env_logger = "*"
+float = "*"
 getopts = "*"
 libc = "*"
+log = "*"
 rand = "*"
 rusqlite = "=0.4.0"
 rustc-serialize = "*"
@@ -215,8 +222,8 @@ path = "../rembrandt-project/libcuda"
 [dependencies.episodb]
 path = "../episodb"
 
-[dependencies.float]
-path = "../libfloat"
+#[dependencies.float]
+#path = "../libfloat"
 
 [dependencies.gsl]
 path = "../libgsl"

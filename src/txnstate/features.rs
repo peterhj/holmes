@@ -11,6 +11,8 @@ use std::cell::{RefCell};
 use std::iter::{repeat};
 use std::slice::bytes::{copy_memory};
 
+const SET: u8 = 255;
+
 #[derive(Clone)]
 pub struct TxnStateFeaturesData {
   //compute_diff:       bool,
@@ -264,7 +266,7 @@ impl TxnStateLibFeaturesData {
       let head = chains.find_chain(point);
       //assert!(head != TOMBSTONE);
       let chain = chains.get_chain(head).unwrap();
-      match chain.approx_count_libs_up_to_3() {
+      match chain.count_libs_up_to_3() {
         0 => { unreachable!(); }
         1 => {
           features[Self::BLACK_ATARI_PLANE + p]  = 1 - bw_value;
@@ -398,61 +400,59 @@ impl TxnStateData for TxnStateLibFeaturesData {
 
 #[derive(Clone)]
 pub struct TxnStateExtLibFeatsData {
-  //time_step:  usize,
-  features:   Vec<u8>,
-  tmp_mark:   BitSet,
+  features:     Vec<u8>,
+  prev_moves:   Vec<Option<(Stone, Point)>>,
+  black_rank:   Option<PlayerRank>,
+  white_rank:   Option<PlayerRank>,
+  tmp_mark:     BitSet,
 }
 
 impl TxnStateExtLibFeatsData {
-  pub const BLACK_PLANE:        usize = 0;
-  pub const BLACK_ATARI_PLANE:  usize = 1 * Board::SIZE;
-  pub const BLACK_AIR_2_PLANE:  usize = 2 * Board::SIZE;
-  pub const BLACK_AIR_3_PLANE:  usize = 3 * Board::SIZE;
-  pub const BLACK_KO_PLANE:     usize = 4 * Board::SIZE;
-  pub const BLACK_HIST_PLANE:   usize = 5 * Board::SIZE;
-  pub const BLACK_RANK_1_PLANE: usize = 6 * Board::SIZE;
-  pub const BLACK_RANK_2_PLANE: usize = 7 * Board::SIZE;
-  pub const BLACK_RANK_3_PLANE: usize = 8 * Board::SIZE;
-  pub const BLACK_RANK_4_PLANE: usize = 9 * Board::SIZE;
-  pub const BLACK_RANK_5_PLANE: usize = 10 * Board::SIZE;
-  pub const BLACK_RANK_6_PLANE: usize = 11 * Board::SIZE;
-  pub const BLACK_RANK_7_PLANE: usize = 12 * Board::SIZE;
-  pub const BLACK_RANK_8_PLANE: usize = 13 * Board::SIZE;
-  pub const BLACK_RANK_9_PLANE: usize = 14 * Board::SIZE;
+  pub const NUM_PLANES:         usize = 28;
+  pub const NUM_COLOR_PLANES:   usize = 12;
+  pub const NUM_GRAY_PLANES:    usize = 4;
 
-  pub const WHITE_PLANE:        usize = 15 * Board::SIZE;
-  pub const WHITE_ATARI_PLANE:  usize = 16 * Board::SIZE;
-  pub const WHITE_AIR_2_PLANE:  usize = 17 * Board::SIZE;
-  pub const WHITE_AIR_3_PLANE:  usize = 18 * Board::SIZE;
-  pub const WHITE_KO_PLANE:     usize = 19 * Board::SIZE;
-  pub const WHITE_HIST_PLANE:   usize = 20 * Board::SIZE;
-  pub const WHITE_RANK_1_PLANE: usize = 21 * Board::SIZE;
-  pub const WHITE_RANK_2_PLANE: usize = 22 * Board::SIZE;
-  pub const WHITE_RANK_3_PLANE: usize = 23 * Board::SIZE;
-  pub const WHITE_RANK_4_PLANE: usize = 24 * Board::SIZE;
-  pub const WHITE_RANK_5_PLANE: usize = 25 * Board::SIZE;
-  pub const WHITE_RANK_6_PLANE: usize = 26 * Board::SIZE;
-  pub const WHITE_RANK_7_PLANE: usize = 27 * Board::SIZE;
-  pub const WHITE_RANK_8_PLANE: usize = 28 * Board::SIZE;
-  pub const WHITE_RANK_9_PLANE: usize = 29 * Board::SIZE;
+  pub const BLACK:              usize = 0 * Board::SIZE;
+  pub const WHITE:              usize = 12 * Board::SIZE;
+  pub const GRAY:               usize = 24 * Board::SIZE;
 
-  pub const NUM_PLANES:         usize = 30;
-  //pub const NUM_TIME_STEPS:     usize = 1;
+  pub const STONE_PLANE:        usize = 0 * Board::SIZE;
+  pub const ATARI_PLANE:        usize = 1 * Board::SIZE;
+  pub const AIR_2_PLANE:        usize = 2 * Board::SIZE;
+  pub const AIR_3_PLANE:        usize = 3 * Board::SIZE;
+  pub const AIR_4_PLANE:        usize = 4 * Board::SIZE;
+  pub const KO_PLANE:           usize = 5 * Board::SIZE;
+  pub const RANK_DAN_1_2_PLANE: usize = 6 * Board::SIZE;
+  pub const RANK_DAN_3_4_PLANE: usize = 7 * Board::SIZE;
+  pub const RANK_DAN_5_6_PLANE: usize = 8 * Board::SIZE;
+  pub const RANK_PRO_1_3_PLANE: usize = 9 * Board::SIZE;
+  pub const RANK_PRO_4_6_PLANE: usize = 10 * Board::SIZE;
+  pub const RANK_PRO_7_9_PLANE: usize = 11 * Board::SIZE;
+
+  pub const PREV_1_PLANE:       usize = 0 * Board::SIZE;
+  pub const PREV_2_PLANE:       usize = 1 * Board::SIZE;
+  pub const PREV_3_PLANE:       usize = 2 * Board::SIZE;
+  pub const BASELINE_PLANE:     usize = 3 * Board::SIZE;
 
   pub fn new() -> TxnStateExtLibFeatsData {
-    TxnStateExtLibFeatsData{
-      //time_step: 0,
-      features: repeat(0).take(Self::NUM_PLANES * Board::SIZE).collect(),
-      tmp_mark: BitSet::with_capacity(Board::SIZE),
-    }
+    let feats = TxnStateExtLibFeatsData{
+      features:     repeat(0).take(Self::NUM_PLANES * Board::SIZE).collect(),
+      prev_moves:   vec![None, None, None],
+      black_rank:   None,
+      white_rank:   None,
+      tmp_mark:     BitSet::with_capacity(Board::SIZE),
+    };
+    assert_eq!(
+        feats.features.len(),
+        Self::NUM_PLANES * Board::SIZE);
+    assert_eq!(
+        Self::GRAY + Self::NUM_GRAY_PLANES * Board::SIZE,
+        Self::NUM_PLANES * Board::SIZE);
+    feats
   }
 
   pub fn current_feature(&self, plane_idx: usize, point: Point) -> u8 {
-    let slice_sz = Self::NUM_PLANES * Board::SIZE;
-    /*let time_step = self.time_step;
-    let offset = time_step * slice_sz;*/
-    let offset = slice_sz;
-    self.features[offset + plane_idx * Board::SIZE + point.idx()]
+    self.features[plane_idx * Board::SIZE + point.idx()]
   }
 
   pub fn feature_dims(&self) -> (usize, usize, usize) {
@@ -460,45 +460,30 @@ impl TxnStateExtLibFeatsData {
   }
 
   pub fn extract_relative_features(&self, turn: Stone, dst_buf: &mut [u8]) {
-    let slice_sz = Self::NUM_PLANES * Board::SIZE;
-    let half_slice_sz = slice_sz / 2;
-    //let init_time_step = self.time_step;
-    let init_time_step = 0;
-    let mut time_step = init_time_step;
-    let mut dst_time_step = 0;
-    /*loop {
-      let src_offset = time_step * slice_sz;
-      let dst_offset = dst_time_step * slice_sz;*/
-
-    let src_offset = 0;
-    let dst_offset = 0;
+    let half_slice_sz = Self::NUM_COLOR_PLANES * Board::SIZE;
     match turn {
       Stone::Black => {
         copy_memory(
-            &self.features[src_offset .. src_offset + slice_sz],
-            &mut dst_buf[dst_offset .. dst_offset + slice_sz],
+            &self.features,
+            dst_buf,
         );
       }
       Stone::White => {
         copy_memory(
-            &self.features[src_offset + Self::BLACK_PLANE .. src_offset + Self::BLACK_PLANE + half_slice_sz],
-            &mut dst_buf[dst_offset + Self::WHITE_PLANE .. dst_offset + Self::WHITE_PLANE + half_slice_sz],
+            &self.features[Self::BLACK .. Self::BLACK + half_slice_sz],
+            &mut dst_buf[Self::WHITE .. Self::WHITE + half_slice_sz],
         );
         copy_memory(
-            &self.features[src_offset + Self::WHITE_PLANE .. src_offset + Self::WHITE_PLANE + half_slice_sz],
-            &mut dst_buf[dst_offset + Self::BLACK_PLANE .. dst_offset + Self::BLACK_PLANE + half_slice_sz],
+            &self.features[Self::WHITE .. Self::WHITE + half_slice_sz],
+            &mut dst_buf[Self::BLACK .. Self::BLACK + half_slice_sz],
+        );
+        copy_memory(
+            &self.features[Self::GRAY .. ],
+            &mut dst_buf[Self::GRAY .. ],
         );
       }
       _ => unreachable!(),
     }
-
-      /*time_step = (time_step + Self::NUM_TIME_STEPS - 1) % Self::NUM_TIME_STEPS;
-      dst_time_step += 1;
-      if time_step == init_time_step {
-        assert_eq!(Self::NUM_TIME_STEPS, dst_time_step);
-        break;
-      }
-    }*/
   }
 
   fn update_point_libs(tmp_mark: &mut BitSet, features: &mut [u8], position: &TxnPosition, chains: &TxnChainsList, point: Point) {
@@ -510,47 +495,65 @@ impl TxnStateExtLibFeatsData {
     if stone != Stone::Empty {
       let bw_value: u8 = match stone {
         Stone::Black => 0,
-        Stone::White => 255,
+        Stone::White => SET,
         _ => unreachable!(),
       };
       let head = chains.find_chain(point);
       //assert!(head != TOMBSTONE);
       let chain = chains.get_chain(head).unwrap();
-      match chain.approx_count_libs_up_to_3() {
+      match chain.count_libs_up_to_4() {
         0 => { unreachable!(); }
         1 => {
-          features[Self::BLACK_ATARI_PLANE + p] = 255 - bw_value;
-          features[Self::BLACK_AIR_2_PLANE + p] = 0;
-          features[Self::BLACK_AIR_3_PLANE + p] = 0;
-          features[Self::WHITE_ATARI_PLANE + p] = bw_value;
-          features[Self::WHITE_AIR_2_PLANE + p] = 0;
-          features[Self::WHITE_AIR_3_PLANE + p] = 0;
+          features[Self::BLACK + Self::ATARI_PLANE + p] = SET - bw_value;
+          features[Self::BLACK + Self::AIR_2_PLANE + p] = 0;
+          features[Self::BLACK + Self::AIR_3_PLANE + p] = 0;
+          features[Self::BLACK + Self::AIR_4_PLANE + p] = 0;
+          features[Self::WHITE + Self::ATARI_PLANE + p] = bw_value;
+          features[Self::WHITE + Self::AIR_2_PLANE + p] = 0;
+          features[Self::WHITE + Self::AIR_3_PLANE + p] = 0;
+          features[Self::WHITE + Self::AIR_4_PLANE + p] = 0;
         }
         2 => {
-          features[Self::BLACK_ATARI_PLANE + p] = 0;
-          features[Self::BLACK_AIR_2_PLANE + p] = 255 - bw_value;
-          features[Self::BLACK_AIR_3_PLANE + p] = 0;
-          features[Self::WHITE_ATARI_PLANE + p] = 0;
-          features[Self::WHITE_AIR_2_PLANE + p] = bw_value;
-          features[Self::WHITE_AIR_3_PLANE + p] = 0;
+          features[Self::BLACK + Self::ATARI_PLANE + p] = 0;
+          features[Self::BLACK + Self::AIR_2_PLANE + p] = SET - bw_value;
+          features[Self::BLACK + Self::AIR_3_PLANE + p] = 0;
+          features[Self::BLACK + Self::AIR_4_PLANE + p] = 0;
+          features[Self::WHITE + Self::ATARI_PLANE + p] = 0;
+          features[Self::WHITE + Self::AIR_2_PLANE + p] = bw_value;
+          features[Self::WHITE + Self::AIR_3_PLANE + p] = 0;
+          features[Self::WHITE + Self::AIR_4_PLANE + p] = 0;
         }
         3 => {
-          features[Self::BLACK_ATARI_PLANE + p] = 0;
-          features[Self::BLACK_AIR_2_PLANE + p] = 0;
-          features[Self::BLACK_AIR_3_PLANE + p] = 255 - bw_value;
-          features[Self::WHITE_ATARI_PLANE + p] = 0;
-          features[Self::WHITE_AIR_2_PLANE + p] = 0;
-          features[Self::WHITE_AIR_3_PLANE + p] = bw_value;
+          features[Self::BLACK + Self::ATARI_PLANE + p] = 0;
+          features[Self::BLACK + Self::AIR_2_PLANE + p] = 0;
+          features[Self::BLACK + Self::AIR_3_PLANE + p] = SET - bw_value;
+          features[Self::BLACK + Self::AIR_4_PLANE + p] = 0;
+          features[Self::WHITE + Self::ATARI_PLANE + p] = 0;
+          features[Self::WHITE + Self::AIR_2_PLANE + p] = 0;
+          features[Self::WHITE + Self::AIR_3_PLANE + p] = bw_value;
+          features[Self::WHITE + Self::AIR_4_PLANE + p] = 0;
+        }
+        4 => {
+          features[Self::BLACK + Self::ATARI_PLANE + p] = 0;
+          features[Self::BLACK + Self::AIR_2_PLANE + p] = 0;
+          features[Self::BLACK + Self::AIR_3_PLANE + p] = 0;
+          features[Self::BLACK + Self::AIR_4_PLANE + p] = SET - bw_value;
+          features[Self::WHITE + Self::ATARI_PLANE + p] = 0;
+          features[Self::WHITE + Self::AIR_2_PLANE + p] = 0;
+          features[Self::WHITE + Self::AIR_3_PLANE + p] = 0;
+          features[Self::WHITE + Self::AIR_4_PLANE + p] = bw_value;
         }
         _ => { unreachable!(); }
       }
     } else {
-      features[Self::BLACK_ATARI_PLANE + p] = 0;
-      features[Self::BLACK_AIR_2_PLANE + p] = 0;
-      features[Self::BLACK_AIR_3_PLANE + p] = 0;
-      features[Self::WHITE_ATARI_PLANE + p] = 0;
-      features[Self::WHITE_AIR_2_PLANE + p] = 0;
-      features[Self::WHITE_AIR_3_PLANE + p] = 0;
+      features[Self::BLACK + Self::ATARI_PLANE + p] = 0;
+      features[Self::BLACK + Self::AIR_2_PLANE + p] = 0;
+      features[Self::BLACK + Self::AIR_3_PLANE + p] = 0;
+      features[Self::BLACK + Self::AIR_4_PLANE + p] = 0;
+      features[Self::WHITE + Self::ATARI_PLANE + p] = 0;
+      features[Self::WHITE + Self::AIR_2_PLANE + p] = 0;
+      features[Self::WHITE + Self::AIR_3_PLANE + p] = 0;
+      features[Self::WHITE + Self::AIR_4_PLANE + p] = 0;
     }
     tmp_mark.insert(p);
   }
@@ -560,145 +563,72 @@ impl TxnStateExtLibFeatsData {
     match ko_turn {
       Stone::Black => {
         if is_ko {
-          features[Self::BLACK_KO_PLANE + p] = 255;
+          features[Self::BLACK + Self::KO_PLANE + p] = SET;
+          features[Self::WHITE + Self::KO_PLANE + p] = 0;
         } else {
-          features[Self::BLACK_KO_PLANE + p] = 0;
+          features[Self::BLACK + Self::KO_PLANE + p] = 0;
+          features[Self::WHITE + Self::KO_PLANE + p] = 0;
         }
       }
       Stone::White => {
         if is_ko {
-          features[Self::WHITE_KO_PLANE + p] = 255;
+          features[Self::BLACK + Self::KO_PLANE + p] = 0;
+          features[Self::WHITE + Self::KO_PLANE + p] = SET;
         } else {
-          features[Self::WHITE_KO_PLANE + p] = 0;
+          features[Self::BLACK + Self::KO_PLANE + p] = 0;
+          features[Self::WHITE + Self::KO_PLANE + p] = 0;
         }
       }
       _ => {}
     }
   }
 
-  fn update_points_history(features: &mut [u8], position: &TxnPosition) {
-    for p in (0 .. Board::SIZE) {
-      match position.stones[p] {
-        Stone::Black => {
-          let t = (position.epoch - position.stone_epochs[p]) as f32;
-          assert!(t >= 0.0);
-          features[Self::BLACK_HIST_PLANE + p] = ((-0.1 * t).exp() * 255.0).round() as u8;
-        }
-        Stone::White => {
-          let t = (position.epoch - position.stone_epochs[p]) as f32;
-          assert!(t >= 0.0);
-          features[Self::WHITE_HIST_PLANE + p] = ((-0.1 * t).exp() * 255.0).round() as u8;
-        }
-        _ => {}
+  fn update_points_rank(features: &mut [u8], position: &TxnPosition, turn: Stone, rank: PlayerRank) {
+    let level = match rank {
+      PlayerRank::Kyu(_) => 0,
+      PlayerRank::AmaDan(1) |
+      PlayerRank::AmaDan(2) => 1,
+      PlayerRank::AmaDan(3) |
+      PlayerRank::AmaDan(4) => 2,
+      PlayerRank::AmaDan(5) |
+      PlayerRank::AmaDan(6) |
+      PlayerRank::AmaDan(7) |
+      PlayerRank::AmaDan(8) |
+      PlayerRank::AmaDan(9) => 3,
+      PlayerRank::Dan(1) |
+      PlayerRank::Dan(2) |
+      PlayerRank::Dan(3) => 4,
+      PlayerRank::Dan(4) |
+      PlayerRank::Dan(5) |
+      PlayerRank::Dan(6) => 5,
+      PlayerRank::Dan(7) |
+      PlayerRank::Dan(8) |
+      PlayerRank::Dan(9) => 6,
+      PlayerRank::AmaDan(_) | PlayerRank::Dan(_) => unimplemented!(),
+    };
+    let offset = match turn {
+      Stone::Black => Self::BLACK,
+      Stone::White => Self::WHITE,
+      _ => unimplemented!(),
+    };
+    for p in 0 .. Board::SIZE {
+      if level >= 1 {
+        features[offset + Self::RANK_DAN_1_2_PLANE + p] = SET;
       }
-    }
-  }
-
-  fn update_points_rank(features: &mut [u8], position: &TxnPosition) {
-    match position.ranks[0] {
-      PlayerRank::Kyu(_) | PlayerRank::Dan(1) => {
-        for p in (0 .. Board::SIZE) {
-          features[Self::BLACK_RANK_1_PLANE + p] = 255;
-        }
+      if level >= 2 {
+        features[offset + Self::RANK_DAN_3_4_PLANE + p] = SET;
       }
-      PlayerRank::Dan(dan) => {
-        assert!(dan >= 2 && dan <= 9);
-        match dan {
-          2 => {
-            for p in (0 .. Board::SIZE) {
-              features[Self::BLACK_RANK_2_PLANE + p] = 255;
-            }
-          }
-          3 => {
-            for p in (0 .. Board::SIZE) {
-              features[Self::BLACK_RANK_3_PLANE + p] = 255;
-            }
-          }
-          4 => {
-            for p in (0 .. Board::SIZE) {
-              features[Self::BLACK_RANK_4_PLANE + p] = 255;
-            }
-          }
-          5 => {
-            for p in (0 .. Board::SIZE) {
-              features[Self::BLACK_RANK_5_PLANE + p] = 255;
-            }
-          }
-          6 => {
-            for p in (0 .. Board::SIZE) {
-              features[Self::BLACK_RANK_6_PLANE + p] = 255;
-            }
-          }
-          7 => {
-            for p in (0 .. Board::SIZE) {
-              features[Self::BLACK_RANK_7_PLANE + p] = 255;
-            }
-          }
-          8 => {
-            for p in (0 .. Board::SIZE) {
-              features[Self::BLACK_RANK_8_PLANE + p] = 255;
-            }
-          }
-          9 => {
-            for p in (0 .. Board::SIZE) {
-              features[Self::BLACK_RANK_9_PLANE + p] = 255;
-            }
-          }
-          _ => unreachable!(),
-        }
+      if level >= 3 {
+        features[offset + Self::RANK_DAN_5_6_PLANE + p] = SET;
       }
-    }
-    match position.ranks[1] {
-      PlayerRank::Kyu(_) | PlayerRank::Dan(1) => {
-        for p in (0 .. Board::SIZE) {
-          features[Self::WHITE_RANK_1_PLANE + p] = 255;
-        }
+      if level >= 4 {
+        features[offset + Self::RANK_PRO_1_3_PLANE + p] = SET;
       }
-      PlayerRank::Dan(dan) => {
-        assert!(dan >= 2 && dan <= 9);
-        match dan {
-          2 => {
-            for p in (0 .. Board::SIZE) {
-              features[Self::WHITE_RANK_2_PLANE + p] = 255;
-            }
-          }
-          3 => {
-            for p in (0 .. Board::SIZE) {
-              features[Self::WHITE_RANK_3_PLANE + p] = 255;
-            }
-          }
-          4 => {
-            for p in (0 .. Board::SIZE) {
-              features[Self::WHITE_RANK_4_PLANE + p] = 255;
-            }
-          }
-          5 => {
-            for p in (0 .. Board::SIZE) {
-              features[Self::WHITE_RANK_5_PLANE + p] = 255;
-            }
-          }
-          6 => {
-            for p in (0 .. Board::SIZE) {
-              features[Self::WHITE_RANK_6_PLANE + p] = 255;
-            }
-          }
-          7 => {
-            for p in (0 .. Board::SIZE) {
-              features[Self::WHITE_RANK_7_PLANE + p] = 255;
-            }
-          }
-          8 => {
-            for p in (0 .. Board::SIZE) {
-              features[Self::WHITE_RANK_8_PLANE + p] = 255;
-            }
-          }
-          9 => {
-            for p in (0 .. Board::SIZE) {
-              features[Self::WHITE_RANK_9_PLANE + p] = 255;
-            }
-          }
-          _ => unreachable!(),
-        }
+      if level >= 5 {
+        features[offset + Self::RANK_PRO_4_6_PLANE + p] = SET;
+      }
+      if level >= 6 {
+        features[offset + Self::RANK_PRO_7_9_PLANE + p] = SET;
       }
     }
   }
@@ -706,66 +636,55 @@ impl TxnStateExtLibFeatsData {
 
 impl TxnStateData for TxnStateExtLibFeatsData {
   fn reset(&mut self) {
-    //self.time_step = 0;
-    assert_eq!(Self::NUM_PLANES * Board::SIZE, self.features.len());
-    for p in (0 .. self.features.len()) {
+    for p in 0 .. Self::GRAY {
       self.features[p] = 0;
     }
+    for p in Self::GRAY .. Self::GRAY + Self::BASELINE_PLANE {
+      self.features[p] = 0;
+    }
+    for p in Self::GRAY + Self::BASELINE_PLANE .. Self::GRAY + Self::NUM_GRAY_PLANES * Board::SIZE {
+      self.features[p] = SET;
+    }
+    self.prev_moves[0] = None;
+    self.prev_moves[1] = None;
+    self.prev_moves[2] = None;
+    self.black_rank = None;
+    self.white_rank = None;
   }
 
   fn update(&mut self, position: &TxnPosition, chains: &TxnChainsList, update_turn: Stone, update_action: Action) {
-    // XXX: Before anything else, increment the time step.
-    //self.time_step = (self.time_step + 1) % Self::NUM_TIME_STEPS;
-
     // TODO(20151124): for sparse features, how to compute diffs efficiently?
 
-    let slice_sz = Self::NUM_PLANES * Board::SIZE;
-    let next_slice_idx = 0;
-    // FIXME(20151123): following only works when there are 2 time steps.
-    /*let next_slice_idx = self.time_step;
-    if Self::NUM_TIME_STEPS > 1 {
-      let prev_slice_idx = (self.time_step + Self::NUM_TIME_STEPS - 1) % Self::NUM_TIME_STEPS;
-      let (src_feats, mut dst_feats) = slice_twice_mut(
-          &mut self.features,
-          prev_slice_idx * slice_sz, (prev_slice_idx + 1) * slice_sz,
-          next_slice_idx * slice_sz, (next_slice_idx + 1) * slice_sz,
-      );
-      copy_memory(src_feats, &mut dst_feats);
-    }*/
-
-    self.tmp_mark.clear();
-
-    let next_start = next_slice_idx * slice_sz;
-    let next_end = next_start + slice_sz;
     {
       // XXX(20151107): Iterate over placed and killed chains to update stone
       // repr.
-      let &mut TxnStateExtLibFeatsData{ref mut features, ref mut tmp_mark, .. } = self;
-      let mut features = &mut features[next_start .. next_end];
+      let &mut TxnStateExtLibFeatsData{
+        ref mut features, ref mut tmp_mark, .. } = self;
 
       // Update stone features.
       if let Some((stone, point)) = position.last_placed {
         let p = point.idx();
         match stone {
           Stone::Black => {
-            features[Self::BLACK_PLANE + p] = 255;
-            features[Self::WHITE_PLANE + p] = 0;
+            features[Self::BLACK + Self::STONE_PLANE + p] = SET;
+            features[Self::WHITE + Self::STONE_PLANE + p] = 0;
           }
           Stone::White => {
-            features[Self::BLACK_PLANE + p] = 0;
-            features[Self::WHITE_PLANE + p] = 255;
+            features[Self::BLACK + Self::STONE_PLANE + p] = 0;
+            features[Self::WHITE + Self::STONE_PLANE + p] = SET;
           }
           Stone::Empty => { unreachable!(); }
         }
       }
       for &kill_point in position.last_killed[0].iter().chain(position.last_killed[1].iter()) {
         let p = kill_point.idx();
-        features[Self::BLACK_PLANE + p] = 0;
-        features[Self::WHITE_PLANE + p] = 0;
+        features[Self::BLACK + Self::STONE_PLANE + p] = 0;
+        features[Self::WHITE + Self::STONE_PLANE + p] = 0;
       }
 
       // XXX(20151123): Update liberty features by iterating over placed,
       // adjacent, ko, captured stones, and pseudolibs; see TxnStateLegalityData.
+      tmp_mark.clear();
       if let Some((_, place_point)) = position.last_placed {
         Self::update_point_libs(tmp_mark, features, position, chains, place_point);
         for_each_adjacent(place_point, |adj_point| {
@@ -785,9 +704,6 @@ impl TxnStateData for TxnStateExtLibFeatsData {
         let mut is_valid_head = false;
         if let Some(chain) = chains.get_chain(head) {
           is_valid_head = true;
-          /*for &lib in chain.ps_libs.iter() {
-            Self::update_point_libs(tmp_mark, features, position, chains, lib);
-          }*/
         }
         if is_valid_head {
           chains.iter_chain(head, |ch_pt| {
@@ -804,11 +720,69 @@ impl TxnStateData for TxnStateExtLibFeatsData {
         Self::update_point_ko(features, position, ko_turn, ko_point, true);
       }
 
-      // Update the quantized history features.
-      Self::update_points_history(features, position);
+      // XXX(20160102): Update previous moves.
+      match update_action {
+        Action::Place{point} => {
+          let p = point.idx();
+          features[Self::GRAY + Self::PREV_1_PLANE + p] = SET;
+        }
+        _ => {}
+      }
+      match self.prev_moves[0] {
+        Some((_, prev_point)) => {
+          let p = prev_point.idx();
+          features[Self::GRAY + Self::PREV_1_PLANE + p] = 0;
+          features[Self::GRAY + Self::PREV_2_PLANE + p] = SET;
+        }
+        None => {}
+      }
+      match self.prev_moves[1] {
+        Some((_, prev_point)) => {
+          let p = prev_point.idx();
+          features[Self::GRAY + Self::PREV_2_PLANE + p] = 0;
+          features[Self::GRAY + Self::PREV_3_PLANE + p] = SET;
+        }
+        None => {}
+      }
+      match self.prev_moves[2] {
+        Some((_, prev_point)) => {
+          let p = prev_point.idx();
+          features[Self::GRAY + Self::PREV_3_PLANE + p] = 0;
+        }
+        None => {}
+      }
+      self.prev_moves[2] = self.prev_moves[1];
+      self.prev_moves[1] = self.prev_moves[0];
+      self.prev_moves[0] = match update_action {
+        Action::Place{point} => Some((update_turn, point)),
+        _ => None,
+      };
 
-      // Update the player rank features.
-      Self::update_points_rank(features, position);
+      // XXX(20160103): Update player rank features.
+      match self.black_rank {
+        None => {
+          Self::update_points_rank(features, position, update_turn, position.ranks[0]);
+          self.black_rank = Some(position.ranks[0]);
+        }
+        Some(rank) => {
+          if rank != position.ranks[0] {
+            Self::update_points_rank(features, position, update_turn, position.ranks[0]);
+            self.black_rank = Some(position.ranks[0]);
+          }
+        }
+      }
+      match self.white_rank {
+        None => {
+          Self::update_points_rank(features, position, update_turn, position.ranks[1]);
+          self.white_rank = Some(position.ranks[1]);
+        }
+        Some(rank) => {
+          if rank != position.ranks[1] {
+            Self::update_points_rank(features, position, update_turn, position.ranks[1]);
+            self.white_rank = Some(position.ranks[1]);
+          }
+        }
+      }
     }
   }
 }

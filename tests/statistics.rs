@@ -1,7 +1,9 @@
-extern crate statistics_avx2;
+//extern crate statistics_avx2;
+extern crate holmes;
 extern crate rand;
 
-use statistics_avx2::array::{array_argmax};
+//use statistics_avx2::array::{array_argmax};
+use holmes::array_util::{array_argmax};
 
 use rand::{Rng, thread_rng};
 use rand::distributions::{IndependentSample};
