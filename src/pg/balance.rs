@@ -8,6 +8,9 @@ use search::parallel_policies::convnet::{
 use search::parallel_tree::{
   ParallelMonteCarloSearch,
   ParallelMonteCarloSearchServer,
+  MonteCarloEvalMode,
+  ParallelMonteCarloEval,
+  ParallelMonteCarloEvalServer,
 };
 use txnstate::{TxnState};
 use txnstate::extras::{TxnStateNodeData};
@@ -34,31 +37,33 @@ pub struct PgBalanceMachine {
 
   rng:              Xorshiftplus128Rng,
   search_server:    ParallelMonteCarloSearchServer<ConvnetPolicyWorker>,
-  arch:     PipelineArchWorker<()>,
-  trace:    Trace,
+  eval_server:      ParallelMonteCarloEvalServer<ConvnetRolloutPolicy>,
+  //arch:     PipelineArchWorker<()>,
+  //trace:    Trace,
 
   target_value: f32,
-  mean_value:   f32,
+  eval_value:   f32,
 }
 
 impl PgBalanceMachine {
-  pub fn estimate(&mut self, initial_state: &TxnState<TxnStateNodeData>, ctx: &DeviceCtxRef) {
-    // Estimate target value using search.
+  pub fn estimate(&mut self, init_state: &TxnState<TxnStateNodeData>, ctx: &DeviceCtxRef) {
+    // XXX(20160106): Estimate target value using search.
     let search = ParallelMonteCarloSearch::new();
-    search.join(5120, &self.search_server, initial_state, &mut self.rng);
+    let search_res = search.join(5120, &self.search_server, init_state, &mut self.rng);
+    self.target_value = search_res.expected_value;
 
-    let mut mean_value_accum = 0.0;
-    for i in (0 .. self.value_minibatch_size) {
-      // TODO(20151219): invoke rollout policy.
+    // XXX(20160106): Invoke Monte Carlo evaluation with rollout policy to
+    // compute values.
+    let eval = ParallelMonteCarloEval::new();
+    let eval_res = eval.join(self.value_minibatch_size, &self.eval_server, init_state, MonteCarloEvalMode::Simulation, &mut self.rng);
+    self.eval_value = eval_res.expected_value;
 
-      let reward = self.trace.reward.unwrap();
-      mean_value_accum += reward;
-    }
-    self.mean_value = mean_value_accum / (self.value_minibatch_size as f32);
+    // XXX(20160106): Invoke Monte Carlo evaluation with rollout policy to
+    // compute gradients and update policy parameters.
+    let grad_eval = ParallelMonteCarloEval::new();
+    let grad_eval_res = eval.join(self.grad_minibatch_size, &self.eval_server, init_state, MonteCarloEvalMode::BalanceTraining, &mut self.rng);
 
-    for i in (0 .. self.grad_minibatch_size) {
-      // TODO(20151219): invoke rollout policy.
-
+    /*for i in (0 .. self.grad_minibatch_size) {
       let trace_len = self.trace.pairs.len();
       let reward = self.trace.reward.unwrap();
       let baseline = 0.5;
@@ -74,8 +79,7 @@ impl PgBalanceMachine {
       self.arch.forward(trace_len, Phase::Training, ctx);
       self.arch.backward(trace_len, (reward - baseline) / ((self.grad_minibatch_size * trace_len) as f32), ctx);
     }
-
     self.arch.descend(self.learning_rate * (self.mean_value - self.target_value), 0.0, ctx);
-    self.arch.reset_gradients(0.0, ctx);
+    self.arch.reset_gradients(0.0, ctx);*/
   }
 }

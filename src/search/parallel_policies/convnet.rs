@@ -10,10 +10,11 @@ use discrete::bfilter::{BFilter};
 //use random::{XorShift128PlusRng};
 use search::parallel_policies::{
   SearchPolicyWorkerBuilder, SearchPolicyWorker,
-  PriorPolicy, TreePolicy, RolloutPolicy,
+  PriorPolicy, TreePolicy,
+  RolloutPolicyBuilder, RolloutMode, RolloutPolicy,
 };
 use search::parallel_policies::thompson::{ThompsonTreePolicy};
-use search::parallel_tree::{TreeTraj, RolloutTraj};
+use search::parallel_tree::{TreeTraj, RolloutTraj, Trace};
 use txnstate::{TxnState, check_good_move_fast};
 use txnstate::extras::{TxnStateNodeData, for_each_touched_empty};
 
@@ -39,11 +40,7 @@ impl SearchPolicyWorkerBuilder for ConvnetPolicyWorkerBuilder {
         arch:             build_12layer128_19x19x16_arch(),
       },
       tree_policy:      ThompsonTreePolicy::new(),
-      rollout_policy:   ConvnetRolloutPolicy{
-        context:          context,
-        batch_size:       worker_batch_size,
-        arch:             build_2layer16_19x19x16_arch(),
-      }
+      rollout_policy:   ConvnetRolloutPolicy::new(tid, worker_batch_size),
     }
   }
 }
@@ -93,10 +90,32 @@ impl PriorPolicy for ConvnetPriorPolicy {
   }
 }
 
+#[derive(Clone, Copy)]
+pub struct ConvnetRolloutPolicyBuilder;
+
+impl RolloutPolicyBuilder for ConvnetRolloutPolicyBuilder {
+  fn build_rollout_policy(&self, tid: usize, batch_size: usize) -> ConvnetRolloutPolicy {
+    ConvnetRolloutPolicy::new(tid, batch_size, mode)
+  }
+}
+
 pub struct ConvnetRolloutPolicy {
   context:      Rc<DeviceContext>,
   batch_size:   usize,
+  //mode:         RolloutMode,
   arch:         PipelineArchWorker<()>,
+}
+
+impl ConvnetRolloutPolicy {
+  pub fn new(tid: usize, batch_size: usize) -> ConvnetRolloutPolicy {
+    let context = Rc::new(DeviceContext::new(tid));
+    ConvnetRolloutPolicy{
+      context:    context,
+      batch_size: batch_size,
+      //mode:       mode,
+      arch:       build_2layer16_19x19x16_arch(),
+    }
+  }
 }
 
 impl RolloutPolicy for ConvnetRolloutPolicy {
@@ -104,7 +123,7 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
     self.batch_size
   }
 
-  fn rollout_batch(&mut self, tree_trajs: &[TreeTraj], rollout_trajs: &mut [RolloutTraj], rng: &mut Xorshiftplus128Rng) {
+  fn rollout_batch(&mut self, tree_trajs: &[TreeTraj], rollout_trajs: &mut [RolloutTraj], mode: RolloutMode, rng: &mut Xorshiftplus128Rng) {
     let ctx = (*self.context).as_ref();
     let batch_size = self.batch_size();
     assert!(batch_size <= rollout_trajs.len());
@@ -144,13 +163,21 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
         //self.arch.loss_layer().preload_mask_buf(batch_idx, valid_moves[turn.offset()][batch_idx].as_slice());
       }
 
-      {
-        self.arch.input_layer().load_frames(batch_size, &ctx);
-        // FIXME(20151125): mask softmax output with valid moves.
-        //self.arch.loss_layer().load_masks(batch_size, &ctx);
-        self.arch.forward(batch_size, Phase::Inference, &ctx);
-        self.arch.loss_layer().store_probs(batch_size, &ctx);
+      self.arch.input_layer().load_frames(batch_size, &ctx);
+      // FIXME(20151125): mask softmax output with valid moves.
+      //self.arch.loss_layer().load_masks(batch_size, &ctx);
+      match mode {
+        RolloutMode::Simulation => {
+          self.arch.forward(batch_size, Phase::Inference, &ctx);
+        }
+        // FIXME(20160106): simulation balancing training.
+        RolloutMode::BalanceTraining => {
+          /*self.arch.forward(batch_size, Phase::Training, &ctx);
+          //self.arch.backward(batch_size, , &ctx);*/
+          unimplemented!();
+        }
       }
+      self.arch.loss_layer().store_probs(batch_size, &ctx);
 
       {
         let batch_probs = self.arch.loss_layer().get_probs(batch_size).as_slice();
@@ -233,5 +260,38 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
         }
       }
     }
+  }
+
+  fn rollout_trace(&mut self, trace: Trace, mode: RolloutMode) {
+    let trace_len = trace.traj_pairs.len();
+    let value = trace.value.unwrap();
+    let baseline = 0.5;
+
+    for t in 0 .. trace_len {
+      let state = &self.trace.pairs[t].0;
+      let turn = state.current_turn();
+      state.get_data()
+        .extract_relative_features(
+            turn, self.arch.input_layer().expose_host_frame_buf(t),
+        );
+    }
+    match mode {
+      RolloutMode::Simulation => {
+        unimplemented!();
+      }
+      RolloutMode::BalanceTraining => {
+        self.arch.input_layer().load_frames(trace_len, self.ctx);
+        self.arch.forward(trace_len, Phase::Training, self.ctx);
+        self.arch.backward(trace_len, (reward - baseline) / (trace_len as f32), self.ctx);
+      }
+    }
+
+    // TODO(20160106)
+    unimplemented!();
+  }
+
+  fn descend_params(&mut self, scale: f32) {
+    self.arch.descend(scale, 0.0, self.ctx);
+    self.arch.reset_gradients(0.0, ctx);
   }
 }

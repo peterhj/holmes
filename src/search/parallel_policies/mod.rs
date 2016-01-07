@@ -34,9 +34,23 @@ pub trait TreePolicy {
   fn execute_search(&mut self, node: &Node, rng: &mut Self::R) -> Option<(Point, usize)>;
 }
 
+pub trait RolloutPolicyBuilder: Send + Clone {
+  type R: Rng = Xorshiftplus128Rng;
+  type Policy: RolloutPolicy<R=R>;
+
+  fn build_rollout_policy(&self, tid: usize, batch_size: usize) -> Self::Policy;
+}
+
+pub enum RolloutMode {
+  Simulation,
+  BalanceTraining,
+}
+
 pub trait RolloutPolicy {
   type R: Rng = Xorshiftplus128Rng;
 
   fn batch_size(&self) -> usize;
-  fn rollout_batch(&mut self, tree_trajs: &[TreeTraj], rollout_trajs: &mut [RolloutTraj], rng: &mut Self::R);
+  fn rollout_batch(&mut self, tree_trajs: &[TreeTraj], rollout_trajs: &mut [RolloutTraj], mode: RolloutMode, rng: &mut Self::R);
+  fn rollout_trace(&mut self, trace: &Trace, mode: RolloutMode);
+  fn descend_params(&mut self, scale: f32);
 }
