@@ -1,14 +1,15 @@
 use board::{Action};
 use search::parallel_policies::{
   SearchPolicyWorker,
+  RolloutMode,
 };
 use search::parallel_policies::convnet::{
   ConvnetPolicyWorker,
+  ConvnetRolloutPolicy,
 };
 use search::parallel_tree::{
   ParallelMonteCarloSearch,
   ParallelMonteCarloSearchServer,
-  MonteCarloEvalMode,
   ParallelMonteCarloEval,
   ParallelMonteCarloEvalServer,
 };
@@ -48,20 +49,20 @@ pub struct PgBalanceMachine {
 impl PgBalanceMachine {
   pub fn estimate(&mut self, init_state: &TxnState<TxnStateNodeData>, ctx: &DeviceCtxRef) {
     // XXX(20160106): Estimate target value using search.
-    let search = ParallelMonteCarloSearch::new();
+    let mut search = ParallelMonteCarloSearch::new();
     let search_res = search.join(5120, &self.search_server, init_state, &mut self.rng);
     self.target_value = search_res.expected_value;
 
     // XXX(20160106): Invoke Monte Carlo evaluation with rollout policy to
     // compute values.
     let eval = ParallelMonteCarloEval::new();
-    let eval_res = eval.join(self.value_minibatch_size, &self.eval_server, init_state, MonteCarloEvalMode::Simulation, &mut self.rng);
+    let eval_res = eval.join(self.value_minibatch_size, &self.eval_server, init_state, RolloutMode::Simulation, &mut self.rng);
     self.eval_value = eval_res.expected_value;
 
     // XXX(20160106): Invoke Monte Carlo evaluation with rollout policy to
     // compute gradients and update policy parameters.
     let grad_eval = ParallelMonteCarloEval::new();
-    let grad_eval_res = eval.join(self.grad_minibatch_size, &self.eval_server, init_state, MonteCarloEvalMode::BalanceTraining, &mut self.rng);
+    let grad_eval_res = eval.join(self.grad_minibatch_size, &self.eval_server, init_state, RolloutMode::BalanceTraining, &mut self.rng);
 
     /*for i in (0 .. self.grad_minibatch_size) {
       let trace_len = self.trace.pairs.len();

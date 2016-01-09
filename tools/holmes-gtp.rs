@@ -2,6 +2,7 @@ extern crate getopts;
 extern crate holmes;
 
 use holmes::agents::convnet::{ConvnetAgent};
+use holmes::agents::parallel_search::{ParallelMonteCarloSearchAgent};
 use holmes::agents::search::{SearchAgent};
 use holmes::gtp::{GtpEngine};
 use holmes::gtp_board::{Player};
@@ -34,7 +35,8 @@ fn main() {
     _ => panic!("FATAL: holmes: invalid player: {}", player_str),
   };*/
   //let agent = ConvnetAgent::new();
-  let agent = SearchAgent::new();
+  //let agent = SearchAgent::new();
+  let agent = ParallelMonteCarloSearchAgent::new(None);
   let client = Client::new(agent, host, port, None);
   GtpEngine::new(client).runloop();
 }

@@ -1,6 +1,6 @@
 use board::{Stone, Point};
 //use random::{XorShift128PlusRng};
-use search::parallel_tree::{TreeTraj, RolloutTraj, Node};
+use search::parallel_tree::{TreeTraj, RolloutTraj, Trace, Node};
 use txnstate::{TxnState};
 use txnstate::extras::{TxnStateNodeData};
 
@@ -15,6 +15,7 @@ pub trait SearchPolicyWorkerBuilder: Send + Clone {
   type Worker: SearchPolicyWorker;
 
   fn build_worker(&self, tid: usize, worker_batch_size: usize) -> Self::Worker;
+  fn into_worker(self, tid: usize, worker_batch_size: usize) -> Self::Worker;
 }
 
 pub trait SearchPolicyWorker {
@@ -35,10 +36,29 @@ pub trait TreePolicy {
 }
 
 pub trait RolloutPolicyBuilder: Send + Clone {
-  type R: Rng = Xorshiftplus128Rng;
-  type Policy: RolloutPolicy<R=R>;
+  //type R: Rng = Xorshiftplus128Rng;
+  type Policy: RolloutPolicy<R=Xorshiftplus128Rng>;
 
   fn build_rollout_policy(&self, tid: usize, batch_size: usize) -> Self::Policy;
+}
+
+pub enum RolloutLeafs<'a> {
+  TreeTrajs(&'a [TreeTraj]),
+  States(&'a [TxnState<TxnStateNodeData>]),
+}
+
+impl<'a> RolloutLeafs<'a> {
+  pub fn with_leaf_state<F>(&self, idx: usize, mut f: F)
+  where F: FnMut(&TxnState<TxnStateNodeData>) {
+    match self {
+      &RolloutLeafs::TreeTrajs(tree_trajs) => {
+        f(&tree_trajs[idx].leaf_node.as_ref().unwrap().read().unwrap().state);
+      }
+      &RolloutLeafs::States(states) => {
+        f(&states[idx]);
+      }
+    }
+  }
 }
 
 pub enum RolloutMode {
@@ -50,7 +70,7 @@ pub trait RolloutPolicy {
   type R: Rng = Xorshiftplus128Rng;
 
   fn batch_size(&self) -> usize;
-  fn rollout_batch(&mut self, tree_trajs: &[TreeTraj], rollout_trajs: &mut [RolloutTraj], mode: RolloutMode, rng: &mut Self::R);
+  fn rollout_batch(&mut self, leafs: RolloutLeafs, rollout_trajs: &mut [RolloutTraj], mode: RolloutMode, rng: &mut Self::R);
   fn rollout_trace(&mut self, trace: &Trace, mode: RolloutMode);
   fn descend_params(&mut self, scale: f32);
 }

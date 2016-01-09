@@ -202,6 +202,29 @@ impl TxnStateData for TxnStateNodeData {
 }
 
 #[derive(Clone)]
+pub struct TxnStateRolloutData {
+  pub features: TxnStateLibFeaturesData,
+}
+
+impl TxnStateRolloutData {
+  pub fn new() -> TxnStateRolloutData {
+    TxnStateRolloutData{
+      features: TxnStateLibFeaturesData::new(),
+    }
+  }
+}
+
+impl TxnStateData for TxnStateRolloutData {
+  fn reset(&mut self) {
+    self.features.reset();
+  }
+
+  fn update(&mut self, position: &TxnPosition, chains: &TxnChainsList, update_turn: Stone, update_action: Action) {
+    self.features.update(position, chains, update_turn, update_action);
+  }
+}
+
+#[derive(Clone)]
 pub struct TxnStateAllData {
   pub features: TxnStateFeaturesData,
   pub libfeats: TxnStateLibFeaturesData,

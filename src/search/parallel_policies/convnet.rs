@@ -7,11 +7,10 @@ use convnet_new::{
 };
 use discrete::{DiscreteFilter};
 use discrete::bfilter::{BFilter};
-//use random::{XorShift128PlusRng};
 use search::parallel_policies::{
   SearchPolicyWorkerBuilder, SearchPolicyWorker,
   PriorPolicy, TreePolicy,
-  RolloutPolicyBuilder, RolloutMode, RolloutPolicy,
+  RolloutPolicyBuilder, RolloutMode, RolloutLeafs, RolloutPolicy,
 };
 use search::parallel_policies::thompson::{ThompsonTreePolicy};
 use search::parallel_tree::{TreeTraj, RolloutTraj, Trace};
@@ -19,29 +18,91 @@ use txnstate::{TxnState, check_good_move_fast};
 use txnstate::extras::{TxnStateNodeData, for_each_touched_empty};
 
 use array_cuda::device::{DeviceContext};
-use rembrandt::arch_new::{ArchWorker, PipelineArchWorker};
+use rembrandt::arch_new::{
+  ArchWorker,
+  PipelineArchConfig, PipelineArchSharedData, PipelineArchWorker,
+};
 use rembrandt::layer_new::{Phase};
 use rng::xorshift::{Xorshiftplus128Rng};
 
 use rand::{Rng};
+use std::path::{PathBuf};
 use std::rc::{Rc};
+use std::sync::{Arc};
 
-#[derive(Clone, Copy)]
-pub struct ConvnetPolicyWorkerBuilder;
+pub struct ConvnetPolicyWorkerBuilder {
+  prior_arch_cfg:       PipelineArchConfig,
+  prior_save_path:      PathBuf,
+  prior_shared:         Arc<PipelineArchSharedData>,
+  prior_shared2:        Arc<()>,
+  rollout_arch_cfg:     PipelineArchConfig,
+  rollout_save_path:    PathBuf,
+  rollout_shared:       Arc<PipelineArchSharedData>,
+}
+
+impl ConvnetPolicyWorkerBuilder {
+  pub fn new() -> ConvnetPolicyWorkerBuilder {
+    // FIXME(20160107): need to set up shared data structures here, for
+    // when we call `build_worker`.
+    unimplemented!();
+  }
+}
+
+impl Clone for ConvnetPolicyWorkerBuilder {
+  fn clone(&self) -> ConvnetPolicyWorkerBuilder {
+    // FIXME(20160107)
+    unimplemented!();
+  }
+}
 
 impl SearchPolicyWorkerBuilder for ConvnetPolicyWorkerBuilder {
   type Worker = ConvnetPolicyWorker;
 
   fn build_worker(&self, tid: usize, worker_batch_size: usize) -> ConvnetPolicyWorker {
     let context = Rc::new(DeviceContext::new(tid));
-    ConvnetPolicyWorker{
+    // FIXME(20160107)
+    unimplemented!();
+    /*ConvnetPolicyWorker{
       prior_policy:     ConvnetPriorPolicy{
         context:          context.clone(),
         arch:             build_12layer128_19x19x16_arch(),
       },
       tree_policy:      ThompsonTreePolicy::new(),
       rollout_policy:   ConvnetRolloutPolicy::new(tid, worker_batch_size),
-    }
+    }*/
+  }
+
+  fn into_worker(self, tid: usize, worker_batch_size: usize) -> ConvnetPolicyWorker {
+    let context = Rc::new(DeviceContext::new(tid));
+    let ctx = (*context).as_ref();
+    let prior_policy = ConvnetPriorPolicy{
+      context:  context.clone(),
+      arch:     PipelineArchWorker::new(
+        worker_batch_size,
+        self.prior_arch_cfg,
+        self.prior_save_path,
+        tid,
+        &self.prior_shared,
+        self.prior_shared2.clone(),
+        &ctx,
+      ),
+    };
+    /*ConvnetPolicyWorker{
+      prior_policy:     prior_policy,
+    }*/
+
+    // FIXME(20160107)
+    unimplemented!();
+    /*ConvnetPolicyWorker{
+      prior_policy:     ConvnetPriorPolicy{
+        context:          context.clone(),
+        arch:             build_12layer128_19x19x16_arch(),
+      },
+      tree_policy:      ThompsonTreePolicy::new(),
+      rollout_policy:   ConvnetRolloutPolicy{
+        ...
+      },
+    }*/
   }
 }
 
@@ -94,8 +155,10 @@ impl PriorPolicy for ConvnetPriorPolicy {
 pub struct ConvnetRolloutPolicyBuilder;
 
 impl RolloutPolicyBuilder for ConvnetRolloutPolicyBuilder {
+  type Policy = ConvnetRolloutPolicy;
+
   fn build_rollout_policy(&self, tid: usize, batch_size: usize) -> ConvnetRolloutPolicy {
-    ConvnetRolloutPolicy::new(tid, batch_size, mode)
+    ConvnetRolloutPolicy::new(tid, batch_size)
   }
 }
 
@@ -109,12 +172,14 @@ pub struct ConvnetRolloutPolicy {
 impl ConvnetRolloutPolicy {
   pub fn new(tid: usize, batch_size: usize) -> ConvnetRolloutPolicy {
     let context = Rc::new(DeviceContext::new(tid));
-    ConvnetRolloutPolicy{
+    // FIXME(20160107)
+    unimplemented!();
+    /*ConvnetRolloutPolicy{
       context:    context,
       batch_size: batch_size,
       //mode:       mode,
       arch:       build_2layer16_19x19x16_arch(),
-    }
+    }*/
   }
 }
 
@@ -123,7 +188,7 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
     self.batch_size
   }
 
-  fn rollout_batch(&mut self, tree_trajs: &[TreeTraj], rollout_trajs: &mut [RolloutTraj], mode: RolloutMode, rng: &mut Xorshiftplus128Rng) {
+  fn rollout_batch(&mut self, leafs: RolloutLeafs, rollout_trajs: &mut [RolloutTraj], mode: RolloutMode, rng: &mut Xorshiftplus128Rng) {
     let ctx = (*self.context).as_ref();
     let batch_size = self.batch_size();
     assert!(batch_size <= rollout_trajs.len());
@@ -134,9 +199,13 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
     let mut num_both_passed = 0;
     let mut filters = vec![];
     for idx in (0 .. batch_size) {
-      let leaf_node = tree_trajs[idx].leaf_node.as_ref().unwrap().read().unwrap();
+      /*let leaf_node = tree_trajs[idx].leaf_node.as_ref().unwrap().read().unwrap();
       valid_moves[0].push(leaf_node.state.get_data().legality.legal_points(Stone::Black));
-      valid_moves[1].push(leaf_node.state.get_data().legality.legal_points(Stone::White));
+      valid_moves[1].push(leaf_node.state.get_data().legality.legal_points(Stone::White));*/
+      leafs.with_leaf_state(idx, |state| {
+        valid_moves[0].push(state.get_data().legality.legal_points(Stone::Black));
+        valid_moves[1].push(state.get_data().legality.legal_points(Stone::White));
+      });
       bad_moves[0].push(vec![]);
       bad_moves[1].push(vec![]);
       turn_pass[0].push(false);
@@ -262,13 +331,15 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
     }
   }
 
-  fn rollout_trace(&mut self, trace: Trace, mode: RolloutMode) {
-    let trace_len = trace.traj_pairs.len();
+  fn rollout_trace(&mut self, trace: &Trace, mode: RolloutMode) {
+    let ctx = (*self.context).as_ref();
+
+    let trace_len = trace.pairs.len();
     let value = trace.value.unwrap();
     let baseline = 0.5;
 
     for t in 0 .. trace_len {
-      let state = &self.trace.pairs[t].0;
+      let state = &trace.pairs[t].0;
       let turn = state.current_turn();
       state.get_data()
         .extract_relative_features(
@@ -280,9 +351,9 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
         unimplemented!();
       }
       RolloutMode::BalanceTraining => {
-        self.arch.input_layer().load_frames(trace_len, self.ctx);
-        self.arch.forward(trace_len, Phase::Training, self.ctx);
-        self.arch.backward(trace_len, (reward - baseline) / (trace_len as f32), self.ctx);
+        self.arch.input_layer().load_frames(trace_len, &ctx);
+        self.arch.forward(trace_len, Phase::Training, &ctx);
+        self.arch.backward(trace_len, (value - baseline) / (trace_len as f32), &ctx);
       }
     }
 
@@ -291,7 +362,8 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
   }
 
   fn descend_params(&mut self, scale: f32) {
-    self.arch.descend(scale, 0.0, self.ctx);
-    self.arch.reset_gradients(0.0, ctx);
+    let ctx = (*self.context).as_ref();
+    self.arch.descend(scale, 0.0, &ctx);
+    self.arch.reset_gradients(0.0, &ctx);
   }
 }

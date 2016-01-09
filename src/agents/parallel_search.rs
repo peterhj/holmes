@@ -5,30 +5,38 @@ use search::parallel_policies::convnet::{
   ConvnetPolicyWorkerBuilder, ConvnetPolicyWorker,
 };
 use search::parallel_tree::{
+  MonteCarloSearchResult,
   ParallelMonteCarloSearchServer, ParallelMonteCarloSearch,
 };
 use txnstate::{TxnState};
 use txnstate::extras::{TxnStateNodeData};
 
 use async_cuda::context::{DeviceContext};
+use cuda::runtime::{CudaDevice};
 use rng::xorshift::{Xorshiftplus128Rng};
 
+use rand::{Rng, thread_rng};
+use std::cmp::{max};
 use std::path::{PathBuf};
 
 pub struct ParallelMonteCarloSearchAgent {
   komi:     f32,
   player:   Option<Stone>,
 
-  history:  Vec<(TxnState<TxnStateNodeData>, Action, Option<SearchResult>)>,
+  history:  Vec<(TxnState<TxnStateNodeData>, Action, Option<MonteCarloSearchResult>)>,
   state:    TxnState<TxnStateNodeData>,
-  result:   Option<SearchResult>,
+  //result:   Option<SearchResult>,
+  result:   Option<MonteCarloSearchResult>,
 
   server:   ParallelMonteCarloSearchServer<ConvnetPolicyWorker>,
 }
 
 impl ParallelMonteCarloSearchAgent {
-  pub fn new(num_workers: usize) -> ParallelMonteCarloSearchAgent {
+  pub fn new(num_workers: Option<usize>) -> ParallelMonteCarloSearchAgent {
     let batch_size = 256;
+    let num_devices = CudaDevice::count().unwrap();
+    let num_workers = num_workers.unwrap_or(num_devices);
+    let num_workers = max(num_workers, num_devices);
     ParallelMonteCarloSearchAgent{
       komi:     0.0,
       player:   None,
@@ -39,7 +47,7 @@ impl ParallelMonteCarloSearchAgent {
           TxnStateNodeData::new(),
       ),
       result:   None,
-      server:   ParallelMonteCarloSearchServer::new(num_workers, batch_size / num_workers, ConvnetPolicyWorkerBuilder),
+      server:   ParallelMonteCarloSearchServer::new(num_workers, batch_size / num_workers, ConvnetPolicyWorkerBuilder::new()),
     }
   }
 }
@@ -113,10 +121,12 @@ impl Agent for ParallelMonteCarloSearchAgent {
     self.result = Some(result);
     result.action*/
 
+    let num_rollouts = 5120;
+    let mut rng = Xorshiftplus128Rng::new(&mut thread_rng());
     let mut search = ParallelMonteCarloSearch::new();
-    //search.join();
-
-    // TODO(20151225)
-    unimplemented!();
+    let search_res = search.join(num_rollouts, &mut self.server, &self.state, &mut rng);
+    println!("DEBUG: search result: {:?}", search_res);
+    self.result = Some(search_res);
+    search_res.action
   }
 }
