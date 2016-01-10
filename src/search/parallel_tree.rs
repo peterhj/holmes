@@ -21,7 +21,7 @@ use threadpool::{ThreadPool};
 
 use bit_set::{BitSet};
 use rand::{Rng, SeedableRng, thread_rng};
-use std::cmp::{max};
+use std::cmp::{max, min};
 use std::iter::{repeat};
 use std::marker::{PhantomData};
 use std::sync::{Arc, Barrier, RwLock};
@@ -222,24 +222,26 @@ impl Node {
     let mut valid_moves = vec![];
     state.get_data().legality.fill_legal_points(state.current_turn(), &mut valid_moves);
     let num_arms = valid_moves.len();
-    // FIXME(20151224): progressive widening.
-    let init_horizon = num_arms;
-    let mut values = NodeValues::new(num_arms);
-    let mut action_priors = vec![];
-    let mut action_idxs = VecMap::with_capacity(Board::SIZE);
+
+    // FIXME(20160109): progressive widening.
+    let init_horizon = min(1, num_arms);
 
     // XXX(20151224): Sort moves by descending value for progressive widening.
+    let mut values = NodeValues::new(num_arms);
+    let mut action_priors = vec![];
     prior_policy.fill_prior_values(&state, &valid_moves, &mut action_priors);
     action_priors.sort_by(|left, right| {
       F32InfNan(right.1).cmp(&F32InfNan(left.1))
     });
-    for j in (0 .. num_arms) {
+    println!("DEBUG: node top actions: {:?}", &action_priors[ .. min(10, action_priors.len())]);
+    for j in 0 .. num_arms {
       valid_moves[j] = action_priors[j].0;
       values.prior_values[j] = action_priors[j].1;
     }
 
     let child_nodes: Vec<_> = repeat(None).take(num_arms).collect();
-    for j in (0 .. num_arms) {
+    let mut action_idxs = VecMap::with_capacity(Board::SIZE);
+    for j in 0 .. num_arms {
       action_idxs.insert(valid_moves[j].idx(), j);
     }
     Node{
@@ -377,6 +379,7 @@ impl Tree {
                   panic!("walk failed due to illegal move: {:?}", e);
                 }
               }
+              // FIXME(20160109): check for race.
               let mut leaf_node = Arc::new(RwLock::new(Node::new(leaf_state, prior_policy)));
               cursor_node.write().unwrap().child_nodes[j] = Some(leaf_node.clone());
               cursor_node = leaf_node;
@@ -618,13 +621,13 @@ pub struct ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
 impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
   pub fn new<B>(num_workers: usize, worker_batch_size: usize, worker_builder: B) -> ParallelMonteCarloSearchServer<W>
   where B: 'static + SearchPolicyWorkerBuilder<Worker=W> {
-    let barrier = Arc::new(Barrier::new(num_workers + 1));
+    let barrier = Arc::new(Barrier::new(num_workers));
     let pool = ThreadPool::new(num_workers);
     let mut in_txs = vec![];
     let (out_tx, out_rx) = channel();
 
     for tid in 0 .. num_workers {
-      let builder = worker_builder.clone();
+      let worker_builder = worker_builder.clone();
       let barrier = barrier.clone();
 
       let (in_tx, in_rx) = channel();
@@ -633,7 +636,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
 
       pool.execute(move || {
         let mut rng = Xorshiftplus128Rng::new(&mut thread_rng());
-        let mut worker = builder.build_worker(tid, worker_batch_size);
+        let mut worker = worker_builder.into_worker(tid, worker_batch_size);
         let barrier = barrier;
         let in_rx = in_rx;
         let out_tx = out_tx;
@@ -653,6 +656,8 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
           };
           let batch_size = cfg.batch_size;
           let num_batches = cfg.num_batches;
+          println!("DEBUG: search worker {}: batch size {} num_batches {}",
+              tid, batch_size, num_batches);
 
           let mut tree_trajs: Vec<_> = repeat(TreeTraj::new()).take(batch_size).collect();
           let mut rollout_trajs: Vec<_> = repeat(RolloutTraj::new()).take(batch_size).collect();
@@ -664,7 +669,15 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
               let (prior_policy, tree_policy) = worker.prior_and_tree_policies();
               for batch_idx in 0 .. batch_size {
                 let tree_traj = &mut tree_trajs[batch_idx];
-                tree.traverse(tree_traj, prior_policy, tree_policy, &mut stats, &mut rng);
+                let rollout_traj = &mut rollout_trajs[batch_idx];
+                match tree.traverse(tree_traj, prior_policy, tree_policy, &mut stats, &mut rng) {
+                  TreeResult::Terminal => {
+                    rollout_traj.reset_terminal();
+                  }
+                  TreeResult::NonTerminal => {
+                    rollout_traj.reset_rollout(tree_traj);
+                  }
+                }
               }
             }
 
@@ -673,15 +686,16 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
             for batch_idx in 0 .. batch_size {
               let tree_traj = &tree_trajs[batch_idx];
               let rollout_traj = &mut rollout_trajs[batch_idx];
+              // FIXME(20160109): use correct values of komi and previous score.
+              rollout_traj.score(7.5, 0.0);
               tree.backup(tree_traj, rollout_traj, &mut rng);
             }
 
             barrier.wait();
           }
 
+          out_tx.send(()).unwrap();
         }
-
-        out_tx.send(()).unwrap();
       });
     }
 
@@ -709,7 +723,9 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
   }
 
   pub fn sync(&self) {
-    self.barrier.wait();
+    // FIXME(20160109): should have separate "internal" and "external" barriers.
+    unimplemented!();
+    //self.barrier.wait();
   }
 
   pub fn join(&self) {
@@ -774,11 +790,11 @@ impl ParallelMonteCarloSearch {
         init_state: init_state.clone(),
       });
     }
-    server.sync();
-    /*for tid in 0 .. num_workers {
+    /*server.sync();
+    for tid in 0 .. num_workers {
       server.enqueue(tid, SearchWorkerCommand::Quit);
-    }
-    server.join();*/
+    }*/
+    server.join();
 
     let root_node_opt = tree.root_node.read().unwrap();
     let root_node = root_node_opt.as_ref().unwrap().read().unwrap();

@@ -16,7 +16,7 @@ use cuda::runtime::{CudaDevice};
 use rng::xorshift::{Xorshiftplus128Rng};
 
 use rand::{Rng, thread_rng};
-use std::cmp::{max};
+use std::cmp::{min};
 use std::path::{PathBuf};
 
 pub struct ParallelMonteCarloSearchAgent {
@@ -36,7 +36,8 @@ impl ParallelMonteCarloSearchAgent {
     let batch_size = 256;
     let num_devices = CudaDevice::count().unwrap();
     let num_workers = num_workers.unwrap_or(num_devices);
-    let num_workers = max(num_workers, num_devices);
+    let num_workers = min(num_workers, num_devices);
+    let worker_batch_size = batch_size / num_workers;
     ParallelMonteCarloSearchAgent{
       komi:     0.0,
       player:   None,
@@ -47,7 +48,10 @@ impl ParallelMonteCarloSearchAgent {
           TxnStateNodeData::new(),
       ),
       result:   None,
-      server:   ParallelMonteCarloSearchServer::new(num_workers, batch_size / num_workers, ConvnetPolicyWorkerBuilder::new()),
+      server:   ParallelMonteCarloSearchServer::new(
+                    num_workers, worker_batch_size,
+                    ConvnetPolicyWorkerBuilder::new(num_workers, worker_batch_size),
+                ),
     }
   }
 }
@@ -106,20 +110,6 @@ impl Agent for ParallelMonteCarloSearchAgent {
       self.state.set_turn(turn);
     }
     assert_eq!(turn, self.state.current_turn());
-
-    /*let mut search = Search::new(5120);
-    let mut tree = Tree::new(self.state.clone(), &mut self.prior_policy, &mut self.tree_policy);
-    let result = search.join(
-        &mut tree,
-        &mut self.prior_policy,
-        &mut self.tree_policy,
-        &mut self.roll_policy,
-        self.komi,
-        self.result.as_ref());
-    println!("DEBUG: search stats:  {:?}", search.stats);
-    println!("DEBUG: search result: {:?}", result);
-    self.result = Some(result);
-    result.action*/
 
     let num_rollouts = 5120;
     let mut rng = Xorshiftplus128Rng::new(&mut thread_rng());

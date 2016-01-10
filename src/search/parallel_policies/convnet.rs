@@ -17,7 +17,7 @@ use search::parallel_tree::{TreeTraj, RolloutTraj, Trace};
 use txnstate::{TxnState, check_good_move_fast};
 use txnstate::extras::{TxnStateNodeData, for_each_touched_empty};
 
-use array_cuda::device::{DeviceContext};
+use array_cuda::device::{DeviceContext, for_all_devices};
 use rembrandt::arch_new::{
   ArchWorker,
   PipelineArchConfig, PipelineArchSharedData, PipelineArchWorker,
@@ -30,6 +30,7 @@ use std::path::{PathBuf};
 use std::rc::{Rc};
 use std::sync::{Arc};
 
+#[derive(Clone)]
 pub struct ConvnetPolicyWorkerBuilder {
   prior_arch_cfg:       PipelineArchConfig,
   prior_save_path:      PathBuf,
@@ -38,39 +39,34 @@ pub struct ConvnetPolicyWorkerBuilder {
   rollout_arch_cfg:     PipelineArchConfig,
   rollout_save_path:    PathBuf,
   rollout_shared:       Arc<PipelineArchSharedData>,
+  rollout_shared2:      Arc<()>,
 }
 
 impl ConvnetPolicyWorkerBuilder {
-  pub fn new() -> ConvnetPolicyWorkerBuilder {
-    // FIXME(20160107): need to set up shared data structures here, for
-    // when we call `build_worker`.
-    unimplemented!();
-  }
-}
-
-impl Clone for ConvnetPolicyWorkerBuilder {
-  fn clone(&self) -> ConvnetPolicyWorkerBuilder {
-    // FIXME(20160107)
-    unimplemented!();
+  pub fn new(num_workers: usize, worker_batch_size: usize) -> ConvnetPolicyWorkerBuilder {
+    let (prior_arch_cfg, prior_save_path) = build_12layer128_19x19x16_arch(1);
+    let (rollout_arch_cfg, rollout_save_path) = build_2layer16_19x19x16_arch(worker_batch_size);
+    let prior_shared = for_all_devices(num_workers, |contexts| {
+      Arc::new(PipelineArchSharedData::new(num_workers, &prior_arch_cfg, contexts))
+    });
+    let rollout_shared = for_all_devices(num_workers, |contexts| {
+      Arc::new(PipelineArchSharedData::new(num_workers, &rollout_arch_cfg, contexts))
+    });
+    ConvnetPolicyWorkerBuilder{
+      prior_arch_cfg:       prior_arch_cfg,
+      prior_save_path:      prior_save_path,
+      prior_shared:         prior_shared,
+      prior_shared2:        Arc::new(()),
+      rollout_arch_cfg:     rollout_arch_cfg,
+      rollout_save_path:    rollout_save_path,
+      rollout_shared:       rollout_shared,
+      rollout_shared2:      Arc::new(()),
+    }
   }
 }
 
 impl SearchPolicyWorkerBuilder for ConvnetPolicyWorkerBuilder {
   type Worker = ConvnetPolicyWorker;
-
-  fn build_worker(&self, tid: usize, worker_batch_size: usize) -> ConvnetPolicyWorker {
-    let context = Rc::new(DeviceContext::new(tid));
-    // FIXME(20160107)
-    unimplemented!();
-    /*ConvnetPolicyWorker{
-      prior_policy:     ConvnetPriorPolicy{
-        context:          context.clone(),
-        arch:             build_12layer128_19x19x16_arch(),
-      },
-      tree_policy:      ThompsonTreePolicy::new(),
-      rollout_policy:   ConvnetRolloutPolicy::new(tid, worker_batch_size),
-    }*/
-  }
 
   fn into_worker(self, tid: usize, worker_batch_size: usize) -> ConvnetPolicyWorker {
     let context = Rc::new(DeviceContext::new(tid));
@@ -78,7 +74,7 @@ impl SearchPolicyWorkerBuilder for ConvnetPolicyWorkerBuilder {
     let prior_policy = ConvnetPriorPolicy{
       context:  context.clone(),
       arch:     PipelineArchWorker::new(
-        worker_batch_size,
+        1,
         self.prior_arch_cfg,
         self.prior_save_path,
         tid,
@@ -87,22 +83,25 @@ impl SearchPolicyWorkerBuilder for ConvnetPolicyWorkerBuilder {
         &ctx,
       ),
     };
-    /*ConvnetPolicyWorker{
+    let tree_policy = ThompsonTreePolicy::new();
+    let rollout_policy = ConvnetRolloutPolicy{
+      context:      context.clone(),
+      batch_size:   worker_batch_size,
+      arch:         PipelineArchWorker::new(
+        worker_batch_size,
+        self.rollout_arch_cfg,
+        self.rollout_save_path,
+        tid,
+        &self.rollout_shared,
+        self.rollout_shared2.clone(),
+        &ctx,
+      ),
+    };
+    ConvnetPolicyWorker{
       prior_policy:     prior_policy,
-    }*/
-
-    // FIXME(20160107)
-    unimplemented!();
-    /*ConvnetPolicyWorker{
-      prior_policy:     ConvnetPriorPolicy{
-        context:          context.clone(),
-        arch:             build_12layer128_19x19x16_arch(),
-      },
-      tree_policy:      ThompsonTreePolicy::new(),
-      rollout_policy:   ConvnetRolloutPolicy{
-        ...
-      },
-    }*/
+      tree_policy:      tree_policy,
+      rollout_policy:   rollout_policy,
+    }
   }
 }
 

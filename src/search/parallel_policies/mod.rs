@@ -14,7 +14,7 @@ pub mod thompson;
 pub trait SearchPolicyWorkerBuilder: Send + Clone {
   type Worker: SearchPolicyWorker;
 
-  fn build_worker(&self, tid: usize, worker_batch_size: usize) -> Self::Worker;
+  //fn build_worker(&self, tid: usize, worker_batch_size: usize) -> Self::Worker;
   fn into_worker(self, tid: usize, worker_batch_size: usize) -> Self::Worker;
 }
 

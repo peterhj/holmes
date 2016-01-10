@@ -10,7 +10,9 @@ use rembrandt::layer_new::{
   CategoricalLossLayerConfig,
 };
 
-pub fn build_2layer16_19x19x16_arch(batch_size: usize, ctx: &DeviceCtxRef) -> PipelineArchWorker<()> {
+use std::path::{PathBuf};
+
+pub fn build_2layer16_19x19x16_arch(batch_size: usize) -> (PipelineArchConfig, PathBuf) {
   let input_channels = 16;
 
   let data_layer_cfg = Data3dLayerConfig{
@@ -46,11 +48,12 @@ pub fn build_2layer16_19x19x16_arch(batch_size: usize, ctx: &DeviceCtxRef) -> Pi
     .conv2d(conv2_layer_cfg)
     .softmax_kl_loss(loss_layer_cfg);
 
-  // TODO(20151228)
-  unimplemented!();
+  let save_path = PathBuf::from("experiments/models/action_2layer_19x19x16.v2.saved");
+
+  (arch_cfg, save_path)
 }
 
-pub fn build_12layer128_19x19x16_arch(batch_size: usize, ctx: &DeviceCtxRef) -> PipelineArchWorker<()> {
+pub fn build_12layer128_19x19x16_arch(batch_size: usize) -> (PipelineArchConfig, PathBuf) {
   let input_channels = 16;
   let conv1_channels = 128;
   let hidden_channels = 128;
@@ -116,6 +119,7 @@ pub fn build_12layer128_19x19x16_arch(batch_size: usize, ctx: &DeviceCtxRef) -> 
     .conv2d(final_conv_layer_cfg)
     .softmax_kl_loss(loss_layer_cfg);
 
-  // TODO(20151228)
-  unimplemented!();
+  let save_path = PathBuf::from("experiments/models/action_12layer_19x19x16.v2.saved");
+
+  (arch_cfg, save_path)
 }

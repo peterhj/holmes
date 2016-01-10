@@ -19,8 +19,8 @@ HOLMES_PRELUDE=
 #HOLMES="./target/release/holmes-gtp -h 127.0.0.1 -p 6060"
 #HOLMES="experiments/logs/holmes_3layer_uct1k_fix-vs-gnugo/holmes-gtp -h 127.0.0.1 -p ${BLACK_PORT}"
 
-#HOLMES="./target/debug/holmes-gtp -h 127.0.0.1 -p ${BLACK_PORT}"
-HOLMES="./target/release/holmes-gtp -h 127.0.0.1 -p ${BLACK_PORT}"
+HOLMES="./target/debug/holmes-gtp -h 127.0.0.1 -p ${BLACK_PORT}"
+#HOLMES="./target/release/holmes-gtp -h 127.0.0.1 -p ${BLACK_PORT}"
 
 RUST_BACKTRACE=1 ./target/release/gtpctl ${BLACK_PORT} ${WHITE_PORT} &
 sleep 5

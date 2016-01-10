@@ -8,6 +8,7 @@ use rng::xorshift::{Xorshiftplus128Rng};
 
 use rand::distributions::{IndependentSample};
 use rand::distributions::gamma::{Gamma};
+use std::iter::{repeat};
 use std::sync::atomic::{Ordering};
 
 pub struct ThompsonTreePolicy {
@@ -25,14 +26,14 @@ impl ThompsonTreePolicy {
       prior_equiv:  100.0,
       rave:         true,
       rave_equiv:   3000.0,
-      tmp_values:   Vec::with_capacity(Board::SIZE),
+      tmp_values:   repeat(0.0).take(Board::SIZE).collect(),
     }
   }
 }
 
 impl TreePolicy for ThompsonTreePolicy {
   fn execute_search(&mut self, node: &Node, rng: &mut Xorshiftplus128Rng) -> Option<(Point, usize)> {
-    for j in (0 .. node.horizon) {
+    for j in 0 .. node.horizon {
       let n = node.values.num_trials[j].load(Ordering::Acquire) as f32;
       let s = node.values.num_succs[j].load(Ordering::Acquire) as f32;
       let (pn, ps) = if !self.prior {
