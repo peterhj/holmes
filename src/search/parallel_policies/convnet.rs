@@ -71,9 +71,7 @@ impl SearchPolicyWorkerBuilder for ConvnetPolicyWorkerBuilder {
   fn into_worker(self, tid: usize, worker_batch_size: usize) -> ConvnetPolicyWorker {
     let context = Rc::new(DeviceContext::new(tid));
     let ctx = (*context).as_ref();
-    let prior_policy = ConvnetPriorPolicy{
-      context:  context.clone(),
-      arch:     PipelineArchWorker::new(
+    let mut prior_arch = PipelineArchWorker::new(
         1,
         self.prior_arch_cfg,
         self.prior_save_path,
@@ -81,13 +79,9 @@ impl SearchPolicyWorkerBuilder for ConvnetPolicyWorkerBuilder {
         &self.prior_shared,
         self.prior_shared2.clone(),
         &ctx,
-      ),
-    };
-    let tree_policy = ThompsonTreePolicy::new();
-    let rollout_policy = ConvnetRolloutPolicy{
-      context:      context.clone(),
-      batch_size:   worker_batch_size,
-      arch:         PipelineArchWorker::new(
+    );
+    prior_arch.load_layer_params(None, &ctx);
+    let mut rollout_arch = PipelineArchWorker::new(
         worker_batch_size,
         self.rollout_arch_cfg,
         self.rollout_save_path,
@@ -95,7 +89,17 @@ impl SearchPolicyWorkerBuilder for ConvnetPolicyWorkerBuilder {
         &self.rollout_shared,
         self.rollout_shared2.clone(),
         &ctx,
-      ),
+    );
+    rollout_arch.load_layer_params(None, &ctx);
+    let prior_policy = ConvnetPriorPolicy{
+      context:  context.clone(),
+      arch:     prior_arch,
+    };
+    let tree_policy = ThompsonTreePolicy::new();
+    let rollout_policy = ConvnetRolloutPolicy{
+      context:      context.clone(),
+      batch_size:   worker_batch_size,
+      arch:         rollout_arch,
     };
     ConvnetPolicyWorker{
       prior_policy:     prior_policy,
@@ -197,7 +201,7 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
     let mut turn_pass = vec![vec![], vec![]];
     let mut num_both_passed = 0;
     let mut filters = vec![];
-    for idx in (0 .. batch_size) {
+    for idx in 0 .. batch_size {
       /*let leaf_node = tree_trajs[idx].leaf_node.as_ref().unwrap().read().unwrap();
       valid_moves[0].push(leaf_node.state.get_data().legality.legal_points(Stone::Black));
       valid_moves[1].push(leaf_node.state.get_data().legality.legal_points(Stone::White));*/
@@ -218,7 +222,7 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
         break;
       }
 
-      for batch_idx in (0 .. batch_size) {
+      for batch_idx in 0 .. batch_size {
         if !rollout_trajs[batch_idx].rollout {
           continue;
         }
@@ -249,7 +253,7 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
 
       {
         let batch_probs = self.arch.loss_layer().get_probs(batch_size).as_slice();
-        for batch_idx in (0 .. batch_size) {
+        for batch_idx in 0 .. batch_size {
           if !rollout_trajs[batch_idx].rollout {
             continue;
           }
@@ -257,7 +261,7 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
         }
       }
 
-      for batch_idx in (0 .. batch_size) {
+      for batch_idx in 0 .. batch_size {
         if !rollout_trajs[batch_idx].rollout {
           continue;
         }

@@ -29,6 +29,17 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{Sender, Receiver, channel};
 use vec_map::{VecMap};
 
+pub fn atomic_increment(x: &AtomicUsize) {
+  loop {
+    let prev_x = x.load(Ordering::Acquire);
+    let curr_x = x.compare_and_swap(prev_x, prev_x + 1, Ordering::AcqRel);
+    if prev_x == curr_x {
+      return;
+    }
+  }
+  //x.fetch_add(1, Ordering::SeqCst);
+}
+
 pub struct HyperparamConfig {
   pub prior:        bool,
   pub prior_equiv:  f32,
@@ -212,12 +223,6 @@ pub struct Node {
 }
 
 impl Node {
-  /*pub fn new_bare(state: TxnState<TxnStateNodeData>) -> Node {
-    // FIXME(20160106): should initialize Tree with a "bare" Node that does not
-    // require prior initialization (which depends on a worker).
-    unimplemented!();
-  }*/
-
   pub fn new(state: TxnState<TxnStateNodeData>, prior_policy: &mut PriorPolicy) -> Node {
     let mut valid_moves = vec![];
     state.get_data().legality.fill_legal_points(state.current_turn(), &mut valid_moves);
@@ -233,7 +238,7 @@ impl Node {
     action_priors.sort_by(|left, right| {
       F32InfNan(right.1).cmp(&F32InfNan(left.1))
     });
-    println!("DEBUG: node top actions: {:?}", &action_priors[ .. min(10, action_priors.len())]);
+    //println!("DEBUG: node top actions: {:?}", &action_priors[ .. min(10, action_priors.len())]);
     for j in 0 .. num_arms {
       valid_moves[j] = action_priors[j].0;
       values.prior_values[j] = action_priors[j].1;
@@ -254,36 +259,36 @@ impl Node {
     }
   }
 
-  /*pub fn reset(&mut self, prior_policy: &mut PriorPolicy) {
-    // FIXME(20160106)
-    unimplemented!();
-  }*/
-
   pub fn is_terminal(&self) -> bool {
     self.valid_moves.is_empty()
   }
 
   pub fn update_visits(&self) {
-    self.values.total_trials.fetch_add(1, Ordering::AcqRel);
+    //self.values.total_trials.fetch_add(1, Ordering::AcqRel);
+    atomic_increment(&self.values.total_trials);
   }
 
   pub fn update_arm(&self, j: usize, score: f32) {
     let turn = self.state.current_turn();
-    self.values.num_trials[j].fetch_add(1, Ordering::AcqRel);
+    //self.values.num_trials[j].fetch_add(1, Ordering::AcqRel);
+    atomic_increment(&self.values.num_trials[j]);
     if (Stone::White == turn && score >= 0.0) ||
         (Stone::Black == turn && score < 0.0)
     {
-      self.values.num_succs[j].fetch_add(1, Ordering::AcqRel);
+      //self.values.num_succs[j].fetch_add(1, Ordering::AcqRel);
+      atomic_increment(&self.values.num_succs[j]);
     }
   }
 
   pub fn rave_update_arm(&self, j: usize, score: f32) {
     let turn = self.state.current_turn();
-    self.values.num_trials_rave[j].fetch_add(1, Ordering::AcqRel);
+    //self.values.num_trials_rave[j].fetch_add(1, Ordering::AcqRel);
+    atomic_increment(&self.values.num_trials_rave[j]);
     if (Stone::White == turn && score >= 0.0) ||
         (Stone::Black == turn && score < 0.0)
     {
-      self.values.num_succs_rave[j].fetch_add(1, Ordering::AcqRel);
+      //self.values.num_succs_rave[j].fetch_add(1, Ordering::AcqRel);
+      atomic_increment(&self.values.num_succs_rave[j]);
     }
   }
 }
@@ -298,11 +303,6 @@ pub struct Tree {
   //root_node:    Arc<RwLock<Node>>,
   root_node:    Arc<RwLock<Option<Arc<RwLock<Node>>>>>,
 }
-
-/*impl Drop for Tree {
-  fn drop(&mut self) {
-  }
-}*/
 
 impl Clone for Tree {
   fn clone(&self) -> Tree {
@@ -367,23 +367,33 @@ impl Tree {
               cursor_node = child_node;
               stats.inner_edge_count += 1;
             } else {
-              // Create a new leaf node and stop the walk.
-              let mut leaf_state = cursor_node.read().unwrap().state.clone();
-              let turn = leaf_state.current_turn();
-              match leaf_state.try_place(turn, place_point) {
-                Ok(_) => {
-                  leaf_state.commit();
+              let leaf_node = {
+                // XXX(20160111): Try to insert a new leaf node, but check for a
+                // race if another thread has done so first.
+                let mut cursor_node = cursor_node.write().unwrap();
+                if cursor_node.child_nodes[j].is_none() {
+                  // Create a new leaf node and stop the walk.
+                  let mut leaf_state = cursor_node.state.clone();
+                  let turn = leaf_state.current_turn();
+                  match leaf_state.try_place(turn, place_point) {
+                    Ok(_) => {
+                      leaf_state.commit();
+                    }
+                    Err(e) => {
+                      // XXX: this means the legal moves features gave an incorrect result.
+                      panic!("walk failed due to illegal move: {:?}", e);
+                    }
+                  }
+                  let mut leaf_node = Arc::new(RwLock::new(Node::new(leaf_state, prior_policy)));
+                  cursor_node.child_nodes[j] = Some(leaf_node.clone());
+                  //cursor_node = leaf_node;
+                  stats.new_leaf_count += 1;
+                  leaf_node
+                } else {
+                  cursor_node.child_nodes[j].as_ref().unwrap().clone()
                 }
-                Err(e) => {
-                  // XXX: this means the legal moves features gave an incorrect result.
-                  panic!("walk failed due to illegal move: {:?}", e);
-                }
-              }
-              // FIXME(20160109): check for race.
-              let mut leaf_node = Arc::new(RwLock::new(Node::new(leaf_state, prior_policy)));
-              cursor_node.write().unwrap().child_nodes[j] = Some(leaf_node.clone());
+              };
               cursor_node = leaf_node;
-              stats.new_leaf_count += 1;
               break;
             }
           }
@@ -417,6 +427,8 @@ impl Tree {
     rollout_traj.rave_mask[1].clear();
     let raw_score = rollout_traj.raw_score.unwrap();
     let adj_score = rollout_traj.adj_score.unwrap();
+
+    //println!("DEBUG: Tree.backup(): update leaf node");
 
     if rollout_traj.sim_pairs.len() >= 1 {
       assert!(rollout_traj.rollout);
@@ -452,7 +464,12 @@ impl Tree {
       leaf_node.update_visits();
     }
 
+    /*let num_backup_triples = tree_traj.backup_triples.len();
+    for (i, &(ref node, update_point, update_j)) in tree_traj.backup_triples.iter().rev().enumerate() {*/
     for &(ref node, update_point, update_j) in tree_traj.backup_triples.iter().rev() {
+      //println!("DEBUG: Tree.backup(): update tree traj node {}/{}",
+      //    i, num_backup_triples);
+
       let node = node.read().unwrap();
 
       assert_eq!(update_point, node.valid_moves[update_j]);
@@ -665,6 +682,9 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
           let mut stats: SearchStats = Default::default();
 
           for batch in 0 .. num_batches {
+            //println!("DEBUG: search worker {}: batch {}/{} exploration step",
+            //    tid, batch, num_batches);
+
             {
               let (prior_policy, tree_policy) = worker.prior_and_tree_policies();
               for batch_idx in 0 .. batch_size {
@@ -680,18 +700,32 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
                 }
               }
             }
+            barrier.wait();
+
+            //println!("DEBUG: search worker {}: batch {}/{} rollout step",
+            //    tid, batch, num_batches);
 
             worker.rollout_policy().rollout_batch(RolloutLeafs::TreeTrajs(&tree_trajs), &mut rollout_trajs, RolloutMode::Simulation, &mut rng);
+            barrier.wait();
+
+            //println!("DEBUG: search worker {}: batch {}/{} backup step",
+            //    tid, batch, num_batches);
 
             for batch_idx in 0 .. batch_size {
               let tree_traj = &tree_trajs[batch_idx];
               let rollout_traj = &mut rollout_trajs[batch_idx];
+              /*println!("DEBUG: search worker {}: batch {}/{} idx {}/{} backup score",
+                  tid, batch, num_batches, batch_idx, batch_size);*/
               // FIXME(20160109): use correct values of komi and previous score.
               rollout_traj.score(7.5, 0.0);
+              /*println!("DEBUG: search worker {}: batch {}/{} idx {}/{} backup",
+                  tid, batch, num_batches, batch_idx, batch_size);*/
               tree.backup(tree_traj, rollout_traj, &mut rng);
             }
-
             barrier.wait();
+
+            //println!("DEBUG: search worker {}: batch {}/{} end",
+            //    tid, batch, num_batches);
           }
 
           out_tx.send(()).unwrap();
