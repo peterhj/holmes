@@ -29,12 +29,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{Sender, Receiver, channel};
 use vec_map::{VecMap};
 
-pub fn atomic_increment(x: &AtomicUsize) {
+pub fn atomic_increment(x: &AtomicUsize) -> usize {
   loop {
     let prev_x = x.load(Ordering::Acquire);
-    let curr_x = x.compare_and_swap(prev_x, prev_x + 1, Ordering::AcqRel);
+    let next_x = prev_x + 1;
+    let curr_x = x.compare_and_swap(prev_x, next_x, Ordering::AcqRel);
     if prev_x == curr_x {
-      return;
+      return next_x;
     }
   }
   //x.fetch_add(1, Ordering::SeqCst);
@@ -214,8 +215,7 @@ impl NodeValues {
 
 pub struct Node {
   pub state:        TxnState<TxnStateNodeData>,
-
-  pub horizon:      usize,
+  pub horizon:      AtomicUsize,
   pub valid_moves:  Vec<Point>,
   pub child_nodes:  Vec<Option<Arc<RwLock<Node>>>>,
   pub action_idxs:  VecMap<usize>,
@@ -251,7 +251,7 @@ impl Node {
     }
     Node{
       state:        state,
-      horizon:      init_horizon,
+      horizon:      AtomicUsize::new(init_horizon),
       valid_moves:  valid_moves,
       child_nodes:  child_nodes,
       action_idxs:  action_idxs,
@@ -266,6 +266,19 @@ impl Node {
   pub fn update_visits(&self) {
     //self.values.total_trials.fetch_add(1, Ordering::AcqRel);
     atomic_increment(&self.values.total_trials);
+    // FIXME(20160111): read progressive widening hyperparameter.
+    let pwide_mu = 1.8f32;
+    loop {
+      // XXX(20160111): Need to read from `total_trials` again because other
+      // threads may also be updating this node's horizon.
+      let total_trials = self.values.total_trials.load(Ordering::Acquire);
+      let next_horizon = ((1 + total_trials) as f32 / pwide_mu.ln()).ceil() as usize;
+      let prev_horizon = self.horizon.load(Ordering::Acquire);
+      let curr_horizon = self.horizon.compare_and_swap(prev_horizon, next_horizon, Ordering::AcqRel);
+      if prev_horizon == curr_horizon {
+        return;
+      }
+    }
   }
 
   pub fn update_arm(&self, j: usize, score: f32) {

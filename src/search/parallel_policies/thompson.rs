@@ -33,7 +33,8 @@ impl ThompsonTreePolicy {
 
 impl TreePolicy for ThompsonTreePolicy {
   fn execute_search(&mut self, node: &Node, rng: &mut Xorshiftplus128Rng) -> Option<(Point, usize)> {
-    for j in 0 .. node.horizon {
+    let horizon = node.horizon.load(Ordering::Acquire);
+    for j in 0 .. horizon {
       let n = node.values.num_trials[j].load(Ordering::Acquire) as f32;
       let s = node.values.num_succs[j].load(Ordering::Acquire) as f32;
       let (pn, ps) = if !self.prior {
@@ -65,7 +66,7 @@ impl TreePolicy for ThompsonTreePolicy {
       let u = xs / (xs + xf);
       self.tmp_values[j] = u;
     }
-    array_argmax(&self.tmp_values[ .. node.horizon])
+    array_argmax(&self.tmp_values[ .. horizon])
       .map(|j| (node.valid_moves[j], j))
   }
 }
