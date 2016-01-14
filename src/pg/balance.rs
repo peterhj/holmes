@@ -50,7 +50,7 @@ impl PgBalanceMachine {
   pub fn estimate(&mut self, init_state: &TxnState<TxnStateNodeData>, ctx: &DeviceCtxRef) {
     // XXX(20160106): Estimate target value using search.
     let mut search = ParallelMonteCarloSearch::new();
-    let search_res = search.join(5120, &self.search_server, init_state, &mut self.rng);
+    let (search_res, _) = search.join(5120, &self.search_server, init_state, None, &mut self.rng);
     self.target_value = search_res.expected_value;
 
     // XXX(20160106): Invoke Monte Carlo evaluation with rollout policy to

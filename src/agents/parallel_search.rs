@@ -112,10 +112,12 @@ impl Agent for ParallelMonteCarloSearchAgent {
     assert_eq!(turn, self.state.current_turn());
 
     let num_rollouts = 5120;
+    //let num_rollouts = 10240;
     let mut rng = Xorshiftplus128Rng::new(&mut thread_rng());
     let mut search = ParallelMonteCarloSearch::new();
-    let search_res = search.join(num_rollouts, &mut self.server, &self.state, &mut rng);
+    let (search_res, search_stats) = search.join(num_rollouts, &mut self.server, &self.state, self.result.as_ref(), &mut rng);
     println!("DEBUG: search result: {:?}", search_res);
+    println!("DEBUG: search stats:  {:?}", search_stats);
     self.result = Some(search_res);
     search_res.action
   }

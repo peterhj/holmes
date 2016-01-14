@@ -124,7 +124,7 @@ impl SearchPolicyWorker for ConvnetPolicyWorker {
     &mut self.tree_policy
   }
 
-  fn prior_and_tree_policies(&mut self) -> (&mut PriorPolicy, &mut TreePolicy<R=Xorshiftplus128Rng>) {
+  fn exploration_policies(&mut self) -> (&mut PriorPolicy, &mut TreePolicy<R=Xorshiftplus128Rng>) {
     (&mut self.prior_policy, &mut self.tree_policy)
   }
 

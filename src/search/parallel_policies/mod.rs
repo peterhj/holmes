@@ -21,7 +21,7 @@ pub trait SearchPolicyWorkerBuilder: Send + Clone {
 pub trait SearchPolicyWorker {
   fn prior_policy(&mut self) -> &mut PriorPolicy;
   fn tree_policy(&mut self) -> &mut TreePolicy<R=Xorshiftplus128Rng>;
-  fn prior_and_tree_policies(&mut self) -> (&mut PriorPolicy, &mut TreePolicy<R=Xorshiftplus128Rng>);
+  fn exploration_policies(&mut self) -> (&mut PriorPolicy, &mut TreePolicy<R=Xorshiftplus128Rng>);
   fn rollout_policy(&mut self) -> &mut RolloutPolicy<R=Xorshiftplus128Rng>;
 }
 

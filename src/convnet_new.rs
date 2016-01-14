@@ -60,7 +60,7 @@ pub fn build_12layer128_19x19x16_arch(batch_size: usize) -> (PipelineArchConfig,
 
   let data_layer_cfg = Data3dLayerConfig{
     dims:           (19, 19, input_channels),
-    normalize:      true,
+    normalize:      false,
   };
   let conv1_layer_cfg = Conv2dLayerConfig{
     in_dims:        (19, 19, input_channels),
