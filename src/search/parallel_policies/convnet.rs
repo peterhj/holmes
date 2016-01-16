@@ -160,7 +160,7 @@ pub struct ConvnetRolloutPolicyBuilder;
 impl RolloutPolicyBuilder for ConvnetRolloutPolicyBuilder {
   type Policy = ConvnetRolloutPolicy;
 
-  fn build_rollout_policy(&self, tid: usize, batch_size: usize) -> ConvnetRolloutPolicy {
+  fn into_rollout_policy(self, tid: usize, batch_size: usize) -> ConvnetRolloutPolicy {
     ConvnetRolloutPolicy::new(tid, batch_size)
   }
 }

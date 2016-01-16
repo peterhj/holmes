@@ -13,6 +13,12 @@ impl Board {
 }
 
 #[derive(Clone, Copy)]
+pub struct GameConfig {
+  pub ranks:    [PlayerRank; 2],
+  pub rules:    Rules,
+}
+
+#[derive(Clone, Copy)]
 pub struct Rules {
   pub score_captures:   bool,
   pub score_stones:     bool,

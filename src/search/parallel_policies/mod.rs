@@ -39,12 +39,12 @@ pub trait RolloutPolicyBuilder: Send + Clone {
   //type R: Rng = Xorshiftplus128Rng;
   type Policy: RolloutPolicy<R=Xorshiftplus128Rng>;
 
-  fn build_rollout_policy(&self, tid: usize, batch_size: usize) -> Self::Policy;
+  fn into_rollout_policy(self, tid: usize, batch_size: usize) -> Self::Policy;
 }
 
 pub enum RolloutLeafs<'a> {
   TreeTrajs(&'a [TreeTraj]),
-  States(&'a [TxnState<TxnStateNodeData>]),
+  LeafStates(&'a [TxnState<TxnStateNodeData>]),
 }
 
 impl<'a> RolloutLeafs<'a> {
@@ -54,8 +54,8 @@ impl<'a> RolloutLeafs<'a> {
       &RolloutLeafs::TreeTrajs(tree_trajs) => {
         f(&tree_trajs[idx].leaf_node.as_ref().unwrap().read().unwrap().state);
       }
-      &RolloutLeafs::States(states) => {
-        f(&states[idx]);
+      &RolloutLeafs::LeafStates(leaf_states) => {
+        f(&leaf_states[idx]);
       }
     }
   }
