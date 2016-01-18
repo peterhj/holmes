@@ -160,10 +160,20 @@ impl RolloutTraj {
   }
 }
 
+#[derive(Clone)]
 pub struct Trace {
-  pub pairs:    Vec<(TxnState<TxnStateExtLibFeatsData>, Action)>,
+  //pub pairs:    Vec<(TxnState<TxnStateExtLibFeatsData>, Action)>,
+  pub pairs:    Vec<(TxnState<TxnStateLibFeaturesData>, Action)>,
   pub value:    Option<f32>,
-  raw_score:    Option<f32>,
+}
+
+impl Trace {
+  pub fn new() -> Trace {
+    Trace{
+      pairs:    vec![],
+      value:    None,
+    }
+  }
 }
 
 pub struct NodeValues {
@@ -486,6 +496,7 @@ impl Tree {
 #[derive(Clone)]
 pub enum EvalWorkerCommand {
   Eval{cfg: EvalWorkerConfig, init_state: TxnState<TxnStateNodeData>},
+  EvalGradientsAndBackup,
   Quit,
 }
 
@@ -541,12 +552,17 @@ impl<W> ParallelMonteCarloEvalServer<W> where W: RolloutPolicy<R=Xorshiftplus128
             TxnStateNodeData::new(),
         )).take(worker_batch_size).collect();
         let mut rollout_trajs: Vec<_> = repeat(RolloutTraj::new()).take(worker_batch_size).collect();
+        let mut traces: Vec<_> = repeat(Trace::new()).take(worker_batch_size).collect();
 
         loop {
           let cmd: EvalWorkerCommand = in_rx.recv().unwrap();
           let (cfg, init_state) = match cmd {
             EvalWorkerCommand::Eval{cfg, init_state} => {
               (cfg, init_state)
+            }
+            EvalWorkerCommand::EvalGradientsAndBackup => {
+              // FIXME(20160117)
+              unimplemented!();
             }
             EvalWorkerCommand::Quit => break,
           };
@@ -569,7 +585,7 @@ impl<W> ParallelMonteCarloEvalServer<W> where W: RolloutPolicy<R=Xorshiftplus128
             barrier.wait();
             fence(Ordering::AcqRel);
 
-            rollout_policy.rollout_batch(RolloutLeafs::LeafStates(&leaf_states), &mut rollout_trajs, RolloutMode::Simulation, &mut rng);
+            rollout_policy.rollout_batch(RolloutLeafs::LeafStates(&leaf_states), &mut rollout_trajs, &mut traces, &mut rng);
             barrier.wait();
             fence(Ordering::AcqRel);
 
@@ -686,6 +702,11 @@ pub enum SearchWorkerCommand {
     tree: Tree,
     init_state: TxnState<TxnStateNodeData>,
   },
+  ResetEval{
+    cfg: SearchWorkerConfig,
+    init_state: TxnState<TxnStateNodeData>,
+  },
+  EvalGradientsAndBackup,
   Quit,
 }
 
@@ -740,78 +761,133 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
         let out_barrier = out_barrier;
 
         let mut tree_trajs: Vec<_> = repeat(TreeTraj::new()).take(worker_batch_size).collect();
+        let mut leaf_states: Vec<_> = repeat(TxnState::new(
+            [PlayerRank::Dan(9), PlayerRank::Dan(9)],
+            RuleSet::KgsJapanese.rules(),
+            TxnStateNodeData::new(),
+        )).take(worker_batch_size).collect();
         let mut rollout_trajs: Vec<_> = repeat(RolloutTraj::new()).take(worker_batch_size).collect();
+        let mut traces: Vec<_> = repeat(Trace::new()).take(worker_batch_size).collect();
 
         loop {
           // FIXME(20151222): for real time search, num batches is just an
           // estimate; should check for termination within inner batch loop.
           let cmd: SearchWorkerCommand = in_rx.recv().unwrap();
-          let (cfg, tree) = match cmd {
+          match cmd {
             SearchWorkerCommand::ResetSearch{cfg, tree, init_state} => {
               // XXX(20160107): If the tree has no root node, this sets it;
               // otherwise use the existing root node.
               tree.try_reset(init_state, worker.prior_policy());
-              (cfg, tree)
-            }
-            SearchWorkerCommand::Quit => break,
-          };
 
-          let batch_size = cfg.batch_size;
-          let num_batches = cfg.num_batches;
-          assert!(batch_size <= worker_batch_size);
-          //println!("DEBUG: search worker {}: batch size {} num_batches {}",
-          //    tid, batch_size, num_batches);
+              let batch_size = cfg.batch_size;
+              let num_batches = cfg.num_batches;
+              assert!(batch_size <= worker_batch_size);
 
-          let mut worker_mean_score: f32 = 0.0;
-          let mut worker_backup_count: f32 = 0.0;
+              let mut worker_mean_score: f32 = 0.0;
+              let mut worker_backup_count: f32 = 0.0;
 
-          // FIXME(20151222): should share stats between workers.
-          let mut stats: SearchStats = Default::default();
+              // FIXME(20151222): should share stats between workers.
+              let mut stats: SearchStats = Default::default();
 
-          for batch in 0 .. num_batches {
-            {
-              let (prior_policy, tree_policy) = worker.exploration_policies();
-              for batch_idx in 0 .. batch_size {
-                let tree_traj = &mut tree_trajs[batch_idx];
-                let rollout_traj = &mut rollout_trajs[batch_idx];
-                match tree.traverse(tree_traj, prior_policy, tree_policy, &mut stats, &mut rng) {
-                  TreeResult::Terminal => {
-                    rollout_traj.reset_terminal();
+              for batch in 0 .. num_batches {
+                {
+                  let (prior_policy, tree_policy) = worker.exploration_policies();
+                  for batch_idx in 0 .. batch_size {
+                    let tree_traj = &mut tree_trajs[batch_idx];
+                    let rollout_traj = &mut rollout_trajs[batch_idx];
+                    match tree.traverse(tree_traj, prior_policy, tree_policy, &mut stats, &mut rng) {
+                      TreeResult::Terminal => {
+                        rollout_traj.reset_terminal();
+                      }
+                      TreeResult::NonTerminal => {
+                        let leaf_state = &tree_traj.leaf_node.as_ref().unwrap().read().unwrap().state;
+                        rollout_traj.reset_rollout(leaf_state);
+                      }
+                    }
                   }
-                  TreeResult::NonTerminal => {
-                    let leaf_state = &tree_traj.leaf_node.as_ref().unwrap().read().unwrap().state;
+                }
+                barrier.wait();
+                fence(Ordering::AcqRel);
+
+                worker.rollout_policy().rollout_batch(RolloutLeafs::TreeTrajs(&tree_trajs), &mut rollout_trajs, &mut traces, &mut rng);
+                barrier.wait();
+                fence(Ordering::AcqRel);
+
+                for batch_idx in 0 .. batch_size {
+                  let tree_traj = &tree_trajs[batch_idx];
+                  let rollout_traj = &mut rollout_trajs[batch_idx];
+                  rollout_traj.score(cfg.komi, cfg.prev_expected_score);
+                  tree.backup(tree_traj, rollout_traj, &mut rng);
+                  let raw_score = rollout_traj.raw_score.unwrap();
+                  worker_backup_count += 1.0;
+                  worker_mean_score += (raw_score - worker_mean_score) / worker_backup_count;
+                }
+                barrier.wait();
+                fence(Ordering::AcqRel);
+              }
+
+              {
+                let mut mean_raw_score = tree.mean_raw_score.lock().unwrap();
+                *mean_raw_score += worker_mean_score / (num_workers as f32);
+              }
+
+              out_barrier.wait();
+            }
+
+            SearchWorkerCommand::ResetEval{cfg, init_state} => {
+              let batch_size = cfg.batch_size;
+              let num_batches = cfg.num_batches;
+              assert!(batch_size <= worker_batch_size);
+
+              let mut worker_mean_score: f32 = 0.0;
+              let mut worker_backup_count: f32 = 0.0;
+
+              traces.clear();
+              for batch in 0 .. num_batches {
+                {
+                  for batch_idx in 0 .. batch_size {
+                    let rollout_traj = &mut rollout_trajs[batch_idx];
+                    let leaf_state = &leaf_states[batch_idx];
                     rollout_traj.reset_rollout(leaf_state);
                   }
                 }
+                barrier.wait();
+                fence(Ordering::AcqRel);
+
+                worker.rollout_policy().rollout_batch(RolloutLeafs::LeafStates(&leaf_states), &mut rollout_trajs, &mut traces, &mut rng);
+                barrier.wait();
+                fence(Ordering::AcqRel);
+
+                for batch_idx in 0 .. batch_size {
+                  let rollout_traj = &mut rollout_trajs[batch_idx];
+                  rollout_traj.score(cfg.komi, cfg.prev_expected_score);
+                  let raw_score = rollout_traj.raw_score.unwrap();
+                  worker_backup_count += 1.0;
+                  worker_mean_score += (raw_score - worker_mean_score) / worker_backup_count;
+                }
+                barrier.wait();
+                fence(Ordering::AcqRel);
               }
             }
-            barrier.wait();
-            fence(Ordering::AcqRel);
 
-            worker.rollout_policy().rollout_batch(RolloutLeafs::TreeTrajs(&tree_trajs), &mut rollout_trajs, RolloutMode::Simulation, &mut rng);
-            barrier.wait();
-            fence(Ordering::AcqRel);
-
-            for batch_idx in 0 .. batch_size {
-              let tree_traj = &tree_trajs[batch_idx];
-              let rollout_traj = &mut rollout_trajs[batch_idx];
-              // FIXME(20160109): use correct values of komi and previous score.
-              rollout_traj.score(cfg.komi, cfg.prev_expected_score);
-              tree.backup(tree_traj, rollout_traj, &mut rng);
-              let raw_score = rollout_traj.raw_score.unwrap();
-              worker_backup_count += 1.0;
-              worker_mean_score += (raw_score - worker_mean_score) / worker_backup_count;
+            SearchWorkerCommand::EvalGradientsAndBackup => {
+              let mut num_traces = 0;
+              worker.rollout_policy().init_traces();
+              for trace in traces.iter() {
+                if worker.rollout_policy().rollout_trace(trace, 0.5) {
+                  num_traces += 1;
+                }
+              }
+              if num_traces > 0 {
+                worker.rollout_policy().backup_traces(1.0, num_traces);
+              }
             }
-            barrier.wait();
-            fence(Ordering::AcqRel);
-          }
 
-          {
-            let mut mean_raw_score = tree.mean_raw_score.lock().unwrap();
-            *mean_raw_score += worker_mean_score / (num_workers as f32);
-          }
+            SearchWorkerCommand::Quit => {
+              break;
+            }
+          };
 
-          out_barrier.wait();
         }
 
         out_barrier.wait();
@@ -866,16 +942,11 @@ pub struct ParallelMonteCarloSearchStats {
   pub argmax_ntrials:   AtomicUsize,
 }*/
 
-pub struct ParallelMonteCarloSearch; /*{
-  // FIXME(20160107): need mutable (non-atomic) stats as well.
-  pub stats:        Arc<ParallelMonteCarloSearchStats>,
-}*/
+pub struct ParallelMonteCarloSearch;
 
 impl ParallelMonteCarloSearch {
   pub fn new() -> ParallelMonteCarloSearch {
-    ParallelMonteCarloSearch/*{
-      stats:        Arc::new(Default::default()),
-    }*/
+    ParallelMonteCarloSearch
   }
 
   pub fn join<W>(&mut self,

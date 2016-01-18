@@ -70,7 +70,9 @@ pub trait RolloutPolicy {
   type R: Rng = Xorshiftplus128Rng;
 
   fn batch_size(&self) -> usize;
-  fn rollout_batch(&mut self, leafs: RolloutLeafs, rollout_trajs: &mut [RolloutTraj], mode: RolloutMode, rng: &mut Self::R);
-  fn rollout_trace(&mut self, trace: &Trace, mode: RolloutMode);
-  fn descend_params(&mut self, scale: f32);
+  fn max_rollout_len(&self) -> usize;
+  fn rollout_batch(&mut self, leafs: RolloutLeafs, rollout_trajs: &mut [RolloutTraj], traces: &mut [Trace], rng: &mut Self::R);
+  fn init_traces(&mut self);
+  fn rollout_trace(&mut self, trace: &Trace, baseline: f32) -> bool;
+  fn backup_traces(&mut self, learning_rate: f32, num_traces: usize);
 }
