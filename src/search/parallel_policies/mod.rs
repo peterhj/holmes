@@ -71,7 +71,7 @@ pub trait RolloutPolicy {
 
   fn batch_size(&self) -> usize;
   fn max_rollout_len(&self) -> usize;
-  fn rollout_batch(&mut self, leafs: RolloutLeafs, rollout_trajs: &mut [RolloutTraj], traces: &mut [QuickTrace], rng: &mut Self::R);
+  fn rollout_batch(&mut self, leafs: RolloutLeafs, rollout_trajs: &mut [RolloutTraj], record_trace: bool, traces: &mut [QuickTrace], rng: &mut Self::R);
   fn init_traces(&mut self);
   fn rollout_trace(&mut self, trace: &Trace, baseline: f32) -> bool;
   fn rollout_quicktrace(&mut self, trace: &QuickTrace, baseline: f32) -> bool;

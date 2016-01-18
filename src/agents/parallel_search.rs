@@ -28,6 +28,7 @@ pub struct ParallelMonteCarloSearchAgent {
   state:    TxnState<TxnStateNodeData>,
   result:   Option<MonteCarloSearchResult>,
 
+  rng:      Xorshiftplus128Rng,
   server:   ParallelMonteCarloSearchServer<ConvnetPolicyWorker>,
 }
 
@@ -49,10 +50,11 @@ impl ParallelMonteCarloSearchAgent {
           TxnStateNodeData::new(),
       ),
       result:   None,
+      rng:      Xorshiftplus128Rng::new(&mut thread_rng()),
       server:   ParallelMonteCarloSearchServer::new(
-                    num_workers, worker_batch_size,
-                    ConvnetPolicyWorkerBuilder::new(num_workers, worker_batch_size),
-                ),
+          num_workers, worker_batch_size,
+          ConvnetPolicyWorkerBuilder::new(num_workers, worker_batch_size),
+      ),
     }
   }
 }
@@ -121,12 +123,11 @@ impl Agent for ParallelMonteCarloSearchAgent {
     assert_eq!(turn, self.state.current_turn());
 
     // FIXME(20160114): read remaining time and apply a time management policy.
-    //let num_rollouts = 5120;
-    let num_rollouts = 10240;
+    let num_rollouts = 5120;
+    //let num_rollouts = 10240;
 
-    let mut rng = Xorshiftplus128Rng::new(&mut thread_rng());
     let mut search = ParallelMonteCarloSearch::new();
-    let (search_res, search_stats) = search.join(num_rollouts, &mut self.server, &self.state, self.result.as_ref(), &mut rng);
+    let (search_res, search_stats) = search.join(num_rollouts, &mut self.server, &self.state, self.result.as_ref(), &mut self.rng);
     println!("DEBUG: search result: {:?}", search_res);
     println!("DEBUG: search stats:  {:?}", search_stats);
     self.result = Some(search_res);

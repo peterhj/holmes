@@ -224,7 +224,7 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
     max_iters
   }
 
-  fn rollout_batch(&mut self, leafs: RolloutLeafs, rollout_trajs: &mut [RolloutTraj], traces: &mut [QuickTrace], rng: &mut Xorshiftplus128Rng) {
+  fn rollout_batch(&mut self, leafs: RolloutLeafs, rollout_trajs: &mut [RolloutTraj], record_trace: bool, traces: &mut [QuickTrace], rng: &mut Xorshiftplus128Rng) {
     let ctx = (*self.context).as_ref();
     let batch_size = self.batch_size();
     assert!(batch_size <= rollout_trajs.len());
@@ -249,9 +249,12 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
       filters.push(BFilter::with_capacity(Board::SIZE));
     }
 
-    for batch_idx in 0 .. batch_size {
-      if rollout_trajs[batch_idx].rollout {
-        traces[batch_idx].init_state = Some(rollout_trajs[batch_idx].sim_state.clone());
+    if record_trace {
+      for batch_idx in 0 .. batch_size {
+        if rollout_trajs[batch_idx].rollout {
+          traces[batch_idx].reset();
+          traces[batch_idx].init_state = Some(rollout_trajs[batch_idx].sim_state.clone());
+        }
       }
     }
 
@@ -301,9 +304,9 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
           continue;
         }
 
-        //if let &Some(ref mut traces) = traces {
-        traces[batch_idx].actions.push((sim_turn, Action::Pass));
-        //}
+        if record_trace {
+          traces[batch_idx].actions.push((sim_turn, Action::Pass));
+        }
 
         let mut made_move = false;
         let mut spin_count = 0;
@@ -328,10 +331,10 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
                 rollout_trajs[batch_idx].sim_state.undo();
                 continue;
               } else {
-                //if let &Some(traces) = traces {
-                let trace_len = traces[batch_idx].actions.len();
-                traces[batch_idx].actions[trace_len - 1].1 = Action::Place{point: sim_point};
-                //}
+                if record_trace {
+                  let trace_len = traces[batch_idx].actions.len();
+                  traces[batch_idx].actions[trace_len - 1].1 = Action::Place{point: sim_point};
+                }
                 rollout_trajs[batch_idx].sim_state.commit();
                 for_each_touched_empty(
                     &rollout_trajs[batch_idx].sim_state.position,
