@@ -1,6 +1,6 @@
 use board::{Stone, Point};
 //use random::{XorShift128PlusRng};
-use search::parallel_tree::{TreeTraj, RolloutTraj, Trace, Node};
+use search::parallel_tree::{TreeTraj, RolloutTraj, Trace, QuickTrace, Node};
 use txnstate::{TxnState};
 use txnstate::extras::{TxnStateNodeData};
 
@@ -71,8 +71,9 @@ pub trait RolloutPolicy {
 
   fn batch_size(&self) -> usize;
   fn max_rollout_len(&self) -> usize;
-  fn rollout_batch(&mut self, leafs: RolloutLeafs, rollout_trajs: &mut [RolloutTraj], traces: &mut [Trace], rng: &mut Self::R);
+  fn rollout_batch(&mut self, leafs: RolloutLeafs, rollout_trajs: &mut [RolloutTraj], traces: &mut [QuickTrace], rng: &mut Self::R);
   fn init_traces(&mut self);
   fn rollout_trace(&mut self, trace: &Trace, baseline: f32) -> bool;
+  fn rollout_quicktrace(&mut self, trace: &QuickTrace, baseline: f32) -> bool;
   fn backup_traces(&mut self, learning_rate: f32, num_traces: usize);
 }

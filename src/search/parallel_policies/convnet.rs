@@ -13,7 +13,7 @@ use search::parallel_policies::{
   RolloutPolicyBuilder, RolloutMode, RolloutLeafs, RolloutPolicy,
 };
 use search::parallel_policies::thompson::{ThompsonTreePolicy};
-use search::parallel_tree::{TreeTraj, RolloutTraj, Trace};
+use search::parallel_tree::{TreeTraj, RolloutTraj, Trace, QuickTrace};
 use txnstate::{TxnState, check_good_move_fast};
 use txnstate::extras::{TxnStateNodeData, for_each_touched_empty};
 
@@ -224,7 +224,7 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
     max_iters
   }
 
-  fn rollout_batch(&mut self, leafs: RolloutLeafs, rollout_trajs: &mut [RolloutTraj], traces: &mut [Trace], rng: &mut Xorshiftplus128Rng) {
+  fn rollout_batch(&mut self, leafs: RolloutLeafs, rollout_trajs: &mut [RolloutTraj], traces: &mut [QuickTrace], rng: &mut Xorshiftplus128Rng) {
     let ctx = (*self.context).as_ref();
     let batch_size = self.batch_size();
     assert!(batch_size <= rollout_trajs.len());
@@ -247,6 +247,12 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
       turn_pass[0].push(false);
       turn_pass[1].push(false);
       filters.push(BFilter::with_capacity(Board::SIZE));
+    }
+
+    for batch_idx in 0 .. batch_size {
+      if rollout_trajs[batch_idx].rollout {
+        traces[batch_idx].init_state = Some(rollout_trajs[batch_idx].sim_state.clone());
+      }
     }
 
     let max_iters = 361 + 361 / 2 + rng.gen_range(0, 2);
@@ -296,7 +302,7 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
         }
 
         //if let &Some(ref mut traces) = traces {
-        traces[batch_idx].pairs.push((rollout_trajs[batch_idx].sim_state.clone(), Action::Pass));
+        traces[batch_idx].actions.push((sim_turn, Action::Pass));
         //}
 
         let mut made_move = false;
@@ -323,8 +329,8 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
                 continue;
               } else {
                 //if let &Some(traces) = traces {
-                let trace_len = traces[batch_idx].pairs.len();
-                traces[batch_idx].pairs[trace_len - 1].1 = Action::Place{point: sim_point};
+                let trace_len = traces[batch_idx].actions.len();
+                traces[batch_idx].actions[trace_len - 1].1 = Action::Place{point: sim_point};
                 //}
                 rollout_trajs[batch_idx].sim_state.commit();
                 for_each_touched_empty(
@@ -350,10 +356,6 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
 
         turn_pass[sim_turn_off][batch_idx] = false;
         if !made_move {
-          //if let &Some(traces) = traces {
-          // XXX(20160117): Do not include pass pairs in the trace.
-          traces[batch_idx].pairs.pop();
-          //}
           rollout_trajs[batch_idx].sim_state.try_action(sim_turn, Action::Pass);
           rollout_trajs[batch_idx].sim_state.commit();
           for_each_touched_empty(&rollout_trajs[batch_idx].sim_state.position, &rollout_trajs[batch_idx].sim_state.chains, |position, chains, pt| {
@@ -385,10 +387,11 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
     let baseline = baseline;
 
     for t in 0 .. trace_len {
-      let state = &trace.pairs[t].0;
-      let action = trace.pairs[t].1;
-      let turn = state.current_turn();
-      state.get_data()
+      let turn = trace.pairs[t].0;
+      let state = &trace.pairs[t].1;
+      let action = trace.pairs[t].2;
+      //let turn = state.current_turn();
+      state
         .extract_relative_features(
             turn, self.arch.input_layer().expose_host_frame_buf(t),
         );
@@ -399,6 +402,49 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
       self.arch.loss_layer().preload_label(t, &label);
     }
 
+    self.arch.input_layer().load_frames(trace_len, &ctx);
+    self.arch.loss_layer().load_labels(trace_len, &ctx);
+    self.arch.forward(trace_len, Phase::Training, &ctx);
+    self.arch.backward(trace_len, (value - baseline) / (trace_len as f32), &ctx);
+
+    true
+  }
+
+  fn rollout_quicktrace(&mut self, trace: &QuickTrace, baseline: f32) -> bool {
+    let ctx = (*self.context).as_ref();
+
+    let mut trace_len = 0;
+    let mut sim_state = match trace.init_state {
+      Some(ref init_state) => init_state.clone(),
+      None => return false,
+    };
+    for &(turn, action) in trace.actions.iter() {
+      match action {
+        Action::Place{point} => {
+          let t = trace_len;
+          sim_state.get_data()
+            .extract_relative_features(
+                turn, self.arch.input_layer().expose_host_frame_buf(t),
+            );
+          let label = SampleLabel::Category{category: point.idx() as i32};
+          self.arch.loss_layer().preload_label(t, &label);
+          trace_len += 1;
+        }
+        _ => {}
+      }
+      match sim_state.try_action(turn, action) {
+        Ok(_) => sim_state.commit(),
+        Err(_) => panic!("quicktrace actions should always be legal!"),
+      }
+    }
+    if trace_len == 0 {
+      return false;
+    }
+
+    let value = match trace.value {
+      Some(value) => value,
+      None => panic!("missing quicktrace value!"),
+    };
     self.arch.input_layer().load_frames(trace_len, &ctx);
     self.arch.loss_layer().load_labels(trace_len, &ctx);
     self.arch.forward(trace_len, Phase::Training, &ctx);

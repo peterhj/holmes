@@ -163,16 +163,40 @@ impl RolloutTraj {
 #[derive(Clone)]
 pub struct Trace {
   //pub pairs:    Vec<(TxnState<TxnStateExtLibFeatsData>, Action)>,
-  pub pairs:    Vec<(TxnState<TxnStateLibFeaturesData>, Action)>,
+  //pub pairs:    Vec<(TxnState<TxnStateLibFeaturesData>, Action)>,
+  pub pairs:    Vec<(Stone, TxnStateLibFeaturesData, Action)>,
   pub value:    Option<f32>,
 }
 
 impl Trace {
   pub fn new() -> Trace {
     Trace{
-      pairs:    vec![],
+      pairs:    Vec::with_capacity(544),
       value:    None,
     }
+  }
+}
+
+#[derive(Clone)]
+pub struct QuickTrace {
+  pub init_state:   Option<TxnState<TxnStateLibFeaturesData>>,
+  pub actions:      Vec<(Stone, Action)>,
+  pub value:        Option<f32>,
+}
+
+impl QuickTrace {
+  pub fn new() -> QuickTrace {
+    QuickTrace{
+      init_state:   None,
+      actions:      Vec::with_capacity(544),
+      value:        None,
+    }
+  }
+
+  pub fn reset(&mut self) {
+    self.init_state = None;
+    self.actions.clear();
+    self.value = None;
   }
 }
 
@@ -552,7 +576,7 @@ impl<W> ParallelMonteCarloEvalServer<W> where W: RolloutPolicy<R=Xorshiftplus128
             TxnStateNodeData::new(),
         )).take(worker_batch_size).collect();
         let mut rollout_trajs: Vec<_> = repeat(RolloutTraj::new()).take(worker_batch_size).collect();
-        let mut traces: Vec<_> = repeat(Trace::new()).take(worker_batch_size).collect();
+        let mut traces: Vec<_> = repeat(QuickTrace::new()).take(worker_batch_size).collect();
 
         loop {
           let cmd: EvalWorkerCommand = in_rx.recv().unwrap();
@@ -767,7 +791,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
             TxnStateNodeData::new(),
         )).take(worker_batch_size).collect();
         let mut rollout_trajs: Vec<_> = repeat(RolloutTraj::new()).take(worker_batch_size).collect();
-        let mut traces: Vec<_> = repeat(Trace::new()).take(worker_batch_size).collect();
+        let mut traces: Vec<_> = repeat(QuickTrace::new()).take(worker_batch_size).collect();
 
         loop {
           // FIXME(20151222): for real time search, num batches is just an
@@ -789,7 +813,14 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
               // FIXME(20151222): should share stats between workers.
               let mut stats: SearchStats = Default::default();
 
+              for trace in traces.iter_mut() {
+                trace.reset();
+              }
+
               for batch in 0 .. num_batches {
+                /*println!("DEBUG: worker {} batch {}/{}",
+                    tid, batch, num_batches);*/
+
                 {
                   let (prior_policy, tree_policy) = worker.exploration_policies();
                   for batch_idx in 0 .. batch_size {
@@ -842,7 +873,10 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
               let mut worker_mean_score: f32 = 0.0;
               let mut worker_backup_count: f32 = 0.0;
 
-              traces.clear();
+              for trace in traces.iter_mut() {
+                trace.reset();
+              }
+
               for batch in 0 .. num_batches {
                 {
                   for batch_idx in 0 .. batch_size {
@@ -874,7 +908,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
               let mut num_traces = 0;
               worker.rollout_policy().init_traces();
               for trace in traces.iter() {
-                if worker.rollout_policy().rollout_trace(trace, 0.5) {
+                if worker.rollout_policy().rollout_quicktrace(trace, 0.5) {
                   num_traces += 1;
                 }
               }
