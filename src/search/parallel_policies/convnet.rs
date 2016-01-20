@@ -456,9 +456,9 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
     true
   }
 
-  fn backup_traces(&mut self, learning_rate: f32, num_traces: usize) {
+  fn backup_traces(&mut self, learning_rate: f32, target_value: f32, eval_value: f32, num_traces: usize) {
     let ctx = (*self.context).as_ref();
     self.arch.dev_allreduce_sum_gradients(&ctx);
-    self.arch.descend(learning_rate / (num_traces as f32), 0.0, &ctx);
+    self.arch.descend(learning_rate * (target_value - eval_value) / (num_traces as f32), 0.0, &ctx);
   }
 }

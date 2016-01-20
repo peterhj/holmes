@@ -75,5 +75,5 @@ pub trait RolloutPolicy {
   fn init_traces(&mut self);
   fn rollout_trace(&mut self, trace: &Trace, baseline: f32) -> bool;
   fn rollout_quicktrace(&mut self, trace: &QuickTrace, baseline: f32) -> bool;
-  fn backup_traces(&mut self, learning_rate: f32, num_traces: usize);
+  fn backup_traces(&mut self, learning_rate: f32, target_value: f32, eval_value: f32, num_traces: usize);
 }

@@ -35,6 +35,7 @@ pub mod book;
 pub mod contains;
 pub mod convnet;
 pub mod convnet_new;
+pub mod data;
 pub mod discrete;
 pub mod fastboard;
 pub mod game;

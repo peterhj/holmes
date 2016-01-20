@@ -1,4 +1,5 @@
 use board::{Action};
+use data::{EpisodeIter};
 use search::parallel_policies::{
   SearchPolicyWorker,
   RolloutMode,
@@ -28,7 +29,10 @@ use rng::xorshift::{Xorshiftplus128Rng};
 use rand::{Rng, thread_rng};
 
 pub struct PgBalanceConfig {
+  pub num_epochs:           usize,
+  pub save_interval:        usize,
   pub target_num_rollouts:  usize,
+  pub target_batch_size:    usize,
   pub value_minibatch_size: usize,
   pub grad_minibatch_size:  usize,
   pub learning_rate:        f32,
@@ -37,7 +41,10 @@ pub struct PgBalanceConfig {
 impl Default for PgBalanceConfig {
   fn default() -> PgBalanceConfig {
     PgBalanceConfig{
+      num_epochs:           10,
+      save_interval:        100,
       target_num_rollouts:  5120,
+      target_batch_size:    256,
       value_minibatch_size: 512,
       grad_minibatch_size:  512,
       learning_rate:        0.05,
@@ -55,9 +62,8 @@ pub struct PgBalanceMachine {
 
 impl PgBalanceMachine {
   pub fn new(config: PgBalanceConfig) -> PgBalanceMachine {
-    let batch_size = 256;
     let num_workers = CudaDevice::count().unwrap();
-    let worker_batch_size = batch_size / num_workers;
+    let worker_batch_size = 544;
     PgBalanceMachine{
       config:           config,
       rng:              Xorshiftplus128Rng::new(&mut thread_rng()),
@@ -68,11 +74,22 @@ impl PgBalanceMachine {
     }
   }
 
-  pub fn estimate_sample(&mut self, init_state: &TxnState<TxnStateNodeData>, ctx: &DeviceCtxRef) {
+  pub fn estimate(&mut self, episodes: &mut EpisodeIter) {
+    episodes.for_each_random_sample(|epoch_idx, state, _, _| {
+      self.estimate_sample(state);
+      let next_idx = epoch_idx + 1;
+      if next_idx % self.config.save_interval == 0 {
+        // FIXME(20160119): save params.
+      }
+    });
+  }
+
+  fn estimate_sample(&mut self, init_state: &TxnState<TxnStateNodeData>) {
     // XXX(20160106): Estimate target value using search.
     let search = ParallelMonteCarloSearch::new();
     let (search_res, _) = search.join(
         self.config.target_num_rollouts,
+        self.config.target_batch_size,
         &self.search_server,
         init_state,
         None,
@@ -84,6 +101,7 @@ impl PgBalanceMachine {
     let eval = ParallelMonteCarloEval::new();
     let (eval_res, _) = eval.join(
         self.config.value_minibatch_size,
+        self.config.value_minibatch_size,
         &self.search_server,
         init_state,
         &mut self.rng);
@@ -93,10 +111,14 @@ impl PgBalanceMachine {
     // compute gradients and update policy parameters.
     let backup = ParallelMonteCarloBackup::new();
     let _ = backup.join(
-        self.config.value_minibatch_size,
+        self.config.grad_minibatch_size,
+        self.config.grad_minibatch_size,
         self.config.learning_rate,
+        target_value,
+        eval_value,
         0.5,
         &self.search_server,
+        init_state,
         &mut self.rng);
   }
 }

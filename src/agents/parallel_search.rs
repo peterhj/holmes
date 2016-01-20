@@ -125,9 +125,16 @@ impl Agent for ParallelMonteCarloSearchAgent {
     // FIXME(20160114): read remaining time and apply a time management policy.
     let num_rollouts = 5120;
     //let num_rollouts = 10240;
+    let batch_size = 256;
 
     let mut search = ParallelMonteCarloSearch::new();
-    let (search_res, search_stats) = search.join(num_rollouts, &mut self.server, &self.state, self.result.as_ref(), &mut self.rng);
+    let (search_res, search_stats) = search.join(
+        num_rollouts,
+        batch_size,
+        &mut self.server,
+        &self.state,
+        self.result.as_ref(),
+        &mut self.rng);
     println!("DEBUG: search result: {:?}", search_res);
     println!("DEBUG: search stats:  {:?}", search_stats);
     self.result = Some(search_res);
