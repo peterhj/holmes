@@ -994,6 +994,7 @@ pub struct MonteCarloSearchResult {
   pub turn:             Stone,
   pub action:           Action,
   pub expected_score:   f32,
+  pub expected_adj_val: f32,
   pub expected_value:   f32,
 }
 
@@ -1039,6 +1040,8 @@ impl ParallelMonteCarloSearch {
     println!("DEBUG: server config: worker num rollouts:  {}", worker_num_rollouts);
     println!("DEBUG: server config: worker batch size:    {}", worker_batch_size);
     println!("DEBUG: server config: worker num batches:   {}", worker_num_batches);*/
+    /*println!("DEBUG: search config: {} {} {}",
+        num_workers, worker_batch_size, worker_num_batches);*/
 
     // TODO(20160106): reset stats.
 
@@ -1067,17 +1070,19 @@ impl ParallelMonteCarloSearch {
     let root_node_opt = tree.root_node.read().unwrap();
     let root_node = root_node_opt.as_ref().unwrap().read().unwrap();
     let root_trials = root_node.values.num_trials_float();
-    let (action, value) = if let Some(argmax_j) = array_argmax(&root_trials) {
+    let (action, adj_value, raw_value) = if let Some(argmax_j) = array_argmax(&root_trials) {
       stats.argmax_rank = Some(argmax_j);
       stats.argmax_ntrials = root_trials[argmax_j] as usize;
       let argmax_point = root_node.valid_moves[argmax_j];
-      let j_succs = root_node.values.num_succs[argmax_j].load(Ordering::Acquire);
+      let j_adj_succs = root_node.values.num_succs[argmax_j].load(Ordering::Acquire);
+      let j_raw_succs = root_node.values.num_raw_succs[argmax_j].load(Ordering::Acquire);
       let j_trials = root_trials[argmax_j];
-      let value = j_succs as f32 / j_trials;
-      (Action::Place{point: argmax_point}, value)
+      let adj_value = j_adj_succs as f32 / j_trials;
+      let raw_value = j_raw_succs as f32 / j_trials;
+      (Action::Place{point: argmax_point}, adj_value, raw_value)
     } else {
       stats.argmax_rank = None;
-      (Action::Pass, 0.5)
+      (Action::Pass, 0.5, 0.5)
     };
     (MonteCarloSearchResult{
       turn:   root_node.state.current_turn(),
@@ -1086,7 +1091,8 @@ impl ParallelMonteCarloSearch {
         let mean_score = tree.mean_raw_score.lock().unwrap();
         *mean_score
       },
-      expected_value: value,
+      expected_adj_val: adj_value,
+      expected_value:   raw_value,
     }, stats)
   }
 }
@@ -1143,6 +1149,8 @@ impl ParallelMonteCarloEval {
     println!("DEBUG: server config: worker num rollouts:  {}", worker_num_rollouts);
     println!("DEBUG: server config: worker batch size:    {}", worker_batch_size);
     println!("DEBUG: server config: worker num batches:   {}", worker_num_batches);*/
+    /*println!("DEBUG: eval config: {} {} {}",
+        num_workers, worker_batch_size, worker_num_batches);*/
 
     let cfg = SearchWorkerConfig{
       batch_size:   worker_batch_size,
@@ -1208,6 +1216,8 @@ impl ParallelMonteCarloBackup {
     println!("DEBUG: server config: worker num rollouts:  {}", worker_num_rollouts);
     println!("DEBUG: server config: worker batch size:    {}", worker_batch_size);
     println!("DEBUG: server config: worker num batches:   {}", worker_num_batches);*/
+    /*println!("DEBUG: backup config: {} {} {}",
+        num_workers, worker_batch_size, worker_num_batches);*/
 
     let cfg = SearchWorkerConfig{
       batch_size:   worker_batch_size,

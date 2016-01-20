@@ -50,7 +50,7 @@ impl Default for PgBalanceConfig {
       target_batch_size:    256,
       value_minibatch_size: 512,
       grad_minibatch_size:  512,
-      learning_rate:        0.05,
+      learning_rate:        0.001,
     }
   }
 }
