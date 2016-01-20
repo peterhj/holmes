@@ -23,6 +23,7 @@ use rand::{Rng, SeedableRng, thread_rng};
 use std::cmp::{max, min};
 use std::iter::{repeat};
 use std::marker::{PhantomData};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Barrier, Mutex, RwLock};
 use std::sync::atomic::{AtomicUsize, Ordering, fence};
 use std::sync::mpsc::{Sender, Receiver, channel};
@@ -626,7 +627,12 @@ impl<W> ParallelMonteCarloEvalServer<W> where W: RolloutPolicy<R=Xorshiftplus128
             barrier.wait();
             fence(Ordering::AcqRel);
 
-            rollout_policy.rollout_batch(RolloutLeafs::LeafStates(&leaf_states), &mut rollout_trajs, true, &mut traces, &mut rng);
+            rollout_policy.rollout_batch(
+                batch_size,
+                RolloutLeafs::LeafStates(&leaf_states),
+                &mut rollout_trajs,
+                true, &mut traces,
+                &mut rng);
             barrier.wait();
             fence(Ordering::AcqRel);
 
@@ -691,7 +697,7 @@ pub enum SearchWorkerCommand {
   ResetEval{
     cfg:            SearchWorkerConfig,
     shared_data:    EvalSharedData,
-    should_trace:   bool,
+    record_trace:   bool,
     init_state:     TxnState<TxnStateNodeData>,
   },
   EvalGradientsAndBackup{
@@ -699,6 +705,10 @@ pub enum SearchWorkerCommand {
     baseline:       f32,
     target_value:   f32,
     eval_value:     f32,
+  },
+  SaveRolloutParams{
+    save_dir:   PathBuf,
+    num_iters:  usize,
   },
   Quit,
 }
@@ -815,6 +825,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
                 fence(Ordering::AcqRel);
 
                 worker.rollout_policy().rollout_batch(
+                    batch_size,
                     RolloutLeafs::TreeTrajs(&tree_trajs),
                     &mut rollout_trajs,
                     false, &mut traces[batch * batch_size .. (batch + 1) * batch_size],
@@ -843,13 +854,15 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
               out_barrier.wait();
             }
 
-            SearchWorkerCommand::ResetEval{cfg, shared_data, should_trace, init_state} => {
+            SearchWorkerCommand::ResetEval{cfg, shared_data, record_trace, init_state} => {
               let batch_size = cfg.batch_size;
               let num_batches = cfg.num_batches;
               assert!(batch_size <= worker_batch_size);
 
-              let mut worker_mean_score: f32 = 0.0;
+              let mut worker_mean_value: f32 = 0.0;
               let mut worker_backup_count: f32 = 0.0;
+
+              let init_turn = init_state.current_turn();
 
               /*for trace in traces.iter_mut() {
                 trace.reset();
@@ -870,9 +883,10 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
                 fence(Ordering::AcqRel);
 
                 worker.rollout_policy().rollout_batch(
+                    batch_size,
                     RolloutLeafs::LeafStates(&leaf_states),
                     &mut rollout_trajs,
-                    should_trace, &mut traces[batch * batch_size .. (batch + 1) * batch_size],
+                    record_trace, &mut traces[batch * batch_size .. (batch + 1) * batch_size],
                     &mut rng);
                 barrier.wait();
                 fence(Ordering::AcqRel);
@@ -881,8 +895,28 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
                   let rollout_traj = &mut rollout_trajs[batch_idx];
                   rollout_traj.score(cfg.komi, cfg.prev_expected_score);
                   let raw_score = rollout_traj.raw_score.unwrap();
+                  let value = match init_turn {
+                    Stone::Black => {
+                      if raw_score < 0.0 {
+                        1.0
+                      } else {
+                        0.0
+                      }
+                    }
+                    Stone::White => {
+                      if raw_score >= 0.0 {
+                        1.0
+                      } else {
+                        0.0
+                      }
+                    }
+                    _ => unreachable!(),
+                  };
+                  if record_trace {
+                    traces[batch * batch_size + batch_idx].value = Some(value);
+                  }
                   worker_backup_count += 1.0;
-                  worker_mean_score += (raw_score - worker_mean_score) / worker_backup_count;
+                  worker_mean_value += (value - worker_mean_value) / worker_backup_count;
                 }
                 barrier.wait();
                 fence(Ordering::AcqRel);
@@ -890,7 +924,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
 
               {
                 let mut expected_value = shared_data.expected_value.lock().unwrap();
-                *expected_value += worker_mean_score / (num_workers as f32);
+                *expected_value += worker_mean_value / (num_workers as f32);
               }
 
               out_barrier.wait();
@@ -907,6 +941,12 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
               if num_traces > 0 {
                 worker.rollout_policy().backup_traces(learning_rate, target_value, eval_value, num_traces);
               }
+
+              out_barrier.wait();
+            }
+
+            SearchWorkerCommand::SaveRolloutParams{save_dir, num_iters} => {
+              worker.rollout_policy().save_params(&save_dir, num_iters);
 
               out_barrier.wait();
             }
@@ -995,10 +1035,10 @@ impl ParallelMonteCarloSearch {
     let worker_num_batches = (worker_num_rollouts + worker_batch_size - 1) / worker_batch_size;
     assert!(worker_batch_size >= 1);
     assert!(worker_num_batches >= 1);
-    println!("DEBUG: server config: num workers:          {}", num_workers);
+    /*println!("DEBUG: server config: num workers:          {}", num_workers);
     println!("DEBUG: server config: worker num rollouts:  {}", worker_num_rollouts);
     println!("DEBUG: server config: worker batch size:    {}", worker_batch_size);
-    println!("DEBUG: server config: worker num batches:   {}", worker_num_batches);
+    println!("DEBUG: server config: worker num batches:   {}", worker_num_batches);*/
 
     // TODO(20160106): reset stats.
 
@@ -1099,10 +1139,10 @@ impl ParallelMonteCarloEval {
     let worker_num_batches = (worker_num_rollouts + worker_batch_size - 1) / worker_batch_size;
     assert!(worker_batch_size >= 1);
     assert!(worker_num_batches >= 1);
-    println!("DEBUG: server config: num workers:          {}", num_workers);
+    /*println!("DEBUG: server config: num workers:          {}", num_workers);
     println!("DEBUG: server config: worker num rollouts:  {}", worker_num_rollouts);
     println!("DEBUG: server config: worker batch size:    {}", worker_batch_size);
-    println!("DEBUG: server config: worker num batches:   {}", worker_num_batches);
+    println!("DEBUG: server config: worker num batches:   {}", worker_num_batches);*/
 
     let cfg = SearchWorkerConfig{
       batch_size:   worker_batch_size,
@@ -1117,7 +1157,7 @@ impl ParallelMonteCarloEval {
       server.enqueue(tid, SearchWorkerCommand::ResetEval{
         cfg:            cfg,
         shared_data:    shared_data.clone(),
-        should_trace:   false,
+        record_trace:   false,
         init_state:     init_state.clone(),
       });
     }
@@ -1164,10 +1204,10 @@ impl ParallelMonteCarloBackup {
     let worker_num_batches = (worker_num_rollouts + worker_batch_size - 1) / worker_batch_size;
     assert!(worker_batch_size >= 1);
     assert!(worker_num_batches >= 1);
-    println!("DEBUG: server config: num workers:          {}", num_workers);
+    /*println!("DEBUG: server config: num workers:          {}", num_workers);
     println!("DEBUG: server config: worker num rollouts:  {}", worker_num_rollouts);
     println!("DEBUG: server config: worker batch size:    {}", worker_batch_size);
-    println!("DEBUG: server config: worker num batches:   {}", worker_num_batches);
+    println!("DEBUG: server config: worker num batches:   {}", worker_num_batches);*/
 
     let cfg = SearchWorkerConfig{
       batch_size:   worker_batch_size,
@@ -1184,7 +1224,7 @@ impl ParallelMonteCarloBackup {
       server.enqueue(tid, SearchWorkerCommand::ResetEval{
         cfg:            cfg,
         shared_data:    shared_data.clone(),
-        should_trace:   true,
+        record_trace:   true,
         init_state:     init_state.clone(),
       });
     }
@@ -1204,5 +1244,29 @@ impl ParallelMonteCarloBackup {
     MonteCarloEvalStats{
       elapsed_ms:   elapsed_ms as usize,
     }
+  }
+}
+
+pub struct ParallelMonteCarloSave;
+
+impl ParallelMonteCarloSave {
+  pub fn new() -> ParallelMonteCarloSave {
+    ParallelMonteCarloSave
+  }
+
+  pub fn join<W>(&self,
+      save_dir:     &Path,
+      num_iters:    usize,
+      server:       &ParallelMonteCarloSearchServer<W>)
+      where W: SearchPolicyWorker
+  {
+    let num_workers = server.num_workers();
+    for tid in 0 .. num_workers {
+      server.enqueue(tid, SearchWorkerCommand::SaveRolloutParams{
+        save_dir:   PathBuf::from(save_dir),
+        num_iters:  num_iters,
+      });
+    }
+    server.join();
   }
 }

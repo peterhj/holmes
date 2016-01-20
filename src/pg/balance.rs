@@ -14,6 +14,7 @@ use search::parallel_tree::{
   ParallelMonteCarloSearch,
   ParallelMonteCarloEval,
   ParallelMonteCarloBackup,
+  ParallelMonteCarloSave,
   //ParallelMonteCarloEvalServer,
 };
 use txnstate::{TxnState};
@@ -25,8 +26,10 @@ use cuda::runtime::{CudaDevice};
 use rembrandt::arch_new::{AtomicData, ArchWorker, PipelineArchWorker};
 use rembrandt::layer_new::{Phase};
 use rng::xorshift::{Xorshiftplus128Rng};
+use std::path::{PathBuf};
 
 use rand::{Rng, thread_rng};
+use time::{get_time};
 
 pub struct PgBalanceConfig {
   pub num_epochs:           usize,
@@ -42,7 +45,7 @@ impl Default for PgBalanceConfig {
   fn default() -> PgBalanceConfig {
     PgBalanceConfig{
       num_epochs:           10,
-      save_interval:        100,
+      save_interval:        50,
       target_num_rollouts:  5120,
       target_batch_size:    256,
       value_minibatch_size: 512,
@@ -75,16 +78,30 @@ impl PgBalanceMachine {
   }
 
   pub fn estimate(&mut self, episodes: &mut EpisodeIter) {
-    episodes.for_each_random_sample(|epoch_idx, state, _, _| {
-      self.estimate_sample(state);
+    let save = ParallelMonteCarloSave::new();
+    save.join(
+        &PathBuf::from("experiments/models_balance/test"),
+        0,
+        &self.search_server);
+
+    episodes.for_each_random_sample(|epoch_idx, state, _, _, _| {
+      self.estimate_sample(epoch_idx, state);
+
       let next_idx = epoch_idx + 1;
       if next_idx % self.config.save_interval == 0 {
-        // FIXME(20160119): save params.
+        println!("DEBUG: pg::balance: saving params (iter {})", next_idx);
+        let save = ParallelMonteCarloSave::new();
+        save.join(
+            &PathBuf::from("experiments/models_balance/test"),
+            next_idx,
+            &self.search_server);
       }
     });
   }
 
-  fn estimate_sample(&mut self, init_state: &TxnState<TxnStateNodeData>) {
+  fn estimate_sample(&mut self, idx: usize, init_state: &TxnState<TxnStateNodeData>) {
+    let start_time = get_time();
+
     // XXX(20160106): Estimate target value using search.
     let search = ParallelMonteCarloSearch::new();
     let (search_res, _) = search.join(
@@ -120,5 +137,10 @@ impl PgBalanceMachine {
         &self.search_server,
         init_state,
         &mut self.rng);
+
+    let lap_time = get_time();
+    let elapsed_ms = (lap_time - start_time).num_milliseconds();
+    println!("DEBUG: sample {}: target: {:.4} eval: {:.4} elapsed: {:.3} s",
+        idx, target_value, eval_value, elapsed_ms as f32 * 0.001);
   }
 }

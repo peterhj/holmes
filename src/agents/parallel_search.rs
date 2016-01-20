@@ -118,7 +118,7 @@ impl Agent for ParallelMonteCarloSearchAgent {
     }
     if self.player.is_none() {
       self.player = Some(turn);
-      self.state.set_turn(turn);
+      self.state.unsafe_set_current_turn(turn);
     }
     assert_eq!(turn, self.state.current_turn());
 

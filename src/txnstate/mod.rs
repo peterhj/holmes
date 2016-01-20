@@ -917,20 +917,10 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
     }
   }
 
-  pub fn set_turn(&mut self, turn: Stone) {
+  pub fn unsafe_set_current_turn(&mut self, turn: Stone) {
     // FIXME(20151115): this can be highly unsafe; make sure no ko points are
     // set.
     self.position.turn = turn;
-  }
-
-  pub fn extract_absolute_features() {
-    // TODO(20151105)
-    unimplemented!();
-  }
-
-  pub fn extract_relative_features() {
-    // TODO(20151105)
-    unimplemented!();
   }
 
   pub fn get_data(&self) -> &Data {
@@ -963,7 +953,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
     Pattern3x3(mask8)
   }
 
-  pub fn current_libs(&self, point: Point) -> usize {
+  /*pub fn current_libs(&self, point: Point) -> usize {
     let head = self.chains.find_chain(point);
     if head == TOMBSTONE {
       0
@@ -971,7 +961,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
       let chain = self.chains.get_chain(head).unwrap();
       chain.count_libs_up_to_3()
     }
-  }
+  }*/
 
   pub fn current_ko(&self) -> Option<(Stone, Point)> {
     self.position.ko

@@ -19,7 +19,7 @@ use txnstate::extras::{TxnStateNodeData, for_each_touched_empty};
 
 use array_cuda::device::{DeviceContext, for_all_devices};
 use rembrandt::arch_new::{
-  ArchWorker,
+  Worker, ArchWorker,
   PipelineArchConfig, PipelineArchSharedData, PipelineArchWorker,
 };
 use rembrandt::data_new::{SampleLabel};
@@ -27,7 +27,7 @@ use rembrandt::layer_new::{Phase};
 use rng::xorshift::{Xorshiftplus128Rng};
 
 use rand::{Rng};
-use std::path::{PathBuf};
+use std::path::{Path, PathBuf};
 use std::rc::{Rc};
 use std::sync::{Arc};
 
@@ -224,9 +224,12 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
     max_iters
   }
 
-  fn rollout_batch(&mut self, leafs: RolloutLeafs, rollout_trajs: &mut [RolloutTraj], record_trace: bool, traces: &mut [QuickTrace], rng: &mut Xorshiftplus128Rng) {
+  fn rollout_batch(&mut self, batch_size: usize, leafs: RolloutLeafs, rollout_trajs: &mut [RolloutTraj], record_trace: bool, traces: &mut [QuickTrace], rng: &mut Xorshiftplus128Rng) {
     let ctx = (*self.context).as_ref();
-    let batch_size = self.batch_size();
+
+    // FIXME(20160120): this allows us to be a little sloppy with how many
+    // trajectories we allocate.
+    //assert_eq!(batch_size, rollout_trajs.len());
     assert!(batch_size <= rollout_trajs.len());
 
     let mut valid_moves = vec![vec![], vec![]];
@@ -460,5 +463,12 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
     let ctx = (*self.context).as_ref();
     self.arch.dev_allreduce_sum_gradients(&ctx);
     self.arch.descend(learning_rate * (target_value - eval_value) / (num_traces as f32), 0.0, &ctx);
+  }
+
+  fn save_params(&mut self, save_dir: &Path, t: usize) {
+    if self.arch.tid() == 0 {
+      let ctx = (*self.context).as_ref();
+      self.arch.save_layer_params_dir(save_dir, t, &ctx);
+    }
   }
 }

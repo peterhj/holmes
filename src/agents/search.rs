@@ -113,7 +113,7 @@ impl Agent for SearchAgent {
     }
     if self.player.is_none() {
       self.player = Some(turn);
-      self.state.set_turn(turn);
+      self.state.unsafe_set_current_turn(turn);
     }
     assert_eq!(turn, self.state.current_turn());
     let mut search = Search::new(5120);

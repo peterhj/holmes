@@ -98,6 +98,10 @@ name = "new-train-12layer384-19x19x28"
 path = "tools/new-train-12layer384-19x19x28.rs"
 
 [[bin]]
+name = "policygrad-balance"
+path = "tools/policygrad-balance.rs"
+
+[[bin]]
 name = "train-action3-narrow-3layer-19x19x16"
 path = "tools/train-action3-narrow-3layer-19x19x16.rs"
 
