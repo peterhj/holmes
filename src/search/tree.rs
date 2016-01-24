@@ -516,12 +516,14 @@ impl Search {
       self.stats.argmax_rank = argmax_j as i32;
       self.stats.argmax_trials = tree.root_node.borrow().num_trials[argmax_j] as i32;
       let root_node = tree.root_node.borrow();
-      if root_node.num_succs[argmax_j] / root_node.num_trials[argmax_j] <= 0.001 {
+      // FIXME(20160123): with simulation balanced policy, seems to resign
+      // often; may be related to dynamic komi.
+      /*if root_node.num_succs[argmax_j] / root_node.num_trials[argmax_j] <= 0.001 {
         Action::Resign
-      } else {
+      } else {*/
         let argmax_point = root_node.prior_moves[argmax_j].0;
         Action::Place{point: argmax_point}
-      }
+      //}
     } else {
       self.stats.argmax_rank = -1;
       Action::Pass

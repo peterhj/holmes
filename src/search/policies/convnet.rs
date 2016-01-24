@@ -1,14 +1,15 @@
 use board::{Board, Stone, Point, Action};
 use convnet::arch::{
-  build_action_3layer_arch,
-  build_action_6layer_arch,
+  //build_pgbalance_action_2layer_19x19x16_arch,
   build_action_2layer_19x19x16_arch,
+  build_action_12layer_19x19x16_arch,
+  /*build_action_3layer_arch,
+  build_action_6layer_arch,
   build_action_narrow_3layer_19x19x16_arch,
   build_action_3layer_19x19x16_arch,
   build_action_6layer_19x19x16_arch,
-  build_action_12layer_19x19x16_arch,
   build_action3_narrow_3layer_19x19x16_arch,
-  build_action3_12layer_19x19x16_arch,
+  build_action3_12layer_19x19x16_arch,*/
 };
 use discrete::{DiscreteFilter};
 use discrete::bfilter::{BFilter};
@@ -39,12 +40,15 @@ pub struct ConvnetPriorPolicy {
 impl ConvnetPriorPolicy {
   pub fn new() -> ConvnetPriorPolicy {
     let ctx = DeviceContext::new(0);
+
+    let arch = build_action_12layer_19x19x16_arch(1, &ctx);
+    //let arch = build_action3_12layer_19x19x16_arch(1, &ctx);
+
     //let arch = build_action_3layer_arch(1, &ctx);
     //let arch = build_action_6layer_arch(1, &ctx);
     //let arch = build_action_3layer_19x19x16_arch(1, &ctx);
     //let arch = build_action_6layer_19x19x16_arch(1, &ctx);
-    let arch = build_action_12layer_19x19x16_arch(1, &ctx);
-    //let arch = build_action3_12layer_19x19x16_arch(1, &ctx);
+
     ConvnetPriorPolicy{
       ctx:  ctx,
       arch: arch,
@@ -88,9 +92,14 @@ pub struct BatchConvnetRolloutPolicy {
 impl BatchConvnetRolloutPolicy {
   pub fn new(batch_size: usize) -> BatchConvnetRolloutPolicy {
     let ctx = DeviceContext::new(0);
+
+    // XXX(20160123): testing out simulation balanced params.
     let arch = build_action_2layer_19x19x16_arch(batch_size, &ctx);
+    //let arch = build_pgbalance_action_2layer_19x19x16_arch(batch_size, &ctx);
+
     //let arch = build_action_narrow_3layer_19x19x16_arch(batch_size, &ctx);
     //let arch = build_action3_narrow_3layer_19x19x16_arch(batch_size, &ctx);
+
     BatchConvnetRolloutPolicy{
       batch_size: batch_size,
       ctx:  ctx,
@@ -254,7 +263,11 @@ impl ParallelBatchConvnetRolloutPolicy {
     let mut archs = vec![];
     for device_idx in (0 .. device_count) {
       let ctx = DeviceContext::new(device_idx);
+
+      // XXX(20160123): testing out simulation balanced params.
       let arch = build_action_2layer_19x19x16_arch(part_batch_size, &ctx);
+      //let arch = build_pgbalance_action_2layer_19x19x16_arch(part_batch_size, &ctx);
+
       ctxs.push(ctx);
       archs.push(arch);
     }

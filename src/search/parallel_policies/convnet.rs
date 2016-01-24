@@ -1,6 +1,7 @@
 use board::{Board, Action, Stone, Point};
 use convnet_new::{
   build_2layer16_19x19x16_arch,
+  build_2layer16_19x19x16_arch_nodir,
   build_12layer128_19x19x16_arch,
   /*build_3layer32_19x19x16_arch,
   build_12layer384_19x19x30_arch,*/
@@ -46,7 +47,10 @@ pub struct ConvnetPolicyWorkerBuilder {
 impl ConvnetPolicyWorkerBuilder {
   pub fn new(num_workers: usize, worker_batch_size: usize) -> ConvnetPolicyWorkerBuilder {
     let (prior_arch_cfg, prior_save_path) = build_12layer128_19x19x16_arch(1);
-    let (rollout_arch_cfg, rollout_save_path) = build_2layer16_19x19x16_arch(worker_batch_size);
+    // FIXME(20160121): temporarily using existing balance run.
+    //let (rollout_arch_cfg, rollout_save_path) = build_2layer16_19x19x16_arch(worker_batch_size);
+    let rollout_arch_cfg = build_2layer16_19x19x16_arch_nodir(worker_batch_size);
+    let rollout_save_path = PathBuf::from("experiments/models_balance/test");
     let prior_shared = for_all_devices(num_workers, |contexts| {
       Arc::new(PipelineArchSharedData::new(num_workers, &prior_arch_cfg, contexts))
     });
@@ -462,7 +466,13 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
   fn backup_traces(&mut self, learning_rate: f32, target_value: f32, eval_value: f32, num_traces: usize) {
     let ctx = (*self.context).as_ref();
     self.arch.dev_allreduce_sum_gradients(&ctx);
-    self.arch.descend(learning_rate * (target_value - eval_value) / (num_traces as f32), 0.0, &ctx);
+    // FIXME(20160122): forgot to scale by total number of traces, not the
+    // number of traces processed by this worker...
+    // as an approximation, just multiply local number of traces by number of
+    // workers.
+    //self.arch.descend(learning_rate * (target_value - eval_value) / (num_traces as f32), 0.0, &ctx);
+    let num_workers = self.arch.num_workers();
+    self.arch.descend(learning_rate * (target_value - eval_value) / ((num_workers * num_traces) as f32), 0.0, &ctx);
   }
 
   fn save_params(&mut self, save_dir: &Path, t: usize) {

@@ -3,7 +3,7 @@ name = "holmes"
 version = "0.2.0"
 authors = ["Peter Jin <peterhaijin@gmail.com>"]
 #build = "build-cuda7.rs"
-build = "build-cuda7_5.rs"
+#build = "build-cuda7_5.rs"
 
 [lib]
 name = "holmes"
@@ -100,6 +100,10 @@ path = "tools/new-train-12layer384-19x19x28.rs"
 [[bin]]
 name = "policygrad-balance"
 path = "tools/policygrad-balance.rs"
+
+[[bin]]
+name = "holmes-vs-pachi10k_f1-f16"
+path = "tools/holmes-vs-pachi10k_f1-f16.rs"
 
 [[bin]]
 name = "train-action3-narrow-3layer-19x19x16"
@@ -201,43 +205,18 @@ time = "*"
 toml = "*"
 vec_map = "*"
 
-[dependencies.array]
-#path = "../../rembrandt-project/libarray"
-path = "../rembrandt-project/libarray"
+array = { path = "../rembrandt-project/libarray" }
+async = { path = "../rembrandt-project/libasync" }
+async_cuda = { path = "../rembrandt-project/libasync_cuda" }
 
-[dependencies.array_cuda]
-path = "../rembrandt-project/libarray_cuda"
+#cuda = { path = "../rembrandt-project/libcuda", features = ["cuda-7-0"] }
+cuda = { path = "../rembrandt-project/libcuda" }
+rembrandt = { path = "../rembrandt-project/rembrandt_new" }
+array_cuda = { path = "../rembrandt-project/libarray_cuda" }
 
-[dependencies.arraydb]
-#path = "../../rembrandt-project/arraydb"
-path = "../rembrandt-project/arraydb"
-
-[dependencies.async]
-#path = "../../rembrandt-project/libasync"
-path = "../rembrandt-project/libasync"
-
-[dependencies.async_cuda]
-#path = "../../rembrandt-project/libasync_cuda"
-path = "../rembrandt-project/libasync_cuda"
-
-[dependencies.cuda]
-path = "../rembrandt-project/libcuda"
-
-[dependencies.episodb]
-path = "../episodb"
-
-#[dependencies.float]
-#path = "../libfloat"
-
-[dependencies.gsl]
-path = "../libgsl"
-
-[dependencies.rembrandt]
-#path = "../../rembrandt-project/rembrandt_new"
-path = "../rembrandt-project/rembrandt_new"
-
-[dependencies.rng]
-path = "../librng"
-
-#[dependencies.statistics_avx2]
-#path = "libstatistics_avx2"
+arraydb = { path = "../rembrandt-project/arraydb" }
+episodb = { path = "../episodb" }
+hydra = { path = "../hydra" }
+gsl = { path = "../libgsl" }
+rng = { path = "../librng" }
+#statistics_avx2 = { path = "libstatistics_avx2" }

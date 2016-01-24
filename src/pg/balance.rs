@@ -78,25 +78,32 @@ impl PgBalanceMachine {
   }
 
   pub fn estimate(&mut self, episodes: &mut EpisodeIter) {
-    let save = ParallelMonteCarloSave::new();
-    save.join(
-        &PathBuf::from("experiments/models_balance/test"),
-        0,
-        &self.search_server);
+    // FIXME(20160121): temporarily using existing balance run.
+    let mut idx = 1000;
 
-    episodes.for_each_random_sample(|epoch_idx, state, _, _, _| {
-      self.estimate_sample(epoch_idx, state);
+    if idx == 0 {
+      let save = ParallelMonteCarloSave::new();
+      save.join(
+          &PathBuf::from("experiments/models_balance/test"),
+          0,
+          &self.search_server);
+    }
 
-      let next_idx = epoch_idx + 1;
-      if next_idx % self.config.save_interval == 0 {
-        println!("DEBUG: pg::balance: saving params (iter {})", next_idx);
-        let save = ParallelMonteCarloSave::new();
-        save.join(
-            &PathBuf::from("experiments/models_balance/test"),
-            next_idx,
-            &self.search_server);
-      }
-    });
+    loop {
+      episodes.for_each_random_sample(|_, state, _, _, _| {
+        self.estimate_sample(idx, state);
+
+        idx += 1;
+        if idx % self.config.save_interval == 0 {
+          println!("DEBUG: pg::balance: saving params (iter {})", idx);
+          let save = ParallelMonteCarloSave::new();
+          save.join(
+              &PathBuf::from("experiments/models_balance/test"),
+              idx,
+              &self.search_server);
+        }
+      });
+    }
   }
 
   fn estimate_sample(&mut self, idx: usize, init_state: &TxnState<TxnStateNodeData>) {

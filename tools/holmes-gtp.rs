@@ -35,8 +35,8 @@ fn main() {
     _ => panic!("FATAL: holmes: invalid player: {}", player_str),
   };*/
   //let agent = ConvnetAgent::new();
-  //let agent = SearchAgent::new();
-  let agent = ParallelMonteCarloSearchAgent::new(None);
+  let agent = SearchAgent::new();
+  //let agent = ParallelMonteCarloSearchAgent::new(None);
   let client = Client::new(agent, host, port, None);
   GtpEngine::new(client).runloop();
 }

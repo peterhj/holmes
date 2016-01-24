@@ -13,6 +13,12 @@ use rembrandt::layer_new::{
 use std::path::{PathBuf};
 
 pub fn build_2layer16_19x19x16_arch(batch_size: usize) -> (PipelineArchConfig, PathBuf) {
+  let arch_cfg = build_2layer16_19x19x16_arch_nodir(batch_size);
+  let save_path = PathBuf::from("experiments/models/action_2layer_19x19x16.v2.saved");
+  (arch_cfg, save_path)
+}
+
+pub fn build_2layer16_19x19x16_arch_nodir(batch_size: usize) -> PipelineArchConfig {
   let input_channels = 16;
 
   let data_layer_cfg = Data3dLayerConfig{
@@ -48,9 +54,7 @@ pub fn build_2layer16_19x19x16_arch(batch_size: usize) -> (PipelineArchConfig, P
     .conv2d(conv2_layer_cfg)
     .softmax_kl_loss(loss_layer_cfg);
 
-  let save_path = PathBuf::from("experiments/models/action_2layer_19x19x16.v2.saved");
-
-  (arch_cfg, save_path)
+  arch_cfg
 }
 
 pub fn build_12layer128_19x19x16_arch(batch_size: usize) -> (PipelineArchConfig, PathBuf) {
