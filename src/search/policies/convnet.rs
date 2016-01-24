@@ -1,6 +1,6 @@
 use board::{Board, Stone, Point, Action};
 use convnet::arch::{
-  //build_pgbalance_action_2layer_19x19x16_arch,
+  build_pgbalance_action_2layer_19x19x16_arch,
   build_action_2layer_19x19x16_arch,
   build_action_12layer_19x19x16_arch,
   /*build_action_3layer_arch,

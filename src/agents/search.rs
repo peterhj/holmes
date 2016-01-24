@@ -30,8 +30,8 @@ pub struct SearchAgent {
   //tree_policy:  UctRaveTreePolicy,
   tree_policy:  ThompsonRaveTreePolicy,
   //roll_policy:  QuasiUniformRolloutPolicy,
-  //roll_policy:  BatchConvnetRolloutPolicy,
-  roll_policy:  ParallelBatchConvnetRolloutPolicy,
+  roll_policy:  BatchConvnetRolloutPolicy,
+  //roll_policy:  ParallelBatchConvnetRolloutPolicy,
 }
 
 impl SearchAgent {
@@ -42,8 +42,8 @@ impl SearchAgent {
     let mut tree_policy = ThompsonRaveTreePolicy::new();
     let batch_size = 256;
     //let mut roll_policy = QuasiUniformRolloutPolicy;
-    //let mut roll_policy = BatchConvnetRolloutPolicy::new(batch_size);
-    let mut roll_policy = ParallelBatchConvnetRolloutPolicy::new(batch_size);
+    let mut roll_policy = BatchConvnetRolloutPolicy::new(batch_size);
+    //let mut roll_policy = ParallelBatchConvnetRolloutPolicy::new(batch_size);
     SearchAgent{
       komi:     0.0,
       player:   None,

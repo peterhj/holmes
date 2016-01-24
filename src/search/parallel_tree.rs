@@ -20,6 +20,7 @@ use threadpool::{ThreadPool};
 
 use bit_set::{BitSet};
 use rand::{Rng, SeedableRng, thread_rng};
+use std::cell::{RefCell};
 use std::cmp::{max, min};
 use std::iter::{repeat};
 use std::marker::{PhantomData};
@@ -201,8 +202,40 @@ impl QuickTrace {
   }
 }
 
-pub struct NodeValues {
+pub trait NodeBox {
+}
+
+/*pub struct UniqueNodeBox {
+  inner:    RefCell<Node<FloatNodeValues>>,
+}
+
+pub struct ArcNodeBox {
+  inner:    Arc<RwLock<Node<AtomicNodeValues>>>,
+}*/
+
+pub trait NodeValues {
+  fn horizon(&self) -> usize;
+  fn num_trials_float(&self) -> Vec<f32>;
+
+  fn update_visits(&self);
+  fn update_arm(&self, j: usize, score: f32, raw_score: f32);
+  fn rave_update_arm(&self, j: usize, score: f32);
+}
+
+pub struct FloatNodeValues {
   pub prior_values:     Vec<f32>,
+  //pub horizon:          usize,
+  pub total_trials:     f32,
+  pub num_trials:       Vec<f32>,
+  pub num_succs:        Vec<f32>,
+  pub num_raw_succs:    Vec<f32>,
+  pub num_trials_rave:  Vec<f32>,
+  pub num_succs_rave:   Vec<f32>,
+}
+
+pub struct AtomicNodeValues {
+  pub prior_values:     Vec<f32>,
+  //pub horizon:          AtomicUsize,
   pub total_trials:     AtomicUsize,
   pub num_trials:       Vec<AtomicUsize>,
   pub num_succs:        Vec<AtomicUsize>,
@@ -211,8 +244,8 @@ pub struct NodeValues {
   pub num_succs_rave:   Vec<AtomicUsize>,
 }
 
-impl NodeValues {
-  pub fn new(num_arms: usize) -> NodeValues {
+impl AtomicNodeValues {
+  pub fn new(num_arms: usize) -> AtomicNodeValues {
     let mut num_trials = Vec::with_capacity(num_arms);
     for _ in 0 .. num_arms {
       num_trials.push(AtomicUsize::new(0));
@@ -233,7 +266,7 @@ impl NodeValues {
     for _ in 0 .. num_arms {
       num_succs_rave.push(AtomicUsize::new(0));
     }
-    NodeValues{
+    AtomicNodeValues{
       prior_values:     repeat(0.5).take(num_arms).collect(),
       total_trials:     AtomicUsize::new(0),
       num_trials:       num_trials,
@@ -259,7 +292,7 @@ pub struct Node {
   pub valid_moves:  Vec<Point>,
   pub child_nodes:  Vec<Option<Arc<RwLock<Node>>>>,
   pub action_idxs:  VecMap<usize>,
-  pub values:       NodeValues,
+  pub values:       AtomicNodeValues,
 }
 
 impl Node {
@@ -272,7 +305,7 @@ impl Node {
     let init_horizon = min(1, num_arms);
 
     // XXX(20151224): Sort moves by descending value for progressive widening.
-    let mut values = NodeValues::new(num_arms);
+    let mut values = AtomicNodeValues::new(num_arms);
     let mut action_priors = Vec::with_capacity(num_arms);
     prior_policy.fill_prior_values(&state, &valid_moves, &mut action_priors);
     action_priors.sort_by(|left, right| {
@@ -352,10 +385,13 @@ pub enum TreeResult {
   Terminal,
 }
 
+pub struct UniqueTree<N> where N: NodeBox {
+  root_node:        Option<N>,
+  mean_raw_score:   f32,
+}
+
 #[derive(Clone)]
 pub struct Tree {
-  //pwide_cfg:    ProgWideConfig,
-  //root_node:    Arc<RwLock<Node>>,
   root_node:        Arc<RwLock<Option<Arc<RwLock<Node>>>>>,
   mean_raw_score:   Arc<Mutex<f32>>,
 }

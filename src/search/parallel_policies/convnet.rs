@@ -8,6 +8,7 @@ use convnet_new::{
 };
 use discrete::{DiscreteFilter};
 use discrete::bfilter::{BFilter};
+use random::{choose_without_replace};
 use search::parallel_policies::{
   SearchPolicyWorkerBuilder, SearchPolicyWorker,
   PriorPolicy, TreePolicy,
@@ -236,18 +237,23 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
     //assert_eq!(batch_size, rollout_trajs.len());
     assert!(batch_size <= rollout_trajs.len());
 
-    let mut valid_moves = vec![vec![], vec![]];
+    let mut valid_move_set = vec![vec![], vec![]];
+    // XXX(20160124): Valid move iterator is an "upper bound" on the valid moves,
+    // since it is easy to add elements but hard to remove them.
+    let mut valid_move_iter: Vec<Vec<Vec<usize>>> = vec![vec![], vec![]];
     let mut bad_moves = vec![vec![], vec![]];
     let mut turn_pass = vec![vec![], vec![]];
     let mut num_both_passed = 0;
     let mut filters = vec![];
     for batch_idx in 0 .. batch_size {
       /*let leaf_node = tree_trajs[idx].leaf_node.as_ref().unwrap().read().unwrap();
-      valid_moves[0].push(leaf_node.state.get_data().legality.legal_points(Stone::Black));
-      valid_moves[1].push(leaf_node.state.get_data().legality.legal_points(Stone::White));*/
+      valid_move_set[0].push(leaf_node.state.get_data().legality.legal_points(Stone::Black));
+      valid_move_set[1].push(leaf_node.state.get_data().legality.legal_points(Stone::White));*/
       leafs.with_leaf_state(batch_idx, |leaf_state| {
-        valid_moves[0].push(leaf_state.get_data().legality.legal_points(Stone::Black));
-        valid_moves[1].push(leaf_state.get_data().legality.legal_points(Stone::White));
+        valid_move_set[0].push(leaf_state.get_data().legality.legal_points(Stone::Black));
+        valid_move_set[1].push(leaf_state.get_data().legality.legal_points(Stone::White));
+        valid_move_iter[0].push(valid_move_set[0][batch_idx].iter().collect());
+        valid_move_iter[1].push(valid_move_set[1][batch_idx].iter().collect());
       });
       bad_moves[0].push(vec![]);
       bad_moves[1].push(vec![]);
@@ -281,7 +287,7 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
           .extract_relative_features(
               turn, self.arch.input_layer().expose_host_frame_buf(batch_idx));
         // FIXME(20151125): mask softmax output with valid moves.
-        //self.arch.loss_layer().preload_mask_buf(batch_idx, valid_moves[turn.offset()][batch_idx].as_slice());
+        //self.arch.loss_layer().preload_mask_buf(batch_idx, valid_move_set[turn.offset()][batch_idx].as_slice());
       }
 
       self.arch.input_layer().load_frames(batch_size, &ctx);
@@ -317,23 +323,23 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
 
         let mut made_move = false;
         let mut spin_count = 0;
-        while !valid_moves[sim_turn_off][batch_idx].is_empty() {
+        while !valid_move_set[sim_turn_off][batch_idx].is_empty() {
           spin_count += 1;
           if let Some(p) = filters[batch_idx].sample(rng) {
             filters[batch_idx].zero(p);
             let sim_point = Point::from_idx(p);
-            if !valid_moves[sim_turn_off][batch_idx].contains(&p) {
+            if !valid_move_set[sim_turn_off][batch_idx].contains(&p) {
               continue;
             } else if !check_good_move_fast(
                 &rollout_trajs[batch_idx].sim_state.position,
                 &rollout_trajs[batch_idx].sim_state.chains,
                 sim_turn, sim_point)
             {
-              valid_moves[sim_turn_off][batch_idx].remove(&p);
+              valid_move_set[sim_turn_off][batch_idx].remove(&p);
               bad_moves[sim_turn_off][batch_idx].push(sim_point);
               continue;
             } else {
-              valid_moves[sim_turn_off][batch_idx].remove(&p);
+              valid_move_set[sim_turn_off][batch_idx].remove(&p);
               if rollout_trajs[batch_idx].sim_state.try_place(sim_turn, sim_point).is_err() {
                 rollout_trajs[batch_idx].sim_state.undo();
                 continue;
@@ -348,28 +354,77 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
                     &rollout_trajs[batch_idx].sim_state.chains,
                     |_, _, pt|
                 {
-                  valid_moves[sim_turn_off][batch_idx].insert(pt.idx());
+                  //valid_move_set[sim_turn_off][batch_idx].insert(pt.idx());
+                  let pt = pt.idx();
+                  if !valid_move_set[sim_turn_off][batch_idx].contains(&pt) {
+                    valid_move_set[sim_turn_off][batch_idx].insert(pt);
+                    valid_move_iter[sim_turn_off][batch_idx].push(pt);
+                  }
                 });
                 made_move = true;
                 break;
               }
             }
           } else {
-            // XXX(20151207): Remaining moves were deemed to have probability zero.
-            break;
+            // XXX(20151207): Remaining moves were deemed to have probability zero,
+            // so finish the rollout using uniform policy.
+            /*break;*/
+            while !valid_move_set[sim_turn_off][batch_idx].is_empty() {
+              spin_count += 1;
+              if let Some(p) = choose_without_replace(&mut valid_move_iter[sim_turn_off][batch_idx], rng) {
+                let sim_point = Point::from_idx(p);
+                if !valid_move_set[sim_turn_off][batch_idx].contains(&p) {
+                  continue;
+                } else if !check_good_move_fast(
+                    &rollout_trajs[batch_idx].sim_state.position,
+                    &rollout_trajs[batch_idx].sim_state.chains,
+                    sim_turn, sim_point)
+                {
+                  valid_move_set[sim_turn_off][batch_idx].remove(&p);
+                  bad_moves[sim_turn_off][batch_idx].push(sim_point);
+                  continue;
+                } else {
+                  valid_move_set[sim_turn_off][batch_idx].remove(&p);
+                  if rollout_trajs[batch_idx].sim_state.try_place(sim_turn, sim_point).is_err() {
+                    rollout_trajs[batch_idx].sim_state.undo();
+                    continue;
+                  } else {
+                    if record_trace {
+                      let trace_len = traces[batch_idx].actions.len();
+                      traces[batch_idx].actions[trace_len - 1].1 = Action::Place{point: sim_point};
+                    }
+                    rollout_trajs[batch_idx].sim_state.commit();
+                    for_each_touched_empty(
+                        &rollout_trajs[batch_idx].sim_state.position,
+                        &rollout_trajs[batch_idx].sim_state.chains,
+                        |_, _, pt|
+                    {
+                      //valid_move_set[sim_turn_off][batch_idx].insert(pt.idx());
+                      let pt = pt.idx();
+                      if !valid_move_set[sim_turn_off][batch_idx].contains(&pt) {
+                        valid_move_set[sim_turn_off][batch_idx].insert(pt);
+                        valid_move_iter[sim_turn_off][batch_idx].push(pt);
+                      }
+                    });
+                    made_move = true;
+                    break;
+                  }
+                }
+              }
+            }
           }
         }
         assert!(spin_count <= Board::SIZE);
 
         // XXX: Bad moves are not technically illegal.
-        valid_moves[sim_turn_off][batch_idx].extend(bad_moves[sim_turn_off][batch_idx].iter().map(|&pt| pt.idx()));
+        valid_move_set[sim_turn_off][batch_idx].extend(bad_moves[sim_turn_off][batch_idx].iter().map(|&pt| pt.idx()));
 
         turn_pass[sim_turn_off][batch_idx] = false;
         if !made_move {
           rollout_trajs[batch_idx].sim_state.try_action(sim_turn, Action::Pass);
           rollout_trajs[batch_idx].sim_state.commit();
           for_each_touched_empty(&rollout_trajs[batch_idx].sim_state.position, &rollout_trajs[batch_idx].sim_state.chains, |position, chains, pt| {
-            valid_moves[sim_turn_off][batch_idx].insert(pt.idx());
+            valid_move_set[sim_turn_off][batch_idx].insert(pt.idx());
           });
           turn_pass[sim_turn_off][batch_idx] = true;
           if turn_pass[0][batch_idx] && turn_pass[1][batch_idx] {
