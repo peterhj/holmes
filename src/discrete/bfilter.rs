@@ -17,7 +17,7 @@ impl BitVec32 {
   pub fn with_capacity(n: usize) -> BitVec32 {
     let cap = (n + 32 - 1)/32;
     let mut data = Vec::with_capacity(cap);
-    for _ in (0 .. cap) {
+    for _ in 0 .. cap {
       data.push(0);
     }
     BitVec32{
@@ -55,7 +55,7 @@ impl BitVec32 {
     let (word_idx, bit_idx) = (idx / 32, idx % 32);
     self.data[word_idx] &= !(0x1 << bit_idx);
     if value {
-      self.data[word_idx] |= (0x1 << bit_idx);
+      self.data[word_idx] |= 0x1 << bit_idx;
     }
   }
 
@@ -201,7 +201,7 @@ impl DiscreteFilter for BFilter {
     (&mut self.heap.data[self.leaf_idx .. self.leaf_idx + self.n]).clone_from_slice(xs);
 
     // XXX: Remaining part of heap data should always be zeroed.
-    for idx in (self.leaf_idx + self.n .. self.heap.data.len()) {
+    for idx in self.leaf_idx + self.n .. self.heap.data.len() {
       let mark_idx = self.mark_idx(idx);
       self.marks.set(mark_idx, true);
       self.zeros.set(idx - self.leaf_idx, true);

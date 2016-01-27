@@ -479,7 +479,7 @@ impl TxnChainsList {
 
   pub fn reset(&mut self) {
     self.num_chains = 0;
-    for p in (0 .. Board::SIZE) {
+    for p in 0 .. Board::SIZE {
       self.chains[p] = None;
       self.roots[p] = TOMBSTONE;
       self.links[p] = TOMBSTONE;
@@ -871,7 +871,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
     self.position.epoch = 0;
     self.position.num_stones[0] = 0;
     self.position.num_stones[1] = 0;
-    for p in (0 .. Board::SIZE) {
+    for p in 0 .. Board::SIZE {
       self.position.stones[p] = Stone::Empty;
       self.position.stone_epochs[p] = 0;
     }
@@ -1013,7 +1013,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
         _ => {}
       }
     }
-    for p in (0 .. Board::SIZE) {
+    for p in 0 .. Board::SIZE {
       match self.position.stones[p] {
         Stone::Empty => {
           for_each_adjacent(Point::from_idx(p), |adj_pt| {
@@ -1031,7 +1031,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
         _ => {}
       }
     }
-    for p in (0 .. Board::SIZE) {
+    for p in 0 .. Board::SIZE {
       match self.position.stones[p] {
         Stone::Empty => {
           match territory[p] {
@@ -1055,7 +1055,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
     let mut w_score = 0.0;
     b_score += self.position.num_stones[0] as f32;
     w_score += self.position.num_stones[1] as f32;
-    for p in (0 .. Board::SIZE) {
+    for p in 0 .. Board::SIZE {
       match self.position.stones[p] {
         Stone::Empty => {
           if is_eyelike(&self.position, &self.chains, Stone::Black, Point(p as i16)) {
@@ -1071,7 +1071,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
   }
 
   pub fn iter_legal_moves_accurate<F>(&mut self, turn: Stone, /*scratch: &mut TxnStateScratch,*/ mut f: F) where F: FnMut(Point) {
-    for p in (0 .. Board::SIZE as i16) {
+    for p in 0 .. Board::SIZE as i16 {
       let point = Point(p);
       if check_illegal_move_simple(&self.position, &self.chains, turn, point).is_some() {
         continue;
@@ -1476,11 +1476,11 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
     let empty_indent = repeat(' ').take(48).collect::<String>();
     let mut strs = vec![];
     let mut chain_h = 0;
-    for col in (0 .. max(Board::DIM + 2, self.chains.num_chains + 1)) {
+    for col in 0 .. max(Board::DIM + 2, self.chains.num_chains + 1) {
       let mut s = String::new();
       if col == 0 || col == Board::DIM + 1 {
         s.push_str("   ");
-        for x in (0 .. Board::DIM) {
+        for x in 0 .. Board::DIM {
           let x = String::from_utf8(dump_xcoord(x as u8)).unwrap();
           s.push_str(&x);
           s.push(' ');
@@ -1493,7 +1493,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
           s.push(' ');
         }
         s.push_str(&format!("{} ", y + 1));
-        for x in (0 .. Board::DIM) {
+        for x in 0 .. Board::DIM {
           let point = Point::from_coord(Coord::new(x as u8, y as u8));
           let stone = self.position.stones[point.idx()];
           match stone {

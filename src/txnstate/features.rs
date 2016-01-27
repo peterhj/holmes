@@ -94,7 +94,7 @@ impl TxnStateData for TxnStateFeaturesData {
   fn reset(&mut self) {
     self.time_step = 0;
     assert_eq!(Self::NUM_TIME_STEPS * Self::NUM_PLANES * Board::SIZE, self.features.len());
-    for p in (0 .. self.features.len()) {
+    for p in 0 .. self.features.len() {
       self.features[p] = 0;
     }
   }
@@ -310,7 +310,7 @@ impl TxnStateData for TxnStateLibFeaturesData {
   fn reset(&mut self) {
     self.time_step = 0;
     assert_eq!(Self::NUM_TIME_STEPS * Self::NUM_PLANES * Board::SIZE, self.features.len());
-    for p in (0 .. self.features.len()) {
+    for p in 0 .. self.features.len() {
       self.features[p] = 0;
     }
   }

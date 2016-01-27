@@ -23,9 +23,9 @@ pub struct Pattern3x3(pub u16);
 impl Pattern3x3 {
   pub fn to_invariant(self) -> InvariantPattern3x3 {
     let mut min_mask8: u16 = 0xffffffff;
-    for t in (0 .. 8) {
+    for t in 0 .. 8 {
       let mut mask8: u16 = 0;
-      for i in (0 .. 8) {
+      for i in 0 .. 8 {
         let x = (self.0 >> (2 * i)) & 0x3;
         let t_i = MASK_8_TRANS_MAPS[t][i];
         mask8 |= x << (2 * t_i);

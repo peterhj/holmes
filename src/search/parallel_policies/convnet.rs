@@ -49,9 +49,9 @@ impl ConvnetPolicyWorkerBuilder {
   pub fn new(num_workers: usize, worker_batch_size: usize) -> ConvnetPolicyWorkerBuilder {
     let (prior_arch_cfg, prior_save_path) = build_12layer128_19x19x16_arch(1);
     // FIXME(20160121): temporarily using existing balance run.
-    //let (rollout_arch_cfg, rollout_save_path) = build_2layer16_19x19x16_arch(worker_batch_size);
-    let rollout_arch_cfg = build_2layer16_19x19x16_arch_nodir(worker_batch_size);
-    let rollout_save_path = PathBuf::from("experiments/models_balance/test");
+    /*let rollout_arch_cfg = build_2layer16_19x19x16_arch_nodir(worker_batch_size);
+    let rollout_save_path = PathBuf::from("experiments/models_balance/test");*/
+    let (rollout_arch_cfg, rollout_save_path) = build_2layer16_19x19x16_arch(worker_batch_size);
     let prior_shared = for_all_devices(num_workers, |contexts| {
       Arc::new(PipelineArchSharedData::new(num_workers, &prior_arch_cfg, contexts))
     });
@@ -272,7 +272,7 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
     }
 
     let max_iters = 361 + 361 / 2 + rng.gen_range(0, 2);
-    for t in (0 .. max_iters) {
+    for t in 0 .. max_iters {
       if num_both_passed == batch_size {
         break;
       }
@@ -324,11 +324,11 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
         let mut made_move = false;
         let mut spin_count = 0;
         while !valid_move_set[sim_turn_off][batch_idx].is_empty() {
-          spin_count += 1;
           if let Some(p) = filters[batch_idx].sample(rng) {
             filters[batch_idx].zero(p);
             let sim_point = Point::from_idx(p);
             if !valid_move_set[sim_turn_off][batch_idx].contains(&p) {
+              spin_count += 1;
               continue;
             } else if !check_good_move_fast(
                 &rollout_trajs[batch_idx].sim_state.position,
@@ -337,11 +337,13 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
             {
               valid_move_set[sim_turn_off][batch_idx].remove(&p);
               bad_moves[sim_turn_off][batch_idx].push(sim_point);
+              spin_count += 1;
               continue;
             } else {
               valid_move_set[sim_turn_off][batch_idx].remove(&p);
               if rollout_trajs[batch_idx].sim_state.try_place(sim_turn, sim_point).is_err() {
                 rollout_trajs[batch_idx].sim_state.undo();
+                spin_count += 1;
                 continue;
               } else {
                 if record_trace {
@@ -362,6 +364,7 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
                   }
                 });
                 made_move = true;
+                spin_count += 1;
                 break;
               }
             }
@@ -374,6 +377,7 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
               if let Some(p) = choose_without_replace(&mut valid_move_iter[sim_turn_off][batch_idx], rng) {
                 let sim_point = Point::from_idx(p);
                 if !valid_move_set[sim_turn_off][batch_idx].contains(&p) {
+                  spin_count += 1;
                   continue;
                 } else if !check_good_move_fast(
                     &rollout_trajs[batch_idx].sim_state.position,
@@ -382,11 +386,13 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
                 {
                   valid_move_set[sim_turn_off][batch_idx].remove(&p);
                   bad_moves[sim_turn_off][batch_idx].push(sim_point);
+                  spin_count += 1;
                   continue;
                 } else {
                   valid_move_set[sim_turn_off][batch_idx].remove(&p);
                   if rollout_trajs[batch_idx].sim_state.try_place(sim_turn, sim_point).is_err() {
                     rollout_trajs[batch_idx].sim_state.undo();
+                    spin_count += 1;
                     continue;
                   } else {
                     if record_trace {
@@ -407,6 +413,7 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
                       }
                     });
                     made_move = true;
+                    spin_count += 1;
                     break;
                   }
                 }

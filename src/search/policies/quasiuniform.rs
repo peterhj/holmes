@@ -26,7 +26,7 @@ impl RolloutPolicy for QuasiUniformRolloutPolicy {
 
     //let max_iters = 3 * 361 + rng.gen_range(0, 2);
     let max_iters = 400;
-    for t in (0 .. max_iters) {
+    for t in 0 .. max_iters {
       sim_pass[sim_turn.offset()] = false;
       let mut made_move = false;
       while !valid_moves[sim_turn.offset()].is_empty() {

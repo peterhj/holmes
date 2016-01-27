@@ -10,7 +10,7 @@ use rand::distributions::{IndependentSample};
 pub fn random_shuffle<T: Copy, R: Rng>(xs: &mut [T], rng: &mut R) {
   // Fisher-Yates shuffle.
   let n = xs.len();
-  for i in (0 .. n) {
+  for i in 0 .. n {
     let uniform_dist = Range::new(i, n);
     let j = uniform_dist.ind_sample(rng);
     xs.swap(i, j);
@@ -119,12 +119,12 @@ impl SeedableRng<[u64; 2]> for XorShift128PlusRng {
 impl<'a> SeedableRng<&'a [u64]> for XorShift128PlusRng {
   fn reseed(&mut self, seed: &'a [u64]) {
     assert!(seed.len() >= 1);
-    for p in (0 .. min(2usize, seed.len())) {
+    for p in 0 .. min(2usize, seed.len()) {
       self.state[p] = seed[p];
     }
     // XXX: This increases the initial state entropy (many zeros to half zeros).
     // See Figure 4 in <http://arxiv.org/abs/1404.0390> for details.
-    for _ in (0 .. 20) {
+    for _ in 0 .. 20 {
       let _ = self.next_u64();
     }
   }
@@ -168,7 +168,7 @@ impl Rng for XorShift1024StarRng {
 impl<'a> SeedableRng<&'a [u64]> for XorShift1024StarRng {
   fn reseed(&mut self, seed: &'a [u64]) {
     assert!(seed.len() >= 1);
-    for p in (0 .. min(16usize, seed.len())) {
+    for p in 0 .. min(16usize, seed.len()) {
       self.state[p] = seed[p];
     }
   }

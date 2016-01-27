@@ -161,7 +161,7 @@ impl Node {
     prior_policy.fill_prior_probs(&state, &valid_moves, &mut prior_moves);
     prior_moves.sort_by(|left, right| ((right.1 * 1.0e6) as i32).cmp(&((left.1 * 1.0e6) as i32)));
     let mut arm_indexes = VecMap::with_capacity(Board::SIZE);
-    for j in (0 .. num_arms) {
+    for j in 0 .. num_arms {
       arm_indexes.insert(prior_moves[j].0.idx(), j);
     }
     let child_nodes: Vec<_> = repeat(None).take(num_arms).collect();
@@ -453,7 +453,7 @@ impl Search {
         let mut walk = Walk::new();
         let mut traj = Trajectory::new();
 
-        for i in (0 .. self.num_rollouts) {
+        for i in 0 .. self.num_rollouts {
           match tree.walk(prior_policy, tree_policy, &mut walk, &mut self.stats, &mut rng) {
             WalkResult::Terminal => {
               self.stats.term_count += 1;
@@ -479,9 +479,9 @@ impl Search {
         let mut trajs: Vec<_> = repeat(Trajectory::new()).take(batch_size).collect();
 
         let num_batches = (self.num_rollouts + batch_size - 1) / batch_size;
-        for batch in (0 .. num_batches) {
+        for batch in 0 .. num_batches {
           // TODO(20151125): walks can happen in parallel within a batch.
-          for batch_idx in (0 .. batch_size) {
+          for batch_idx in 0 .. batch_size {
             let walk = &mut walks[batch_idx];
             let traj = &mut trajs[batch_idx];
             match tree.walk(prior_policy, tree_policy, walk, &mut self.stats, &mut rng) {
@@ -498,7 +498,7 @@ impl Search {
 
           roll_policy.rollout_batch(&walks, &mut trajs, &mut rng);
 
-          for batch_idx in (0 .. batch_size) {
+          for batch_idx in 0 .. batch_size {
             let walk = &walks[batch_idx];
             let traj = &mut trajs[batch_idx];
             traj.score(komi, prev_expected_score);

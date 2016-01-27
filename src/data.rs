@@ -108,6 +108,14 @@ impl EpisodePreproc for GogodbEpisodePreproc {
   }
 }
 
+pub struct EpisodeFrame<'a> {
+  pub state:    &'a TxnState<TxnStateNodeData>,
+  pub turn:     Stone,
+  pub action:   Action,
+  pub value:    f32,
+  pub outcome:  Stone,
+}
+
 pub struct EpisodeIter {
   rng:      Xorshiftplus128Rng,
   episodes: Vec<Episode>,
@@ -154,7 +162,7 @@ impl EpisodeIter {
   }
 
   pub fn for_each_random_sample<F>(&mut self, mut f: F)
-  where F: FnMut(usize, &TxnState<TxnStateNodeData>, Stone, Action, f32) {
+  where F: FnMut(usize, EpisodeFrame) {
     let num_episodes = self.episodes.len();
     for idx in 0 .. num_episodes {
       let i = self.rng.gen_range(0, num_episodes);
@@ -167,7 +175,44 @@ impl EpisodeIter {
         (Stone::Black, Stone::White) | (Stone::White, Stone::Black) => 0.0,
         _ => unreachable!(),
       };
-      f(idx, &sample.0, sample.1, sample.2, value);
+      let outcome = episode.outcome;
+      let frame = EpisodeFrame{
+        state:  &sample.0,
+        turn:   sample.1,
+        action: sample.2,
+        value:  value,
+        outcome:    outcome,
+      };
+      f(idx, frame);
+    }
+  }
+
+  pub fn cyclic_frame_at<F>(&mut self, t: usize, mut f: F)
+  where F: FnMut(usize, EpisodeFrame) {
+    let num_episodes = self.episodes.len();
+    let mut epoch_idx = 0;
+    for i in 0 .. num_episodes {
+      let episode = &self.episodes[i];
+      let episode_len = episode.history.len();
+      if t >= episode_len {
+        continue;
+      }
+      let sample = &episode.history[t];
+      let value = match (sample.0.current_turn(), episode.outcome) {
+        (Stone::Black, Stone::Black) | (Stone::White, Stone::White) => 1.0,
+        (Stone::Black, Stone::White) | (Stone::White, Stone::Black) => 0.0,
+        _ => unreachable!(),
+      };
+      let outcome = episode.outcome;
+      let frame = EpisodeFrame{
+        state:  &sample.0,
+        turn:   sample.1,
+        action: sample.2,
+        value:  value,
+        outcome:    outcome,
+      };
+      f(epoch_idx, frame);
+      epoch_idx += 1;
     }
   }
 }

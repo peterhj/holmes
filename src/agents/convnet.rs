@@ -109,7 +109,7 @@ impl Agent for ConvnetAgent {
     arch.loss_layer().store_ranked_labels(1, ctx);
     let ranked_labels = arch.loss_layer().predict_ranked_labels(1);
     let mut action = Action::Pass;
-    for k in (0 .. Board::SIZE) {
+    for k in 0 .. Board::SIZE {
       let place_point = Point(ranked_labels[k] as i16);
       let res = state.try_place(turn, place_point);
       state.undo();

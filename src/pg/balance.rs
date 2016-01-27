@@ -78,8 +78,9 @@ impl PgBalanceMachine {
   }
 
   pub fn estimate(&mut self, episodes: &mut EpisodeIter) {
-    // FIXME(20160121): temporarily using existing balance run.
-    let mut idx = 1000;
+    /*// FIXME(20160121): temporarily using existing balance run.
+    let mut idx = 1000;*/
+    let mut idx = 0;
 
     if idx == 0 {
       let save = ParallelMonteCarloSave::new();
@@ -90,7 +91,8 @@ impl PgBalanceMachine {
     }
 
     loop {
-      episodes.for_each_random_sample(|_, state, _, _, _| {
+      episodes.for_each_random_sample(|_, frame| {
+        let state = frame.state;
         self.estimate_sample(idx, state);
 
         idx += 1;

@@ -43,7 +43,7 @@ impl TreePolicy for ThompsonRaveTreePolicy {
   }
 
   fn execute_search(&mut self, node: &Node, rng: &mut Self::R) -> Option<(Point, usize)> {
-    for j in (0 .. node.horizon) {
+    for j in 0 .. node.horizon {
       let n = node.num_trials[j];
       let s = node.num_succs[j];
       let pn = self.prior_equiv;

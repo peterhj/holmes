@@ -46,7 +46,7 @@ impl TreePolicy for UctRaveTreePolicy {
     let beta_pbias = (self.pbias_equiv / (node.total_trials + self.pbias_equiv)).sqrt();
     //let num_arms = node.values.len();
     //for j in (0 .. num_arms) {
-    for j in (0 .. node.horizon) {
+    for j in 0 .. node.horizon {
       // XXX: The UCB1-RAVE update rule.
       let n = node.num_trials[j];
       let s = node.num_succs[j];

@@ -40,7 +40,7 @@ impl DataSource for RandomEpisodeSamples {
   fn each_sample(&mut self, label_cfg: SampleLabelConfig, f: &mut FnMut(usize, &SampleDatum, Option<SampleLabel>)) {
     let mut epoch_idx = 0;
     let ep_idx_range = Range::new(0, self.num_episodes());
-    for _ in (0 .. self.num_samples()) {
+    for _ in 0 .. self.num_samples() {
       let ep_idx = ep_idx_range.ind_sample(&mut self.rng);
       let (start_idx, end_idx) = self.data.get_episode_range(ep_idx);
       let sample_idx = self.rng.gen_range(start_idx, end_idx);
@@ -84,7 +84,7 @@ impl DataSource for CyclicRandomEpisodeSamples {
     let mut epoch_idx = 0;
     let mut num_skipped = 0;
     let num_eps = self.num_episodes();
-    for i in (0 .. self.num_samples()) {
+    for i in 0 .. self.num_samples() {
       let ep_idx = i % num_eps;
       let (start_idx, end_idx) = self.data.get_episode_range(ep_idx);
       let sample_idx = self.rng.gen_range(start_idx, end_idx);

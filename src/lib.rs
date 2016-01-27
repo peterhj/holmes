@@ -1,9 +1,8 @@
 #![feature(associated_consts)]
 #![feature(associated_type_defaults)]
 #![feature(clone_from_slice)]
-#![feature(drain)]
 #![feature(slice_bytes)]
-#![feature(wrapping)]
+//#![feature(wrapping)]
 
 extern crate array;
 extern crate array_cuda;
@@ -31,14 +30,14 @@ extern crate vec_map;
 pub mod agents;
 pub mod array_util;
 pub mod board;
-pub mod book;
+//pub mod book;
 pub mod contains;
 pub mod convnet;
 pub mod convnet_new;
 pub mod data;
 pub mod discrete;
-pub mod fastboard;
-pub mod game;
+//pub mod fastboard;
+//pub mod game;
 pub mod gtp;
 pub mod gtp_board;
 pub mod gtp_client;
@@ -49,6 +48,6 @@ pub mod pg;
 pub mod random;
 pub mod search;
 pub mod sgf;
-pub mod table;
+//pub mod table;
 pub mod txnstate;
 pub mod util;

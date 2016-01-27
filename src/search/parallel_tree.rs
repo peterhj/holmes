@@ -20,12 +20,14 @@ use threadpool::{ThreadPool};
 
 use bit_set::{BitSet};
 use rand::{Rng, SeedableRng, thread_rng};
-use std::cell::{RefCell};
+use std::cell::{RefCell, Ref, RefMut};
 use std::cmp::{max, min};
 use std::iter::{repeat};
 use std::marker::{PhantomData};
+use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Barrier, Mutex, RwLock};
+use std::rc::{Rc};
+use std::sync::{Arc, Barrier, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::sync::atomic::{AtomicUsize, Ordering, fence};
 use std::sync::mpsc::{Sender, Receiver, channel};
 use time::{get_time};
@@ -118,9 +120,10 @@ impl RolloutTraj {
     }
   }
 
-  pub fn reset_terminal(&mut self) {
+  pub fn reset_terminal(&mut self, leaf_state: &TxnState<TxnStateNodeData>) {
     self.rollout = false;
-    self.sim_state.reset();
+    //self.sim_state.reset();
+    self.sim_state.replace_clone_from(leaf_state, leaf_state.get_data().features.clone());
     self.sim_pairs.clear();
     self.raw_score = None;
     self.adj_score = None;
@@ -130,9 +133,7 @@ impl RolloutTraj {
 
   pub fn reset_rollout(&mut self, leaf_state: &TxnState<TxnStateNodeData>) {
     self.rollout = true;
-    {
-      self.sim_state.replace_clone_from(leaf_state, leaf_state.get_data().features.clone());
-    }
+    self.sim_state.replace_clone_from(leaf_state, leaf_state.get_data().features.clone());
     self.sim_pairs.clear();
     self.raw_score = None;
     self.adj_score = None;
@@ -141,24 +142,24 @@ impl RolloutTraj {
   }
 
   pub fn score(&mut self, komi: f32, expected_score: f32) {
-    if !self.rollout {
+    /*if !self.rollout {
       // FIXME(20151114)
       self.raw_score = Some(0.0);
       self.adj_score = Some([0.0, 0.0]);
     } else {
-      // XXX(20151125): A version of dynamic komi. When the current player is
-      // ahead, the expected score in their favor is deducted into the effective
-      // komi:
-      // - B ahead, expected score < 0.0, komi should be increased
-      // - W ahead, expected score > 0.0, komi should be decreased
-      // This implements the heuristic, "when ahead, stay ahead."
-      // FIXME(20151125): one complication is how dynamic komi interacts with
-      // prior values.
-      self.raw_score = Some(self.sim_state.current_score_rollout(komi));
-      let b_adj_score = self.sim_state.current_score_rollout(komi - 0.0f32.min(expected_score));
-      let w_adj_score = self.sim_state.current_score_rollout(komi - 0.0f32.max(expected_score));
-      self.adj_score = Some([b_adj_score, w_adj_score]);
-    }
+    }*/
+    // XXX(20151125): A version of dynamic komi. When the current player is
+    // ahead, the expected score in their favor is deducted into the effective
+    // komi:
+    // - B ahead, expected score < 0.0, komi should be increased
+    // - W ahead, expected score > 0.0, komi should be decreased
+    // This implements the heuristic, "when ahead, stay ahead."
+    // FIXME(20151125): one complication is how dynamic komi interacts with
+    // prior values.
+    self.raw_score = Some(self.sim_state.current_score_rollout(komi));
+    let b_adj_score = self.sim_state.current_score_rollout(komi - 0.0f32.min(expected_score));
+    let w_adj_score = self.sim_state.current_score_rollout(komi - 0.0f32.max(expected_score));
+    self.adj_score = Some([b_adj_score, w_adj_score]);
   }
 }
 
@@ -202,29 +203,58 @@ impl QuickTrace {
   }
 }
 
-pub trait NodeBox {
+pub trait NodeBox: Sized {
+  type V: NodeValues;
+
+  fn map<U>(&self, f: &mut FnMut(&Node<Self, Self::V>) -> U) -> U;
+  fn map_mut<U>(&self, f: &mut FnMut(&mut Node<Self, Self::V>) -> U) -> U;
 }
 
-/*pub struct UniqueNodeBox {
-  inner:    RefCell<Node<FloatNodeValues>>,
+pub struct RcNodeBox {
+  inner:      Rc<RefCell<Node<RcNodeBox, RefCell<FloatNodeValues>>>>,
+}
+
+impl NodeBox for RcNodeBox {
+  type V = RefCell<FloatNodeValues>;
+
+  fn map<U>(&self, f: &mut FnMut(&Node<Self, Self::V>) -> U) -> U {
+    let node = self.inner.borrow();
+    f(&*node)
+  }
+
+  fn map_mut<U>(&self, f: &mut FnMut(&mut Node<Self, Self::V>) -> U) -> U {
+    let mut node = self.inner.borrow_mut();
+    f(&mut *node)
+  }
 }
 
 pub struct ArcNodeBox {
-  inner:    Arc<RwLock<Node<AtomicNodeValues>>>,
-}*/
+  inner:    Arc<RwLock<Node<ArcNodeBox, AtomicNodeValues>>>,
+}
+
+impl NodeBox for ArcNodeBox {
+  type V = AtomicNodeValues;
+
+  fn map<U>(&self, f: &mut FnMut(&Node<Self, Self::V>) -> U) -> U {
+    let node = self.inner.read().unwrap();
+    f(&*node)
+  }
+
+  fn map_mut<U>(&self, f: &mut FnMut(&mut Node<Self, Self::V>) -> U) -> U {
+    let mut node = self.inner.write().unwrap();
+    f(&mut *node)
+  }
+}
 
 pub trait NodeValues {
+  fn new(num_arms: usize) -> Self where Self: Sized;
   fn horizon(&self) -> usize;
   fn num_trials_float(&self) -> Vec<f32>;
-
-  fn update_visits(&self);
-  fn update_arm(&self, j: usize, score: f32, raw_score: f32);
-  fn rave_update_arm(&self, j: usize, score: f32);
 }
 
 pub struct FloatNodeValues {
   pub prior_values:     Vec<f32>,
-  //pub horizon:          usize,
+  pub horizon:          usize,
   pub total_trials:     f32,
   pub num_trials:       Vec<f32>,
   pub num_succs:        Vec<f32>,
@@ -233,9 +263,34 @@ pub struct FloatNodeValues {
   pub num_succs_rave:   Vec<f32>,
 }
 
+impl NodeValues for RefCell<FloatNodeValues> {
+  fn new(num_arms: usize) -> Self where Self: Sized {
+    RefCell::new(FloatNodeValues{
+      prior_values:     repeat(0.5).take(num_arms).collect(),
+      horizon:          min(1, num_arms),
+      total_trials:     0.0,
+      num_trials:       repeat(0.0).take(num_arms).collect(),
+      num_succs:        repeat(0.0).take(num_arms).collect(),
+      num_raw_succs:    repeat(0.0).take(num_arms).collect(),
+      num_trials_rave:  repeat(0.0).take(num_arms).collect(),
+      num_succs_rave:   repeat(0.0).take(num_arms).collect(),
+    })
+  }
+
+  fn horizon(&self) -> usize {
+    let values = self.borrow();
+    values.horizon
+  }
+
+  fn num_trials_float(&self) -> Vec<f32> {
+    let values = self.borrow();
+    values.num_trials.clone()
+  }
+}
+
 pub struct AtomicNodeValues {
   pub prior_values:     Vec<f32>,
-  //pub horizon:          AtomicUsize,
+  pub horizon:          AtomicUsize,
   pub total_trials:     AtomicUsize,
   pub num_trials:       Vec<AtomicUsize>,
   pub num_succs:        Vec<AtomicUsize>,
@@ -244,8 +299,8 @@ pub struct AtomicNodeValues {
   pub num_succs_rave:   Vec<AtomicUsize>,
 }
 
-impl AtomicNodeValues {
-  pub fn new(num_arms: usize) -> AtomicNodeValues {
+impl NodeValues for AtomicNodeValues {
+  fn new(num_arms: usize) -> AtomicNodeValues {
     let mut num_trials = Vec::with_capacity(num_arms);
     for _ in 0 .. num_arms {
       num_trials.push(AtomicUsize::new(0));
@@ -268,6 +323,8 @@ impl AtomicNodeValues {
     }
     AtomicNodeValues{
       prior_values:     repeat(0.5).take(num_arms).collect(),
+      // FIXME(20160125): switch on progressive widening.
+      horizon:          AtomicUsize::new(min(1, num_arms)),
       total_trials:     AtomicUsize::new(0),
       num_trials:       num_trials,
       num_succs:        num_succs,
@@ -277,7 +334,11 @@ impl AtomicNodeValues {
     }
   }
 
-  pub fn num_trials_float(&self) -> Vec<f32> {
+  fn horizon(&self) -> usize {
+    self.horizon.load(Ordering::Acquire)
+  }
+
+  fn num_trials_float(&self) -> Vec<f32> {
     let mut ns = vec![];
     for j in 0 .. self.num_trials.len() {
       ns.push(self.num_trials[j].load(Ordering::Acquire) as f32);
@@ -286,23 +347,25 @@ impl AtomicNodeValues {
   }
 }
 
-pub struct Node {
+pub struct Node<N=ArcNodeBox, V=AtomicNodeValues> where N: NodeBox, V: NodeValues {
   pub state:        TxnState<TxnStateNodeData>,
-  pub horizon:      AtomicUsize,
+  //pub horizon:      AtomicUsize,
   pub valid_moves:  Vec<Point>,
-  pub child_nodes:  Vec<Option<Arc<RwLock<Node>>>>,
   pub action_idxs:  VecMap<usize>,
+  pub child_nodes:  Vec<Option<Arc<RwLock<Node>>>>,
+  //pub child_nodes:  Vec<Option<ArcNodeBox>>,
   pub values:       AtomicNodeValues,
+  _marker:  PhantomData<(N, V)>,
 }
 
-impl Node {
-  pub fn new(state: TxnState<TxnStateNodeData>, prior_policy: &mut PriorPolicy) -> Node {
+impl<N, V> Node<N, V> where N: NodeBox, V: NodeValues {
+  pub fn new(state: TxnState<TxnStateNodeData>, prior_policy: &mut PriorPolicy) -> Node<N, V> {
     let mut valid_moves = vec![];
     state.get_data().legality.fill_legal_points(state.current_turn(), &mut valid_moves);
     let num_arms = valid_moves.len();
 
     // FIXME(20160109): depends on progressive widening.
-    let init_horizon = min(1, num_arms);
+    //let init_horizon = min(1, num_arms);
 
     // XXX(20151224): Sort moves by descending value for progressive widening.
     let mut values = AtomicNodeValues::new(num_arms);
@@ -324,11 +387,12 @@ impl Node {
     }
     Node{
       state:        state,
-      horizon:      AtomicUsize::new(init_horizon),
+      //horizon:      AtomicUsize::new(init_horizon),
       valid_moves:  valid_moves,
       child_nodes:  child_nodes,
       action_idxs:  action_idxs,
       values:       values,
+      _marker:  PhantomData,
     }
   }
 
@@ -346,8 +410,8 @@ impl Node {
       // threads may also be updating this node's horizon.
       let total_trials = self.values.total_trials.load(Ordering::Acquire);
       let next_horizon = min(num_arms, (((1 + total_trials) as f32).ln() / pwide_mu.ln()).ceil() as usize);
-      let prev_horizon = self.horizon.load(Ordering::Acquire);
-      let curr_horizon = self.horizon.compare_and_swap(prev_horizon, next_horizon, Ordering::AcqRel);
+      let prev_horizon = self.values.horizon.load(Ordering::Acquire);
+      let curr_horizon = self.values.horizon.compare_and_swap(prev_horizon, next_horizon, Ordering::AcqRel);
       if prev_horizon == curr_horizon {
         return;
       }
@@ -390,46 +454,67 @@ pub struct UniqueTree<N> where N: NodeBox {
   mean_raw_score:   f32,
 }
 
-#[derive(Clone)]
-pub struct Tree {
-  root_node:        Arc<RwLock<Option<Arc<RwLock<Node>>>>>,
-  mean_raw_score:   Arc<Mutex<f32>>,
+struct InnerTree {
+  root_node:        Option<Arc<RwLock<Node<ArcNodeBox, AtomicNodeValues>>>>,
+  mean_raw_score:   f32,
 }
 
-impl Tree {
-  pub fn new() -> Tree {
-    Tree{
-      //root_node:    Arc::new(RwLock::new(Node::new(init_state, prior_policy))),
-      //root_node:    Arc::new(RwLock::new(Node::new_bare(init_state))),
-      root_node:        Arc::new(RwLock::new(None)),
-      mean_raw_score:   Arc::new(Mutex::new(0.0)),
+#[derive(Clone)]
+pub struct SharedTree {
+  inner:    Arc<Mutex<InnerTree>>,
+}
+
+impl SharedTree {
+  pub fn new() -> SharedTree {
+    SharedTree{
+      inner:    Arc::new(Mutex::new(InnerTree{
+        root_node:      None,
+        mean_raw_score: 0.0,
+      })),
     }
   }
 
   pub fn try_reset(&self, init_state: TxnState<TxnStateNodeData>, prior_policy: &mut PriorPolicy) {
-    let mut root_node = self.root_node.write().unwrap();
-    if root_node.is_none() {
-      *root_node = Some(Arc::new(RwLock::new(Node::new(init_state, prior_policy))));
-      let mut mean_raw_score = self.mean_raw_score.lock().unwrap();
-      *mean_raw_score = 0.0;
+    let mut inner = self.inner.lock().unwrap();
+    if inner.root_node.is_none() {
+      inner.root_node = Some(Arc::new(RwLock::new(Node::new(init_state, prior_policy))));
+      inner.mean_raw_score = 0.0;
     }
   }
+}
 
-  pub fn traverse(&self,
-      tree_traj: &mut TreeTraj,
+pub trait TreeOpsTrait {
+  type N: NodeBox;
+
+  fn traverse(
+      root_node:    Self::N,
+      tree_traj:    &mut TreeTraj,
       prior_policy: &mut PriorPolicy,
-      tree_policy: &mut TreePolicy<R=Xorshiftplus128Rng>,
-      stats: &mut SearchStats,
-      rng: &mut Xorshiftplus128Rng)
+      tree_policy:  &mut TreePolicy<R=Xorshiftplus128Rng>,
+      rng:          &mut Xorshiftplus128Rng)
+      -> TreeResult;
+  fn backup(
+      tree_traj: &TreeTraj,
+      rollout_traj: &mut RolloutTraj,
+      rng: &mut Xorshiftplus128Rng);
+}
+
+pub struct TreeOps;
+
+impl TreeOps {
+  pub fn traverse(
+      root_node:    Arc<RwLock<Node>>,
+      tree_traj:    &mut TreeTraj,
+      prior_policy: &mut PriorPolicy,
+      tree_policy:  &mut TreePolicy<R=Xorshiftplus128Rng>,
+      stats:        &mut SearchStats,
+      rng:          &mut Xorshiftplus128Rng)
       -> TreeResult
   {
     tree_traj.reset();
 
     let mut ply = 0;
-    let mut cursor_node: Arc<RwLock<Node>> = {
-      let root_node = self.root_node.read().unwrap();
-      root_node.as_ref().unwrap().clone()
-    };
+    let mut cursor_node: Arc<RwLock<Node>> = root_node;
     loop {
       // At the cursor node, decide to walk or rollout depending on the total
       // number of trials.
@@ -504,7 +589,11 @@ impl Tree {
     }
   }
 
-  pub fn backup(&self, tree_traj: &TreeTraj, rollout_traj: &mut RolloutTraj, rng: &mut Xorshiftplus128Rng) {
+  pub fn backup(
+      tree_traj: &TreeTraj,
+      rollout_traj: &mut RolloutTraj,
+      rng: &mut Xorshiftplus128Rng)
+  {
     rollout_traj.rave_mask[0].clear();
     rollout_traj.rave_mask[1].clear();
     let raw_score = match rollout_traj.raw_score {
@@ -725,10 +814,14 @@ impl<W> ParallelMonteCarloEvalServer<W> where W: RolloutPolicy<R=Xorshiftplus128
 
 #[derive(Clone)]
 pub enum SearchWorkerCommand {
-  ResetSearch{
+  ResetSerialSearch{
     cfg:        SearchWorkerConfig,
-    tree:       Tree,
     init_state: TxnState<TxnStateNodeData>,
+  },
+  ResetSearch{
+    cfg:            SearchWorkerConfig,
+    shared_tree:    SharedTree,
+    init_state:     TxnState<TxnStateNodeData>,
   },
   ResetEval{
     cfg:            SearchWorkerConfig,
@@ -813,10 +906,21 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
           // estimate; should check for termination within inner batch loop.
           let cmd: SearchWorkerCommand = in_rx.recv().unwrap();
           match cmd {
-            SearchWorkerCommand::ResetSearch{cfg, tree, init_state} => {
+            SearchWorkerCommand::ResetSerialSearch{cfg, init_state} => {
+              // FIXME(20160124)
+              unimplemented!();
+            }
+
+            SearchWorkerCommand::ResetSearch{cfg, shared_tree, init_state} => {
               // XXX(20160107): If the tree has no root node, this sets it;
               // otherwise use the existing root node.
+              let tree = shared_tree;
               tree.try_reset(init_state, worker.prior_policy());
+
+              let root_node = {
+                let inner = tree.inner.lock().unwrap();
+                inner.root_node.as_ref().unwrap().clone()
+              };
 
               let batch_size = cfg.batch_size;
               let num_batches = cfg.num_batches;
@@ -846,9 +950,10 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
                   for batch_idx in 0 .. batch_size {
                     let tree_traj = &mut tree_trajs[batch_idx];
                     let rollout_traj = &mut rollout_trajs[batch_idx];
-                    match tree.traverse(tree_traj, prior_policy, tree_policy, &mut stats, &mut rng) {
+                    match TreeOps::traverse(root_node.clone(), tree_traj, prior_policy, tree_policy, &mut stats, &mut rng) {
                       TreeResult::Terminal => {
-                        rollout_traj.reset_terminal();
+                        let leaf_state = &tree_traj.leaf_node.as_ref().unwrap().read().unwrap().state;
+                        rollout_traj.reset_terminal(leaf_state);
                       }
                       TreeResult::NonTerminal => {
                         let leaf_state = &tree_traj.leaf_node.as_ref().unwrap().read().unwrap().state;
@@ -873,7 +978,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
                   let tree_traj = &tree_trajs[batch_idx];
                   let rollout_traj = &mut rollout_trajs[batch_idx];
                   rollout_traj.score(cfg.komi, cfg.prev_expected_score);
-                  tree.backup(tree_traj, rollout_traj, &mut rng);
+                  TreeOps::backup(tree_traj, rollout_traj, &mut rng);
                   let raw_score = rollout_traj.raw_score.unwrap();
                   worker_backup_count += 1.0;
                   worker_mean_score += (raw_score - worker_mean_score) / worker_backup_count;
@@ -883,8 +988,8 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
               }
 
               {
-                let mut mean_raw_score = tree.mean_raw_score.lock().unwrap();
-                *mean_raw_score += worker_mean_score / (num_workers as f32);
+                let mut inner = tree.inner.lock().unwrap();
+                inner.mean_raw_score += worker_mean_score / (num_workers as f32);
               }
 
               out_barrier.wait();
@@ -1047,6 +1152,27 @@ pub struct ParallelMonteCarloSearchStats {
   pub argmax_ntrials:   AtomicUsize,
 }*/
 
+pub struct SerialMonteCarloSearch;
+
+impl SerialMonteCarloSearch {
+  pub fn new() -> SerialMonteCarloSearch {
+    SerialMonteCarloSearch
+  }
+
+  pub fn join<W>(&self,
+      total_num_rollouts: usize,
+      total_batch_size:   usize,
+      server:       &ParallelMonteCarloSearchServer<W>,
+      init_state:   &TxnState<TxnStateNodeData>,
+      prev_result:  Option<&MonteCarloSearchResult>,
+      rng:          &mut Xorshiftplus128Rng)
+      -> (MonteCarloSearchResult, MonteCarloSearchStats)
+      where W: SearchPolicyWorker
+  {
+    unimplemented!();
+  }
+}
+
 pub struct ParallelMonteCarloSearch;
 
 impl ParallelMonteCarloSearch {
@@ -1081,7 +1207,7 @@ impl ParallelMonteCarloSearch {
 
     // TODO(20160106): reset stats.
 
-    let tree = Tree::new();
+    let tree = SharedTree::new();
     let cfg = SearchWorkerConfig{
       batch_size:   worker_batch_size,
       num_batches:  worker_num_batches,
@@ -1092,9 +1218,9 @@ impl ParallelMonteCarloSearch {
     let start_time = get_time();
     for tid in 0 .. num_workers {
       server.enqueue(tid, SearchWorkerCommand::ResetSearch{
-        cfg: cfg,
-        tree: tree.clone(),
-        init_state: init_state.clone(),
+        cfg:            cfg,
+        shared_tree:    tree.clone(),
+        init_state:     init_state.clone(),
       });
     }
     server.join();
@@ -1103,8 +1229,14 @@ impl ParallelMonteCarloSearch {
 
     let mut stats: MonteCarloSearchStats = Default::default();
     stats.elapsed_ms = elapsed_ms as usize;
-    let root_node_opt = tree.root_node.read().unwrap();
-    let root_node = root_node_opt.as_ref().unwrap().read().unwrap();
+
+    /*let root_node_opt = tree.root_node.read().unwrap();
+    let root_node = root_node_opt.as_ref().unwrap().read().unwrap();*/
+    let (root_node, mean_raw_score) = {
+      let inner_tree = tree.inner.lock().unwrap();
+      (inner_tree.root_node.as_ref().unwrap().clone(), inner_tree.mean_raw_score)
+    };
+    let root_node = root_node.read().unwrap();
     let root_trials = root_node.values.num_trials_float();
     let (action, adj_value, raw_value) = if let Some(argmax_j) = array_argmax(&root_trials) {
       stats.argmax_rank = Some(argmax_j);
@@ -1123,10 +1255,11 @@ impl ParallelMonteCarloSearch {
     (MonteCarloSearchResult{
       turn:   root_node.state.current_turn(),
       action: action,
-      expected_score: {
+      /*expected_score: {
         let mean_score = tree.mean_raw_score.lock().unwrap();
         *mean_score
-      },
+      },*/
+      expected_score:   mean_raw_score,
       expected_adj_val: adj_value,
       expected_value:   raw_value,
     }, stats)

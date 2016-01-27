@@ -1,7 +1,7 @@
 extern crate holmes;
 extern crate rustc_serialize;
 
-use holmes::game::{GameHistory};
+//use holmes::game::{GameHistory};
 use holmes::sgf::{Sgf, Property, RootProperty, GameInfoProperty, parse_raw_sgf};
 
 use std::collections::{BTreeMap};

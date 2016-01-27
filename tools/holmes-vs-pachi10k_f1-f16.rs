@@ -17,16 +17,16 @@ fn main() {
       Asset::Symlink{src: PathBuf::from("patterns.prob")},
       Asset::Symlink{src: PathBuf::from("patterns.spat")},
       Asset::SymlinkAs{
-        src: PathBuf::from("experiments/models/action_12layer_19x19x16.v2.saved/layer_params.latest.blob"),
-        dst: PathBuf::from("experiments/models/action_12layer_19x19x16.v2.saved/layer_params.latest.blob"),
-        /*src: PathBuf::from("models/action_12layer_19x19x16.v2.saved/layer_params.latest.blob"),
-        dst: PathBuf::from("models/action_12layer_19x19x16.v2.saved/layer_params.latest.blob"),*/
+        /*src: PathBuf::from("experiments/models/action_12layer_19x19x16.v2.saved/layer_params.latest.blob"),
+        dst: PathBuf::from("experiments/models/action_12layer_19x19x16.v2.saved/layer_params.latest.blob"),*/
+        src: PathBuf::from("models/action_12layer_19x19x16.v2.saved/layer_params.latest.blob"),
+        dst: PathBuf::from("models/action_12layer_19x19x16.v2.saved/layer_params.latest.blob"),
       },
       Asset::SymlinkAs{
-        src: PathBuf::from("experiments/models/action_2layer_19x19x16.v2.saved/layer_params.latest.blob"),
-        dst: PathBuf::from("experiments/models/action_2layer_19x19x16.v2.saved/layer_params.latest.blob"),
-        /*src: PathBuf::from("models/action_2layer_19x19x16.v2.saved/layer_params.latest.blob"),
-        dst: PathBuf::from("models/action_2layer_19x19x16.v2.saved/layer_params.latest.blob"),*/
+        /*src: PathBuf::from("experiments/models/action_2layer_19x19x16.v2.saved/layer_params.latest.blob"),
+        dst: PathBuf::from("experiments/models/action_2layer_19x19x16.v2.saved/layer_params.latest.blob"),*/
+        src: PathBuf::from("models/action_2layer_19x19x16.v2.saved/layer_params.latest.blob"),
+        dst: PathBuf::from("models/action_2layer_19x19x16.v2.saved/layer_params.latest.blob"),
         /*src: PathBuf::from("models/rollout_2layer_pgbalance.saved/layer_params.t_1000.blob"),
         dst: PathBuf::from("models/rollout_2layer_pgbalance.saved/layer_params.latest.blob"),*/
         /*src: PathBuf::from("models/rollout_2layer_pgbalance.saved/layer_params.latest.blob"),
@@ -49,8 +49,9 @@ fn main() {
       (PathBuf::from("bin/gnugo-3.8"),
         vec![
           "--level".to_string(), "10".to_string(),
-          "--mode".to_string(), "gtp".to_string(),
+          "--chinese-rules".to_string(),
           "--seed".to_string(), "${HYDRA.SEED32.0}".to_string(),
+          "--mode".to_string(), "gtp".to_string(),
           "--gtp-connect".to_string(), "127.0.0.1:${HYDRA.PORT.2}".to_string(),
         ],
         vec![]),
@@ -69,8 +70,7 @@ fn main() {
           "-e".to_string(), "uct".to_string(),
           "-r".to_string(), "chinese".to_string(),
           "-s".to_string(), "${HYDRA.SEED32.1}".to_string(),
-          "-t".to_string(), "=10000".to_string(),
-          "threads=1,pondering=0".to_string(),
+          "-t".to_string(), "=10000".to_string(), "threads=1,pondering=0".to_string(),
           "-g".to_string(), "127.0.0.1:${HYDRA.PORT.1}".to_string(),
         ],
         vec![]),
@@ -79,7 +79,8 @@ fn main() {
   let experiment = Experiment{
     trial_cfg:      trial_cfg,
     //trials_path:    PathBuf::from("experiments/baseline.2.experiment"),
-    trials_path:    PathBuf::from("experiments/batch_size_128_oldcode.1.experiment"),
+    //trials_path:    PathBuf::from("experiments/batch_size_128_oldcode.1.experiment"),
+    trials_path:    PathBuf::from("experiments/batch_size_256.0.experiment"),
     //trials_path:    PathBuf::from("experiments/pgbalance1000.2.experiment"),
     scratch_prefix: PathBuf::from("/scratch/phj/space/holmes-project/holmes"),
     //num_trials:     240,

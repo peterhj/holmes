@@ -130,7 +130,7 @@ impl RolloutPolicy for BatchConvnetRolloutPolicy {
     let mut turn_pass = vec![vec![], vec![]];
     let mut num_both_passed = 0;
     let mut filters = vec![];
-    for idx in (0 .. batch_size) {
+    for idx in 0 .. batch_size {
       let leaf_node = walks[idx].leaf_node.as_ref().unwrap().borrow();
       valid_moves[0].push(leaf_node.state.get_data().legality.legal_points(Stone::Black));
       valid_moves[1].push(leaf_node.state.get_data().legality.legal_points(Stone::White));
@@ -142,14 +142,14 @@ impl RolloutPolicy for BatchConvnetRolloutPolicy {
     }
 
     let max_iters = 361 + 361 / 2 + rng.gen_range(0, 2);
-    for t in (0 .. max_iters) {
+    for t in 0 .. max_iters {
       //println!("DEBUG: BatchConvnetRolloutPolicy: iter {} / {}", t, max_iters);
       if num_both_passed == batch_size {
         //println!("DEBUG: BatchConvnetRolloutPolicy: all passed");
         break;
       }
 
-      for idx in (0 .. batch_size) {
+      for idx in 0 .. batch_size {
         if !trajs[idx].rollout {
           continue;
         }
@@ -170,7 +170,7 @@ impl RolloutPolicy for BatchConvnetRolloutPolicy {
 
       {
         let batch_probs = self.arch.loss_layer().predict_probs(batch_size, &self.ctx).as_slice();
-        for idx in (0 .. batch_size) {
+        for idx in 0 .. batch_size {
           if !trajs[idx].rollout {
             continue;
           }
@@ -178,7 +178,7 @@ impl RolloutPolicy for BatchConvnetRolloutPolicy {
         }
       }
 
-      for idx in (0 .. batch_size) {
+      for idx in 0 .. batch_size {
         if !trajs[idx].rollout {
           continue;
         }
@@ -261,7 +261,7 @@ impl ParallelBatchConvnetRolloutPolicy {
     let part_batch_size = batch_size / device_count;
     let mut ctxs = vec![];
     let mut archs = vec![];
-    for device_idx in (0 .. device_count) {
+    for device_idx in 0 .. device_count {
       let ctx = DeviceContext::new(device_idx);
 
       // XXX(20160123): testing out simulation balanced params.
@@ -304,7 +304,7 @@ impl RolloutPolicy for ParallelBatchConvnetRolloutPolicy {
     let mut turn_pass = vec![vec![], vec![]];
     let mut num_both_passed = 0;
     let mut filters = vec![];
-    for idx in (0 .. batch_size) {
+    for idx in 0 .. batch_size {
       let leaf_node = walks[idx].leaf_node.as_ref().unwrap().borrow();
       valid_moves[0].push(leaf_node.state.get_data().legality.legal_points(Stone::Black));
       valid_moves[1].push(leaf_node.state.get_data().legality.legal_points(Stone::White));
@@ -316,15 +316,15 @@ impl RolloutPolicy for ParallelBatchConvnetRolloutPolicy {
     }
 
     let max_iters = 361 + 361 / 2 + rng.gen_range(0, 2);
-    for t in (0 .. max_iters) {
+    for t in 0 .. max_iters {
       //println!("DEBUG: ParallelBatchConvnetRolloutPolicy: iter {} / {}", t, max_iters);
       if num_both_passed == batch_size {
         //println!("DEBUG: ParallelBatchConvnetRolloutPolicy: all passed");
         break;
       }
 
-      for part in (0 .. self.num_parts) {
-        for idx in (part * part_batch_size .. (part + 1) * part_batch_size) {
+      for part in 0 .. self.num_parts {
+        for idx in part * part_batch_size .. (part + 1) * part_batch_size {
           if !trajs[idx].rollout {
             continue;
           }
@@ -340,24 +340,24 @@ impl RolloutPolicy for ParallelBatchConvnetRolloutPolicy {
       }
 
       // FIXME(20151211): parallel rollouts.
-      for part in (0 .. self.num_parts) {
+      for part in 0 .. self.num_parts {
         self.ctxs[part].set_device();
         self.archs[part].data_layer().load_frames(part_batch_size, &self.ctxs[part]);
       }
-      for part in (0 .. self.num_parts) {
+      for part in 0 .. self.num_parts {
         self.ctxs[part].set_device();
         self.archs[part].evaluate(OptPhase::Inference, &self.ctxs[part]);
       }
-      for part in (0 .. self.num_parts) {
+      for part in 0 .. self.num_parts {
         self.ctxs[part].set_device();
         self.archs[part].loss_layer().store_probs(part_batch_size, &self.ctxs[part]);
       }
 
       {
-        for part in (0 .. self.num_parts) {
+        for part in 0 .. self.num_parts {
           self.ctxs[part].set_device();
           let batch_probs = self.archs[part].loss_layer().predict_probs(part_batch_size, &self.ctxs[part]).as_slice();
-          for idx in (part * part_batch_size .. (part + 1) * part_batch_size) {
+          for idx in part * part_batch_size .. (part + 1) * part_batch_size {
             if !trajs[idx].rollout {
               continue;
             }
@@ -367,7 +367,7 @@ impl RolloutPolicy for ParallelBatchConvnetRolloutPolicy {
         }
       }
 
-      for idx in (0 .. batch_size) {
+      for idx in 0 .. batch_size {
         if !trajs[idx].rollout {
           continue;
         }
