@@ -118,9 +118,7 @@ impl Coord {
     s.extend(&y_label);
     s
   }
-//}
 
-//impl ToString for Coord {
   pub fn to_string(&self) -> String {
     String::from_utf8(self.to_bytestring()).ok().unwrap()
   }
@@ -128,6 +126,31 @@ impl Coord {
   pub fn to_sgf(&self) -> String {
     let (x, y) = ((b'a' + self.x) as char, (b'a' + self.y) as char);
     [x, y].iter().map(|&c| c).collect::<String>()
+  }
+
+  pub fn from_idx(idx: usize) -> Coord {
+    let (x, y) = ((idx % 19) as u8, (idx / 19) as u8);
+    Coord{x: x, y: y}
+  }
+
+  pub fn idx(self) -> usize {
+    self.x as usize + self.y as usize * 19
+  }
+
+  pub fn rotate(self, rot: u8) -> Coord {
+    let (u, v) = (self.x as i8 - 9, self.y as i8 - 9);
+    let (nu, nv) = match rot {
+      0 => ( u,  v),
+      1 => (-v,  u), // Rot L
+      2 => ( v, -u), // Rot R
+      3 => (-u,  v), // Flip H
+      4 => ( u, -v), // Flip V
+      5 => ( v,  u), // Rot L + Flip H
+      6 => (-u, -v), // Rot R + Flip H
+      7 => (-v, -u), // Rot 180
+      _ => unreachable!(),
+    };
+    Coord{x: (nu + 9) as u8, y: (nv + 9) as u8}
   }
 }
 

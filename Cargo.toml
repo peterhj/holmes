@@ -90,12 +90,20 @@ name = "train-12layer384-19x19x16"
 path = "tools/train-12layer384-19x19x16.rs"
 
 [[bin]]
+name = "new-train-12layer128-19x19x16"
+path = "tools/new-train-12layer128-19x19x16.rs"
+
+[[bin]]
 name = "new-train-12layer384-19x19x16"
 path = "tools/new-train-12layer384-19x19x16.rs"
 
 [[bin]]
 name = "new-train-12layer384-19x19x28"
 path = "tools/new-train-12layer384-19x19x28.rs"
+
+[[bin]]
+name = "new-train-12layer256-19x19x37"
+path = "tools/new-train-12layer256-19x19x37.rs"
 
 [[bin]]
 name = "policygrad-balance"
@@ -213,10 +221,11 @@ array = { path = "../rembrandt-project/libarray" }
 async = { path = "../rembrandt-project/libasync" }
 async_cuda = { path = "../rembrandt-project/libasync_cuda" }
 
+array_cuda = { path = "../rembrandt-project/libarray_cuda" }
+array_new = { path = "../rembrandt-project/libarray_new" }
 #cuda = { path = "../rembrandt-project/libcuda", features = ["cuda-7-0"] }
 cuda = { path = "../rembrandt-project/libcuda" }
 rembrandt = { path = "../rembrandt-project/rembrandt_new" }
-array_cuda = { path = "../rembrandt-project/libarray_cuda" }
 
 arraydb = { path = "../rembrandt-project/arraydb" }
 episodb = { path = "../episodb" }

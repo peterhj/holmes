@@ -7,7 +7,7 @@ use std::path::{PathBuf};
 
 fn main() {
   let cfg = RolloutEvalOutcomeConfig{
-    fixed_t:        100,
+    fixed_t:        150,
     num_rollouts:   512, // FIXME(20160126): unused.
   };
   let mut machine = RolloutEvalOutcomeMachine::new(cfg);

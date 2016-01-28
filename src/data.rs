@@ -3,12 +3,68 @@ use sgf::{Sgf, parse_raw_sgf};
 use txnstate::{TxnState};
 use txnstate::extras::{TxnStateNodeData};
 
+use rembrandt::data_new::{Augment, SampleDatum, SampleLabel};
 use rng::xorshift::{Xorshiftplus128Rng};
 
 use rand::{Rng, thread_rng};
+use rand::distributions::{IndependentSample};
+use rand::distributions::range::{Range};
 use std::fs::{File};
 use std::io::{Read, BufRead, BufReader};
 use std::path::{PathBuf};
+
+pub struct SymmetryAugment {
+  range:    Range<u8>,
+  rng:      Xorshiftplus128Rng,
+}
+
+impl SymmetryAugment {
+  pub fn new<R: Rng>(seed_rng: &mut R) -> SymmetryAugment {
+    SymmetryAugment{
+      range:    Range::new(0, 8),
+      rng:      Xorshiftplus128Rng::new(seed_rng),
+    }
+  }
+}
+
+impl Augment for SymmetryAugment {
+  fn transform(&mut self, datum: SampleDatum, maybe_label: Option<SampleLabel>) -> (SampleDatum, Option<SampleLabel>) {
+    let rot = self.range.ind_sample(&mut self.rng);
+    let mut new_datum = datum.clone();
+    let mut new_label = maybe_label.clone();
+    match (datum, &mut new_datum) {
+      (SampleDatum::RowMajorBytes(ref datum), &mut SampleDatum::RowMajorBytes(ref mut new_datum)) => {
+        let bound = new_datum.bound();
+        let stride = new_datum.stride();
+        {
+          let old_data = datum.as_slice();
+          let mut new_data = new_datum.as_mut_slice();
+          for k in 0 .. bound.2 {
+            for j in 0 .. bound.1 {
+              for i in 0 .. bound.0 {
+                let c = Coord{x: i as u8, y: j as u8};
+                let nc = c.rotate(rot);
+                let (ni, nj) = (nc.x as usize, nc.y as usize);
+                new_data[ni + nj * stride.0 + k * stride.0 * stride.1] = old_data[i + j * stride.0 + k * stride.0 * stride.1];
+              }
+            }
+          }
+        }
+      }
+    }
+    if let Some(label) = maybe_label {
+      match label {
+        SampleLabel::Category{category} => {
+          let c = Coord::from_idx(category as usize);
+          let nc = c.rotate(rot);
+          new_label = Some(SampleLabel::Category{category: nc.idx() as i32});
+        }
+        _ => unimplemented!(),
+      }
+    }
+    (new_datum, new_label)
+  }
+}
 
 pub struct Episode {
   history:  Vec<(TxnState<TxnStateNodeData>, Stone, Action)>,

@@ -278,6 +278,10 @@ impl Chain {
     }
   }
 
+  pub fn count_length(&self) -> usize {
+    self.size as usize
+  }
+
   /// Returns 0 or 1.
   pub fn count_pseudolibs(&self) -> usize {
     if self.ps_libs.is_empty() {
@@ -359,6 +363,33 @@ impl Chain {
       (Some(_), Some(_), Some(_)) => 3,
       _ => unreachable!(),
     }
+  }
+
+  /// Returns 0 through 8.
+  pub fn count_libs_up_to_8(&self) -> usize {
+    let mut prev_libs = [
+      None, None, None, None,
+      None, None, None, None,
+    ];
+    let mut num_uniq_libs = 0 ;
+    for &lib in self.ps_libs.iter() {
+      for t in 0 .. (num_uniq_libs + 1) {
+        match prev_libs[t] {
+          None => {
+            prev_libs[t] = Some(lib);
+            num_uniq_libs += 1;
+          }
+          Some(prev_lib) => {
+            if prev_lib == lib {
+              break;
+            } else if t == 7 {
+              return 8;
+            }
+          }
+        }
+      }
+    }
+    num_uniq_libs
   }
 
   pub fn insert_pseudolib(&mut self, point: Point) {

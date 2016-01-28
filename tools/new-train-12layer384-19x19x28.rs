@@ -13,7 +13,7 @@ use rembrandt::arch_new::{
   PipelineArchConfig, PipelineArchSharedData, PipelineArchWorker,
 };
 use rembrandt::data_new::{
-  SampleLabelConfig, DatasetConfig, DataSource,
+  SampleDatumConfig, SampleLabelConfig, DatasetConfig, DataSource,
   SampleIterator, RandomEpisodeIterator, CyclicEpisodeIterator,
   PartitionDataSource,
 };
@@ -24,7 +24,7 @@ use rembrandt::layer_new::{
   CategoricalLossLayerConfig, SoftmaxKLLossLayer,
 };
 use rembrandt::opt_new::{
-  LearningRateSchedule,
+  StepSizeSchedule,
   SupervisedData,
   SgdOptConfig, SgdOptimization,
 };
@@ -54,8 +54,9 @@ fn train() {
   // - LR 0.05, momentum 0.1, init 0.05 (does not work)
 
   let sgd_opt_cfg = SgdOptConfig{
+    init_t:         0,
     minibatch_size: batch_size,
-    learning_rate:  LearningRateSchedule::StepTwice{
+    step_size:      StepSizeSchedule::StepTwice{
       lr0:      0.01,   lr0_iters:  200000,
       lr1:      0.001,  lr1_iters:  400000,
       lr_final: 0.0001,
@@ -66,9 +67,11 @@ fn train() {
     valid_iters:    1600,
     save_iters:     1600,
   };
+  let datum_cfg = SampleDatumConfig::ByteArray3d;
   let label_cfg = SampleLabelConfig::Category;
 
   info!("sgd cfg: {:?}", sgd_opt_cfg);
+  info!("datum cfg: {:?}", datum_cfg);
   info!("label cfg: {:?}", label_cfg);
 
   let data_layer_cfg = Data3dLayerConfig{
@@ -174,7 +177,7 @@ fn train() {
             );
 
         let sgd_opt = SgdOptimization;
-        sgd_opt.train(sgd_opt_cfg, label_cfg, &mut arch_worker, &mut train_data, &mut valid_data, &ctx);
+        sgd_opt.train(sgd_opt_cfg, datum_cfg, label_cfg, &mut arch_worker, &mut train_data, &mut valid_data, &ctx);
       });
     }
     scope.join_all();

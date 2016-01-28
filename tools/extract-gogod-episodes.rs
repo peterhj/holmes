@@ -1,4 +1,5 @@
-extern crate array;
+//extern crate array;
+extern crate array_new;
 extern crate byteorder;
 extern crate episodb;
 extern crate holmes;
@@ -11,9 +12,11 @@ use holmes::txnstate::features::{
   TxnStateFeaturesData,
   TxnStateLibFeaturesData,
   TxnStateExtLibFeatsData,
+  TxnStateAlphaFeatsV1Data,
 };
 
-use array::{NdArrayFormat, ArrayDeserialize, ArraySerialize, Array3d};
+//use array::{NdArrayFormat, ArrayDeserialize, ArraySerialize, Array3d};
+use array_new::{NdArraySerialize, Array3d, BitArray3d};
 use byteorder::{WriteBytesExt, LittleEndian};
 use episodb::{EpisoDb};
 
@@ -47,8 +50,11 @@ fn main() {
   //let serial_frame_sz = <Array3d<u8> as ArrayDeserialize<u8, NdArrayFormat>>::serial_size((19, 19, 10));
 
   //let expected_dims = (19, 19, 16);
-  let expected_dims = (19, 19, 28);
-  let expected_frame_sz = <Array3d<u8> as ArrayDeserialize<u8, NdArrayFormat>>::serial_size(expected_dims);
+  //let expected_dims = (19, 19, 28);
+  let expected_dims = (19, 19, 37);
+  //let expected_frame_sz = <Array3d<u8> as ArrayDeserialize<u8, NdArrayFormat>>::serial_size(expected_dims);
+  //let expected_frame_sz = Array3d::<u8>::serial_size(expected_dims);
+  let expected_frame_sz = BitArray3d::serial_size(expected_dims);
   let n = sgf_paths.len();
   let est_ep_len = 216;
 
@@ -317,15 +323,26 @@ fn main() {
         [b_rank, w_rank],
         RuleSet::KgsJapanese.rules(),
         //TxnStateLibFeaturesData::new(),
-        TxnStateExtLibFeatsData::new(),
+        //TxnStateExtLibFeatsData::new(),
+        TxnStateAlphaFeatsV1Data::new(),
     );
     state.reset();
-    for &(ref player, ref mov) in sgf.moves.iter() {
+    for (t, &(ref player, ref mov)) in sgf.moves.iter().enumerate() {
       let turn = match player as &str {
         "B" => Stone::Black,
         "W" => Stone::White,
         _ => unimplemented!(),
       };
+      // XXX(20160119): Set state turn the first time if necessary.
+      if turn != state.current_turn() {
+        if t == 0 {
+          state.unsafe_set_current_turn(turn);
+        } else {
+          println!("WARNING: extract: repeated turn: sgf path: '{:?}'", sgf_path);
+          history.clear();
+          break;
+        }
+      }
       let action = match mov as &str {
         "Pass"    => Action::Pass,
         "Resign"  => Action::Resign,
@@ -390,8 +407,10 @@ fn main() {
       state.get_data().extract_relative_features(turn, &mut frame_data);
 
       let frame = Array3d::with_data(frame_data, frame_dims);
+      let raw_frame = BitArray3d::from_byte_array(&frame);
       let mut serial_frame = vec![];
-      frame.as_view().serialize(&mut serial_frame);
+      //frame.as_view().serialize(&mut serial_frame);
+      raw_frame.serialize(&mut serial_frame);
       assert_eq!(expected_frame_sz, serial_frame.len());
       frames_db.append_frame(&serial_frame);
 
