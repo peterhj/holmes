@@ -583,8 +583,8 @@ fn parse_property(text: &[u8], mut ptr: usize, props: &mut Vec<Property>) -> usi
           ptr = read_property_value(text, ptr, &mut value);
           Property::GameInfo(GameInfoProperty::Unknown(text[ptr .. ptr + 10].to_vec(), value.clone()))
         } else {
-          //panic!("FATAL: unhandled property: '{}'", from_utf8(&text[ptr .. ]).unwrap());
-          println!("DEBUG: unhandled property");
+          panic!("FATAL: unhandled property: '{}'", from_utf8(&text[ptr .. ]).unwrap());
+          //println!("DEBUG: unhandled property");
           return ptr;
         }
       }

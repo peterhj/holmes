@@ -984,7 +984,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
     Pattern3x3(mask8)
   }
 
-  /*pub fn current_libs(&self, point: Point) -> usize {
+  pub fn current_libs_up_to_3(&self, point: Point) -> usize {
     let head = self.chains.find_chain(point);
     if head == TOMBSTONE {
       0
@@ -992,7 +992,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
       let chain = self.chains.get_chain(head).unwrap();
       chain.count_libs_up_to_3()
     }
-  }*/
+  }
 
   pub fn current_ko(&self) -> Option<(Stone, Point)> {
     self.position.ko

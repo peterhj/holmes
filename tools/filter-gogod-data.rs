@@ -11,7 +11,8 @@ use std::io::{Read, BufRead, Write, BufReader};
 use std::path::{PathBuf};
 
 fn main() {
-  let index_path = PathBuf::from("/data0/go/gogodb-preproc/index");
+  let index_path = PathBuf::from("/data0/go/gogodb_w2015-preproc/index");
+  //let index_path = PathBuf::from("/data0/go/gogodb-preproc/index");
   //let index_path = PathBuf::from("/data0/go/kgs-ugo-preproc/index");
   let index_file = BufReader::new(File::open(&index_path).unwrap());
   let mut index_lines = Vec::new();
@@ -28,7 +29,7 @@ fn main() {
     .map(|line| PathBuf::from(line)).collect();
   println!("num sgf paths: {}", sgf_paths.len());
 
-  let mut filterindex_path = PathBuf::from("/data0/go/gogodb-preproc/filtered_index.v3");
+  let mut filterindex_path = PathBuf::from("/data0/go/gogodb_w2015-preproc/filtered_index.v3");
   //let mut filterindex_path = PathBuf::from("/data0/go/kgs-ugo-preproc/filtered_index");
   let mut filterindex = File::create(&filterindex_path).unwrap();
 
@@ -64,11 +65,15 @@ fn main() {
     let mut sgf_file = File::open(sgf_path).unwrap();
     let mut text = Vec::new();
     sgf_file.read_to_end(&mut text).unwrap();
+    /*if i >= 85000 {
+      println!("DEBUG: {} {:?}", i, sgf_path);
+    }*/
     let raw_sgf = parse_raw_sgf(&text);
 
     let mut has_handicap = false;
     let mut komi = None;
 
+    let mut is_semimodern = false;
     let mut is_modern = false;
     let mut is_19 = false;
     let mut is_nohand = false;
@@ -80,6 +85,9 @@ fn main() {
       .to_str().unwrap().split("-").collect();
     let year: Option<i32> = path_toks[0].parse().ok();
     if let Some(year) = year {
+      if year >= 1800 {
+        is_semimodern = true;
+      }
       if year >= 1950 {
         is_modern = true;
       }
@@ -125,11 +133,13 @@ fn main() {
             komi = k;
           }
           &GameInfoProperty::GoHandicap(handicap) => {
-            if !handicap_counts.contains_key(&handicap.unwrap()) {
-              handicap_counts.insert(handicap.unwrap(), 0);
+            if let Some(handicap) = handicap {
+              if !handicap_counts.contains_key(&handicap) {
+                handicap_counts.insert(handicap, 0);
+              }
+              *handicap_counts.get_mut(&handicap).unwrap() += 1;
+              has_handicap = true;
             }
-            *handicap_counts.get_mut(&handicap.unwrap()).unwrap() += 1;
-            has_handicap = true;
           }
           _ => {}
         },
@@ -169,7 +179,8 @@ fn main() {
         }
       }
     }
-    if is_modern && is_19 {
+    if is_semimodern && is_19 {
+    //if is_modern && is_19 {
     //if is_modern && is_19 && is_nohand && is_goodkomi {
     //if is_modern && is_19 && is_nohand && is_komi65 && is_japanese { // XXX: KGS filter.
       let sgf = Sgf::from_raw(&raw_sgf);

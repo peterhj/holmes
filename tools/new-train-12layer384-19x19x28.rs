@@ -4,6 +4,7 @@ extern crate rembrandt;
 #[macro_use]
 extern crate log;
 extern crate env_logger;
+extern crate rand;
 extern crate scoped_threadpool;
 
 use array_cuda::device::{DeviceContext};
@@ -30,6 +31,7 @@ use rembrandt::opt_new::{
 };
 use scoped_threadpool::{Pool};
 
+use rand::{Rng, thread_rng};
 use std::path::{PathBuf};
 use std::sync::{Arc};
 
@@ -68,7 +70,7 @@ fn train() {
     save_iters:     1600,
   };
   let datum_cfg = SampleDatumConfig::ByteArray3d;
-  let label_cfg = SampleLabelConfig::Category;
+  let label_cfg = SampleLabelConfig::Category{num_categories: 361};
 
   info!("sgd cfg: {:?}", sgd_opt_cfg);
   info!("datum cfg: {:?}", datum_cfg);
@@ -136,6 +138,7 @@ fn train() {
     .softmax_kl_loss(loss_layer_cfg);
 
   let num_workers = 1;
+  let shared_seed = [thread_rng().next_u64(), thread_rng().next_u64()];
   let arch_shared = for_all_devices(num_workers, |contexts| {
     Arc::new(PipelineArchSharedData::new(num_workers, &arch_cfg, contexts))
   });
@@ -156,6 +159,7 @@ fn train() {
             //PathBuf::from("experiments/models/tmp_new_action_12layer384_19x19x16.v2"),
             PathBuf::from("experiments/models/tmp2_new_action_12layer384_19x19x28.v3"),
             tid,
+            shared_seed,
             &arch_shared,
             atomic_data,
             &ctx,
@@ -177,7 +181,7 @@ fn train() {
             );
 
         let sgd_opt = SgdOptimization;
-        sgd_opt.train(sgd_opt_cfg, datum_cfg, label_cfg, &mut arch_worker, &mut train_data, &mut valid_data, &ctx);
+        sgd_opt.train(sgd_opt_cfg, datum_cfg, label_cfg, label_cfg, &mut arch_worker, &mut train_data, &mut valid_data, &ctx);
       });
     }
     scope.join_all();

@@ -923,9 +923,9 @@ impl TxnStateAlphaFeatsV1Data {
         features[Self::TURNS_7_PLANE + p] = 0;
         features[Self::TURNS_8_PLANE + p] = Self::SET;
       }
-      9 => {
+      /*9 => {
         features[Self::TURNS_8_PLANE + p] = 0;
-      }
+      }*/
       _ => unreachable!(),
     }
   }
@@ -1316,7 +1316,8 @@ impl TxnStateData for TxnStateAlphaFeatsV1Data {
       // XXX(20160102): Update previous moves.
       match self.prev_moves[7] {
         Some((_, prev_point)) => {
-          Self::update_point_turns(features, prev_point, 9);
+          // XXX(20160129): Do not erase the oldest moves.
+          //Self::update_point_turns(features, prev_point, 9);
         }
         None => {}
       }

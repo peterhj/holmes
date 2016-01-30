@@ -243,7 +243,7 @@ fn test_sgf_correctness() {
           let point = Point::from_idx(p);
           match state.current_stone(point) {
             Stone::Black => {
-              let libs = state.current_libs(point);
+              let libs = state.current_libs_up_to_3(point);
               assert_eq!(if libs == 1 { 1 } else { 0 }, state.get_data().libfeats.current_feature(1, point));
               assert_eq!(if libs == 2 { 1 } else { 0 }, state.get_data().libfeats.current_feature(2, point));
               assert_eq!(if libs == 3 { 1 } else { 0 }, state.get_data().libfeats.current_feature(3, point));
@@ -252,7 +252,7 @@ fn test_sgf_correctness() {
               assert_eq!(0, state.get_data().libfeats.current_feature(7, point));
             }
             Stone::White => {
-              let libs = state.current_libs(point);
+              let libs = state.current_libs_up_to_3(point);
               assert_eq!(0, state.get_data().libfeats.current_feature(1, point));
               assert_eq!(0, state.get_data().libfeats.current_feature(2, point));
               assert_eq!(0, state.get_data().libfeats.current_feature(3, point));

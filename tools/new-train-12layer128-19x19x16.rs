@@ -1,5 +1,9 @@
 extern crate array_cuda;
 extern crate rembrandt;
+
+#[macro_use]
+extern crate log;
+extern crate env_logger;
 extern crate rand;
 extern crate scoped_threadpool;
 
@@ -36,33 +40,50 @@ fn main() {
 }
 
 fn train() {
+  env_logger::init().unwrap();
   //let mut rng = thread_rng();
 
-  let batch_size = 256;
+  //let num_workers = 1;
+  let num_workers = 3;
+
+  let batch_size = 86;
   let input_channels = 16;
   let conv1_channels = 96;
-  let hidden_channels = 384;
+  let hidden_channels = 128;
+
+  // XXX(20160104): combos that work (maybe?):
+  // - LR 0.01, momentum 0.9, init 0.05 (only worked once, unstable init?)
+  // - LR 0.005, momentum 0.9, init 0.01 (currently running; failed once, worked 2nd time?)
+  // - LR 0.005, momentum 0.1, init 0.05 (works)
+  // - LR 0.01, momentum 0.1, init 0.05 (also works)
+  // - LR 0.05, momentum 0.1, init 0.05 (does not work)
 
   let sgd_opt_cfg = SgdOptConfig{
     init_t:         0,
-    minibatch_size: batch_size,
-    step_size:      StepSizeSchedule::StepTwice{
-      lr0:      0.05,   lr0_iters:  200000,
-      lr1:      0.005,  lr1_iters:  400000,
-      lr_final: 0.0005,
+    minibatch_size: num_workers * batch_size,
+    step_size:      StepSizeSchedule::Decay{
+      //init_step:    0.015625,
+      init_step:    0.03125,
+      decay_rate:   0.5,
+      level_iters:  15_000_000,
     },
-    momentum:       0.0,
+    momentum:       0.1,
     l2_reg_coef:    0.0,
     display_iters:  20,
-    valid_iters:    800,
-    save_iters:     1600,
+    valid_iters:    3000,
+    save_iters:     3000,
   };
   let datum_cfg = SampleDatumConfig::ByteArray3d;
+  //let datum_cfg = SampleDatumConfig::BitArray3d;
   let label_cfg = SampleLabelConfig::Category{num_categories: 361};
+
+  info!("sgd cfg: {:?}", sgd_opt_cfg);
+  info!("datum cfg: {:?}", datum_cfg);
+  info!("label cfg: {:?}", label_cfg);
 
   let data_layer_cfg = Data3dLayerConfig{
     dims:           (19, 19, input_channels),
-    normalize:      false,
+    normalize:      true,
   };
   let conv1_layer_cfg = Conv2dLayerConfig{
     in_dims:        (19, 19, input_channels),
@@ -121,7 +142,6 @@ fn train() {
     .conv2d(final_conv_layer_cfg)
     .softmax_kl_loss(loss_layer_cfg);
 
-  let num_workers = 1;
   let shared_seed = [thread_rng().next_u64(), thread_rng().next_u64()];
   let arch_shared = for_all_devices(num_workers, |contexts| {
     Arc::new(PipelineArchSharedData::new(num_workers, &arch_cfg, contexts))
@@ -140,7 +160,9 @@ fn train() {
         let mut arch_worker = PipelineArchWorker::new(
             batch_size,
             arch_cfg,
-            PathBuf::from("models/tmp_new_action_12layer384_19x19x16.v2"),
+            //PathBuf::from("experiments/models/tmp_new_action_12layer384_19x19x16.v2"),
+            //PathBuf::from("experiments/models/tmp2_new_action_12layer384_19x19x28.v3"),
+            PathBuf::from("models/tmp_new_action_12layer128_19x19x16.v2"),
             tid,
             shared_seed,
             &arch_shared,
@@ -148,11 +170,13 @@ fn train() {
             &ctx,
         );
 
+        //let dataset_cfg = DatasetConfig::open(&PathBuf::from("experiments/gogodb_19x19x16_episode.v2.data"));
+        //let dataset_cfg = DatasetConfig::open(&PathBuf::from("experiments/gogodb_19x19x28_episode.v3.data"));
         let dataset_cfg = DatasetConfig::open(&PathBuf::from("data/gogodb_19x19x16_episode.v2.data"));
         let mut train_data =
             //SampleIterator::new(
-            CyclicEpisodeIterator::new(
-            //RandomEpisodeIterator::new(
+            //CyclicEpisodeIterator::new(
+            RandomEpisodeIterator::new(
               //Box::new(PartitionDataSource::new(tid, num_workers, dataset_cfg.build("train")))
               dataset_cfg.build("train")
             );

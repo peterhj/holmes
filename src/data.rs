@@ -59,7 +59,16 @@ impl Augment for SymmetryAugment {
           let nc = c.rotate(rot);
           new_label = Some(SampleLabel::Category{category: nc.idx() as i32});
         }
-        _ => unimplemented!(),
+        SampleLabel::MultiCategory{ref categories} => {
+          let lookahead = categories.len();
+          let mut new_categories = Vec::with_capacity(lookahead);
+          for k in 0 .. lookahead {
+            let c = Coord::from_idx(categories[k] as usize);
+            let nc = c.rotate(rot);
+            new_categories.push(nc.idx() as i32);
+          }
+          new_label = Some(SampleLabel::MultiCategory{categories: new_categories});
+        }
       }
     }
     (new_datum, new_label)

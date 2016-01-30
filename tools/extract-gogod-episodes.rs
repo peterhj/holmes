@@ -271,7 +271,8 @@ fn main() {
       }
     }
 
-    let b_ranks = parse_rank(&sgf.black_rank, i, sgf_path);
+    // FIXME(20160129): disabling rank parsing for now.
+    /*let b_ranks = parse_rank(&sgf.black_rank, i, sgf_path);
     let w_ranks = parse_rank(&sgf.white_rank, i, sgf_path);
     let ranks = match (b_ranks.len(), w_ranks.len()) {
       (1, 1) => vec![b_ranks[0], w_ranks[0]],
@@ -287,7 +288,9 @@ fn main() {
       }
     };
     let b_rank = ranks[0];
-    let w_rank = ranks[1];
+    let w_rank = ranks[1];*/
+    let b_rank = PlayerRank::Dan(9);
+    let w_rank = PlayerRank::Dan(9);
 
     let outcome = {
       let result_toks: Vec<_> = sgf.result.split("+").collect();
@@ -307,7 +310,7 @@ fn main() {
             None
           }
           _ => {
-            println!("WARNING: extract: unimplemented outcome: \"{}\"", sgf.result);
+            println!("WARNING: extract: unimplemented outcome: \"{}\" sgf path: '{:?}'", sgf.result, sgf_path);
             None
           }
         }
@@ -373,17 +376,24 @@ fn main() {
       if t >= 1 {
         // XXX(20151209): if 2 turns in a row, skip the rest of this game.
         if history[t-1].0 == turn {
+          println!("WARNING: extract: duplicated turns: sgf path: '{:?}'", sgf_path);
           num_skipped += history.len() - t;
           break;
         }
       }
       let action_label = match action {
-        Action::Place{point} => point.0 as i32,
-        Action::Pass => -1,
+        Action::Place{point} => {
+          point.0 as i32
+        }
+        // XXX(20160129): Trying out new label system. Resigns are 361, passes are 362.
+        Action::Pass => {
+          362
+        }
         Action::Resign => {
-          num_skipped += history.len() - t;
+          /*num_skipped += history.len() - t;
           //continue;
-          break;
+          break;*/
+          361
         }
       };
       let value_label = if let Some(outcome) = outcome {

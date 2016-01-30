@@ -34,7 +34,7 @@ use rembrandt::opt_new::{
 };
 use scoped_threadpool::{Pool};
 
-use rand::{thread_rng};
+use rand::{Rng, thread_rng};
 use std::path::{PathBuf};
 use std::sync::{Arc};
 
@@ -67,7 +67,7 @@ fn train() {
   // - LR 0.05, momentum 0.1, init 0.05 (does not work)
 
   let sgd_opt_cfg = SgdOptConfig{
-    init_t:         30000,
+    init_t:         30000, // FIXME(20160128)
     minibatch_size: num_workers * batch_size,
     step_size:      StepSizeSchedule::Decay{
       init_step:    0.03125,
@@ -83,7 +83,7 @@ fn train() {
   };
   //let datum_cfg = SampleDatumConfig::ByteArray3d;
   let datum_cfg = SampleDatumConfig::BitArray3d;
-  let label_cfg = SampleLabelConfig::Category;
+  let label_cfg = SampleLabelConfig::Category{num_categories: 361};
 
   info!("sgd cfg: {:?}", sgd_opt_cfg);
   info!("datum cfg: {:?}", datum_cfg);
@@ -150,6 +150,7 @@ fn train() {
     .conv2d(final_conv_layer_cfg)
     .softmax_kl_loss(loss_layer_cfg);
 
+  let shared_seed = [thread_rng().next_u64(), thread_rng().next_u64()];
   let arch_shared = for_all_devices(num_workers, |contexts| {
     Arc::new(PipelineArchSharedData::new(num_workers, &arch_cfg, contexts))
   });
@@ -171,6 +172,7 @@ fn train() {
             //PathBuf::from("experiments/models/tmp2_new_action_12layer384_19x19x28.v3"),
             PathBuf::from("models/tmp_new_action_12layer256_19x19x37.v3"),
             tid,
+            shared_seed,
             &arch_shared,
             atomic_data,
             &ctx,
@@ -185,8 +187,8 @@ fn train() {
         let mut train_data =
             //SampleIterator::new(
             //CyclicEpisodeIterator::new(
-            RandomEpisodeIterator::new(
               //Box::new(PartitionDataSource::new(tid, num_workers, dataset_cfg.build("train")))
+            RandomEpisodeIterator::new(
               //dataset_cfg.build("train")
               Box::new(AugmentDataSource::new(SymmetryAugment::new(&mut thread_rng()), dataset_cfg.build("train"))),
             );
@@ -197,7 +199,7 @@ fn train() {
             );
 
         let sgd_opt = SgdOptimization;
-        sgd_opt.train(sgd_opt_cfg, datum_cfg, label_cfg, &mut arch_worker, &mut train_data, &mut valid_data, &ctx);
+        sgd_opt.train(sgd_opt_cfg, datum_cfg, label_cfg, label_cfg, &mut arch_worker, &mut train_data, &mut valid_data, &ctx);
       });
     }
     scope.join_all();

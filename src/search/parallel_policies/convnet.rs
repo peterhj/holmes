@@ -28,7 +28,7 @@ use rembrandt::data_new::{SampleLabel};
 use rembrandt::layer_new::{Phase};
 use rng::xorshift::{Xorshiftplus128Rng};
 
-use rand::{Rng};
+use rand::{Rng, thread_rng};
 use std::path::{Path, PathBuf};
 use std::rc::{Rc};
 use std::sync::{Arc};
@@ -82,6 +82,7 @@ impl SearchPolicyWorkerBuilder for ConvnetPolicyWorkerBuilder {
         self.prior_arch_cfg,
         self.prior_save_path,
         tid,
+        [thread_rng().next_u64(), thread_rng().next_u64()],
         &self.prior_shared,
         self.prior_shared2.clone(),
         &ctx,
@@ -92,6 +93,7 @@ impl SearchPolicyWorkerBuilder for ConvnetPolicyWorkerBuilder {
         self.rollout_arch_cfg,
         self.rollout_save_path,
         tid,
+        [thread_rng().next_u64(), thread_rng().next_u64()],
         &self.rollout_shared,
         self.rollout_shared2.clone(),
         &ctx,
@@ -197,6 +199,7 @@ impl RolloutPolicyBuilder for ConvnetRolloutPolicyBuilder {
         self.rollout_arch_cfg,
         self.rollout_save_path,
         tid,
+        [thread_rng().next_u64(), thread_rng().next_u64()],
         &self.rollout_shared,
         self.rollout_shared2.clone(),
         &ctx,
@@ -471,7 +474,7 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
         Action::Place{point} => point.idx() as i32,
         _ => -1,
       }};
-      self.arch.loss_layer().preload_label(t, &label);
+      self.arch.loss_layer().preload_label(t, &label, Phase::Inference);
     }
 
     self.arch.input_layer().load_frames(trace_len, &ctx);
@@ -499,7 +502,7 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
                 turn, self.arch.input_layer().expose_host_frame_buf(t),
             );
           let label = SampleLabel::Category{category: point.idx() as i32};
-          self.arch.loss_layer().preload_label(t, &label);
+          self.arch.loss_layer().preload_label(t, &label, Phase::Inference);
           trace_len += 1;
         }
         _ => {}
