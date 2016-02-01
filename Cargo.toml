@@ -53,17 +53,17 @@ path = "tools/measure-holmes-vs-pachi.rs"
 #name = "train-mimic-19x19x4"
 #path = "tools/train-mimic-19x19x4.rs"
 
-[[bin]]
-name = "train-1layer-19x19x4"
-path = "tools/train-1layer-19x19x4.rs"
+#[[bin]]
+#name = "train-1layer-19x19x4"
+#path = "tools/train-1layer-19x19x4.rs"
 
-[[bin]]
-name = "train-shallow-19x19x4"
-path = "tools/train-shallow-19x19x4.rs"
+#[[bin]]
+#name = "train-shallow-19x19x4"
+#path = "tools/train-shallow-19x19x4.rs"
 
-[[bin]]
-name = "train-3layer-19x19x4"
-path = "tools/train-3layer-19x19x4.rs"
+#[[bin]]
+#name = "train-3layer-19x19x4"
+#path = "tools/train-3layer-19x19x4.rs"
 
 [[bin]]
 name = "train-2layer-19x19x16"
@@ -73,13 +73,13 @@ path = "tools/train-2layer-19x19x16.rs"
 name = "train-narrow-3layer-19x19x16"
 path = "tools/train-narrow-3layer-19x19x16.rs"
 
-[[bin]]
-name = "train-3layer-19x19x16"
-path = "tools/train-3layer-19x19x16.rs"
+#[[bin]]
+#name = "train-3layer-19x19x16"
+#path = "tools/train-3layer-19x19x16.rs"
 
-[[bin]]
-name = "train-6layer-19x19x16"
-path = "tools/train-6layer-19x19x16.rs"
+#[[bin]]
+#name = "train-6layer-19x19x16"
+#path = "tools/train-6layer-19x19x16.rs"
 
 [[bin]]
 name = "train-12layer-19x19x16"
@@ -122,6 +122,10 @@ name = "holmes-vs-pachi10k_f1-f16"
 path = "tools/holmes-vs-pachi10k_f1-f16.rs"
 
 [[bin]]
+name = "holmes-convnet-vs-pachi10k_f1-f16"
+path = "tools/holmes-convnet-vs-pachi10k_f1-f16.rs"
+
+[[bin]]
 name = "train-action3-narrow-3layer-19x19x16"
 path = "tools/train-action3-narrow-3layer-19x19x16.rs"
 
@@ -149,9 +153,9 @@ path = "tools/bench-txnstate.rs"
 #name = "test-book"
 #path = "tools/test-book.rs"
 
-[[bin]]
-name = "test-sgf"
-path = "tools/test-sgf.rs"
+#[[bin]]
+#name = "test-sgf"
+#path = "tools/test-sgf.rs"
 
 #[[bin]]
 #name = "bench-board"
@@ -165,9 +169,9 @@ path = "tools/test-sgf.rs"
 #name = "bench-net"
 #path = "tools/bench-net.rs"
 
-[[bin]]
-name = "compare-arraydb"
-path = "tools/compare-arraydb.rs"
+#[[bin]]
+#name = "compare-arraydb"
+#path = "tools/compare-arraydb.rs"
 
 [[bin]]
 name = "filter-gogod-data"
@@ -200,6 +204,10 @@ path = "tools/manual-gtp.rs"
 [[bin]]
 name = "holmes-gtp"
 path = "tools/holmes-gtp.rs"
+
+[[bin]]
+name = "holmes-convnet-gtp"
+path = "tools/holmes-convnet-gtp.rs"
 
 [dependencies]
 bit-set = "*"

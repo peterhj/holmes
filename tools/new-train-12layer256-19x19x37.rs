@@ -73,7 +73,7 @@ fn train() {
       init_step:    0.03125,
       //init_step:    0.01,
       decay_rate:   0.5,
-      level_iters:  120000,
+      decay_iters:  120000,
     },
     momentum:       0.1,
     l2_reg_coef:    0.0,

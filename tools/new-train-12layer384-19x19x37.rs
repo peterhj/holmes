@@ -65,16 +65,15 @@ fn train() {
   // - LR 0.05, momentum 0.1, init 0.05 (does not work)
 
   let sgd_opt_cfg = SgdOptConfig{
-    init_t:         0,
+    init_t:         270000,
     minibatch_size: num_workers * batch_size,
     step_size:      StepSizeSchedule::Decay{
       init_step:    0.015625,
       decay_rate:   0.25,
-      //level_iters:  300000,
-      level_iters:  150000,
+      decay_iters:  540000,
     },
-    //momentum:       0.1,
     momentum:       0.0,
+    //momentum:       0.9,
     l2_reg_coef:    0.0,
     display_iters:  20,
     valid_iters:    3000,
@@ -175,7 +174,7 @@ fn train() {
         let mut arch_worker = PipelineArchWorker::new(
             batch_size,
             arch_cfg,
-            PathBuf::from("models/tmp_new_action_12layer384_19x19x37.v3"),
+            PathBuf::from("models/tmp_kgs_ugo_201505_new_action_12layer384_19x19x37.v3"),
             tid,
             shared_seed,
             &arch_shared,

@@ -1,6 +1,7 @@
 use board::{Coord, Stone, Point, Action};
 
 pub mod convnet;
+pub mod convnet_new;
 pub mod manual;
 pub mod parallel_search;
 pub mod search;
