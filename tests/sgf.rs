@@ -6,6 +6,11 @@ use holmes::board::{RuleSet, Board, PlayerRank, Stone, Point, Action};
 use holmes::sgf::{Sgf};
 use holmes::txnstate::{TxnState, TxnResult};
 use holmes::txnstate::extras::{TxnStateAllData};
+use holmes::txnstate::features::{
+  TxnStateLibFeatsData,
+  TxnStateAlphaFeatsV1Data,
+  TxnStateAlphaFeatsV2Data,
+};
 use rusqlite::{SqliteConnection, SqliteOpenFlags};
 use rustc_serialize::json;
 

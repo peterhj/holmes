@@ -1,6 +1,6 @@
 use board::{Board, Rules, RuleSet, Coord, PlayerRank, Stone, Point, Action};
 use txnstate::{
-  TxnStateData, TxnState, TxnPosition, TxnChainsList,
+  TxnStateData, TxnStateConfig, TxnState, TxnPosition, TxnChainsList,
   for_each_adjacent, check_illegal_move_simple, check_legal_move_simple,
 };
 use txnstate::features::{
@@ -53,8 +53,10 @@ impl TxnStateLegalityData {
         BitSet::from_bit_vec(BitVec::from_elem(Board::SIZE, true)),
       ],
       test_state: TxnState::new(
-          [PlayerRank::Dan(9), PlayerRank::Dan(9)],
-          RuleSet::KgsJapanese.rules(),
+          TxnStateConfig{
+            rules:  RuleSet::KgsJapanese.rules(),
+            ranks:  [PlayerRank::Dan(9), PlayerRank::Dan(9)],
+          },
           (),
       ),
       tmp_mark: BitSet::with_capacity(Board::SIZE),

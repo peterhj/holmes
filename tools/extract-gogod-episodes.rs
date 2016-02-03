@@ -7,12 +7,13 @@ extern crate rustc_serialize;
 
 use holmes::board::{RuleSet, Coord, PlayerRank, Stone, Point, Action};
 use holmes::sgf::{Sgf, parse_raw_sgf};
-use holmes::txnstate::{TxnState};
+use holmes::txnstate::{TxnStateConfig, TxnState};
 use holmes::txnstate::features::{
   TxnStateFeaturesData,
   TxnStateLibFeaturesData,
   TxnStateExtLibFeatsData,
   TxnStateAlphaFeatsV1Data,
+  TxnStateAlphaFeatsV2Data,
 };
 
 //use array::{NdArrayFormat, ArrayDeserialize, ArraySerialize, Array3d};
@@ -51,10 +52,14 @@ fn main() {
 
   //let expected_dims = (19, 19, 16);
   //let expected_dims = (19, 19, 28);
-  let expected_dims = (19, 19, 37);
+  //let expected_dims = (19, 19, 37);
+  let expected_dims = (19, 19, 44);
+
   //let expected_frame_sz = <Array3d<u8> as ArrayDeserialize<u8, NdArrayFormat>>::serial_size(expected_dims);
   //let expected_frame_sz = Array3d::<u8>::serial_size(expected_dims);
-  let expected_frame_sz = BitArray3d::serial_size(expected_dims);
+  //let expected_frame_sz = BitArray3d::serial_size(expected_dims);
+  let expected_frame_sz = BitArray3d::serial_size((19, 19, 43)) + Array3d::<u8>::serial_size((19, 19, 1));
+
   let n = sgf_paths.len();
   let est_ep_len = 216;
 
@@ -109,6 +114,10 @@ fn main() {
         // XXX(20160104): in `19x19/2005-08-00a.sgf` the rank applied to a
         // group, '250 dan total'.
         vec![PlayerRank::Dan(1), PlayerRank::Dan(1)]
+      } else if text.contains("Honinbo") {
+        // XXX(20160103): This is for a ridiculous case, `19x19/1982-08-00a.sgf`
+        // where Black has rank 'Fukui Pref. Honinbo'. Should be before 'Hon'.
+        vec![PlayerRank::Dan(9)]
       } else if text.contains("3rd") {
         let rank_texts: Vec<_> = text.splitn(2, "3rd").collect();
         parse_rank(rank_texts[1].trim(), i, sgf_path)
@@ -121,18 +130,17 @@ fn main() {
       } else if text.contains("Hon.") {
         let rank_texts: Vec<_> = text.splitn(2, "Hon.").collect();
         parse_rank(rank_texts[1].trim(), i, sgf_path)
+      } else if text.contains("Hon") {
+        let rank_texts: Vec<_> = text.splitn(2, "Hon").collect();
+        parse_rank(rank_texts[1].trim(), i, sgf_path)
       } else if text.contains("Shogi") {
         let rank_texts: Vec<_> = text.splitn(2, "Shogi").collect();
         parse_rank(rank_texts[1].trim(), i, sgf_path)
       } else if text.contains("Insei") {
-        vec![PlayerRank::AmaDan(7)]
+        vec![PlayerRank::Ama(7)]
       } else if text.contains("Holder") {
         vec![PlayerRank::Dan(9)]
       } else if text.contains("Challenger") {
-        vec![PlayerRank::Dan(9)]
-      } else if text.contains("Honinbo") {
-        // XXX(20160103): This is for a ridiculous case, `19x19/1982-08-00a.sgf`
-        // where Black has rank 'Fukui Pref. Honinbo'.
         vec![PlayerRank::Dan(9)]
       } else if text.contains("Meijin") {
         // XXX(20160103): `19x19/1996-05-06a.sgf` has 'Shogi Meijin'.
@@ -140,7 +148,7 @@ fn main() {
       } else if text.contains("ama") {
         let rank_texts: Vec<_> = text.splitn(2, "ama").collect();
         match rank_texts[0].trim() {
-          ""    => vec![PlayerRank::AmaDan(7)],
+          ""    => vec![PlayerRank::Ama(7)],
           "8k"  => vec![PlayerRank::Kyu(8)],
           "7k"  => vec![PlayerRank::Kyu(7)],
           "6k"  => vec![PlayerRank::Kyu(6)],
@@ -149,21 +157,21 @@ fn main() {
           "3k"  => vec![PlayerRank::Kyu(3)],
           "2k"  => vec![PlayerRank::Kyu(2)],
           "1k"  => vec![PlayerRank::Kyu(1)],
-          "1d"  => vec![PlayerRank::AmaDan(1)],
-          "2d"  => vec![PlayerRank::AmaDan(2)],
-          "3d"  => vec![PlayerRank::AmaDan(3)],
-          "4d"  => vec![PlayerRank::AmaDan(4)],
-          "5d"  => vec![PlayerRank::AmaDan(5)],
-          "6d"  => vec![PlayerRank::AmaDan(6)],
-          "7d"  => vec![PlayerRank::AmaDan(7)],
-          "8d"  => vec![PlayerRank::AmaDan(8)],
-          "9d"  => vec![PlayerRank::AmaDan(9)],
+          "1d"  => vec![PlayerRank::Ama(1)],
+          "2d"  => vec![PlayerRank::Ama(2)],
+          "3d"  => vec![PlayerRank::Ama(3)],
+          "4d"  => vec![PlayerRank::Ama(4)],
+          "5d"  => vec![PlayerRank::Ama(5)],
+          "6d"  => vec![PlayerRank::Ama(6)],
+          "7d"  => vec![PlayerRank::Ama(7)],
+          "8d"  => vec![PlayerRank::Ama(8)],
+          "9d"  => vec![PlayerRank::Ama(9)],
           x     => panic!("index: {} sgf path: {:?} unknown 'ama' rank: {}", i, sgf_path, x),
         }
       } else if text.contains("am") {
         let rank_texts: Vec<_> = text.splitn(2, "am").collect();
         match rank_texts[0].trim() {
-          ""    => vec![PlayerRank::AmaDan(7)],
+          ""    => vec![PlayerRank::Ama(7)],
           "8k"  => vec![PlayerRank::Kyu(8)],
           "7k"  => vec![PlayerRank::Kyu(7)],
           "6k"  => vec![PlayerRank::Kyu(6)],
@@ -172,21 +180,21 @@ fn main() {
           "3k"  => vec![PlayerRank::Kyu(3)],
           "2k"  => vec![PlayerRank::Kyu(2)],
           "1k"  => vec![PlayerRank::Kyu(1)],
-          "1d"  => vec![PlayerRank::AmaDan(1)],
-          "2d"  => vec![PlayerRank::AmaDan(2)],
-          "3d"  => vec![PlayerRank::AmaDan(3)],
-          "4d"  => vec![PlayerRank::AmaDan(4)],
-          "5d"  => vec![PlayerRank::AmaDan(5)],
-          "6d"  => vec![PlayerRank::AmaDan(6)],
-          "7d"  => vec![PlayerRank::AmaDan(7)],
-          "8d"  => vec![PlayerRank::AmaDan(8)],
-          "9d"  => vec![PlayerRank::AmaDan(9)],
+          "1d"  => vec![PlayerRank::Ama(1)],
+          "2d"  => vec![PlayerRank::Ama(2)],
+          "3d"  => vec![PlayerRank::Ama(3)],
+          "4d"  => vec![PlayerRank::Ama(4)],
+          "5d"  => vec![PlayerRank::Ama(5)],
+          "6d"  => vec![PlayerRank::Ama(6)],
+          "7d"  => vec![PlayerRank::Ama(7)],
+          "8d"  => vec![PlayerRank::Ama(8)],
+          "9d"  => vec![PlayerRank::Ama(9)],
           x     => panic!("index: {} sgf path: {:?} unknown 'am' rank: {}", i, sgf_path, x),
         }
       } else if text.contains("insei") {
         let rank_texts: Vec<_> = text.splitn(2, "insei").collect();
         match rank_texts[0].trim() {
-          ""    => vec![PlayerRank::AmaDan(7)],
+          ""    => vec![PlayerRank::Ama(7)],
           "8k"  => vec![PlayerRank::Kyu(8)],
           "7k"  => vec![PlayerRank::Kyu(7)],
           "6k"  => vec![PlayerRank::Kyu(6)],
@@ -195,15 +203,15 @@ fn main() {
           "3k"  => vec![PlayerRank::Kyu(3)],
           "2k"  => vec![PlayerRank::Kyu(2)],
           "1k"  => vec![PlayerRank::Kyu(1)],
-          "1d"  => vec![PlayerRank::AmaDan(1)],
-          "2d"  => vec![PlayerRank::AmaDan(2)],
-          "3d"  => vec![PlayerRank::AmaDan(3)],
-          "4d"  => vec![PlayerRank::AmaDan(4)],
-          "5d"  => vec![PlayerRank::AmaDan(5)],
-          "6d"  => vec![PlayerRank::AmaDan(6)],
-          "7d"  => vec![PlayerRank::AmaDan(7)],
-          "8d"  => vec![PlayerRank::AmaDan(8)],
-          "9d"  => vec![PlayerRank::AmaDan(9)],
+          "1d"  => vec![PlayerRank::Ama(1)],
+          "2d"  => vec![PlayerRank::Ama(2)],
+          "3d"  => vec![PlayerRank::Ama(3)],
+          "4d"  => vec![PlayerRank::Ama(4)],
+          "5d"  => vec![PlayerRank::Ama(5)],
+          "6d"  => vec![PlayerRank::Ama(6)],
+          "7d"  => vec![PlayerRank::Ama(7)],
+          "8d"  => vec![PlayerRank::Ama(8)],
+          "9d"  => vec![PlayerRank::Ama(9)],
           x     => panic!("index: {} sgf path: {:?} unknown 'insei' rank: {}", i, sgf_path, x),
         }
       } else if text.contains("prov") {
@@ -225,9 +233,9 @@ fn main() {
         vec![]
       } else {
         vec![match text {
-          "?" => PlayerRank::AmaDan(7),
-          "Ama" | "Amateur" => PlayerRank::AmaDan(7),
-          "Insei" | "insei" => PlayerRank::AmaDan(7),
+          "?" => PlayerRank::Ama(7),
+          "Ama" | "Amateur" => PlayerRank::Ama(7),
+          "Insei" | "insei" => PlayerRank::Ama(7),
           "Gisung" | "Kisung" |
           "Gosei" |
           "Honinbo" |
@@ -240,15 +248,15 @@ fn main() {
           "6k" | "7k" | "8k" | "9k" | "10k" |
           "11k" | "12k" | "13k" | "14k" | "15k" |
           "16k" | "17k" | "18k" | "19k" | "20k" => PlayerRank::Kyu(1),
-          "1a" => PlayerRank::AmaDan(1),
-          "2a" => PlayerRank::AmaDan(2),
-          "3a" => PlayerRank::AmaDan(3),
-          "4a" => PlayerRank::AmaDan(4),
-          "5a" => PlayerRank::AmaDan(5),
-          "6a" => PlayerRank::AmaDan(6),
-          "7a" => PlayerRank::AmaDan(7),
-          "8a" => PlayerRank::AmaDan(8),
-          "9a" => PlayerRank::AmaDan(9),
+          "1a" => PlayerRank::Ama(1),
+          "2a" => PlayerRank::Ama(2),
+          "3a" => PlayerRank::Ama(3),
+          "4a" => PlayerRank::Ama(4),
+          "5a" => PlayerRank::Ama(5),
+          "6a" => PlayerRank::Ama(6),
+          "7a" => PlayerRank::Ama(7),
+          "8a" => PlayerRank::Ama(8),
+          "9a" => PlayerRank::Ama(9),
           "1d" | "1p" => PlayerRank::Dan(1),
           "2d" | "2p" => PlayerRank::Dan(2),
           "3d" | "3p" => PlayerRank::Dan(3),
@@ -259,7 +267,7 @@ fn main() {
           "8d" | "8p" => PlayerRank::Dan(8),
           "9d" | "9p" => PlayerRank::Dan(9),
           // XXX(20150104): `19x19/1978-09-00l.sgf`.
-          "4.3a" => PlayerRank::AmaDan(4),
+          "4.3a" => PlayerRank::Ama(4),
           // XXX(20150104): `19x19/1996-01-16a.sgf`.
           "6d*" => PlayerRank::Dan(6),
           // XXX(20150104): `19x19/1994-05-07c.sgf`.
@@ -271,8 +279,11 @@ fn main() {
       }
     }
 
-    // FIXME(20160129): disabling rank parsing for now.
-    /*let b_ranks = parse_rank(&sgf.black_rank, i, sgf_path);
+    /*// FIXME(20160129): disabling rank parsing for now.
+    let b_rank = PlayerRank::Dan(9);
+    let w_rank = PlayerRank::Dan(9);*/
+
+    let b_ranks = parse_rank(&sgf.black_rank, i, sgf_path);
     let w_ranks = parse_rank(&sgf.white_rank, i, sgf_path);
     let ranks = match (b_ranks.len(), w_ranks.len()) {
       (1, 1) => vec![b_ranks[0], w_ranks[0]],
@@ -282,15 +293,13 @@ fn main() {
       (x, y) => {
         //panic!("sgf_path: {:?}, unexpected number of player ranks: {:?} {:?}",
         //    sgf_path, b_ranks, w_ranks);
-        println!("relay game, skipping ({} {}), sgf_path: {:?}",
+        println!("WARNING: extract: skipping relay game ({} {}), sgf_path: {:?}",
             x, y, sgf_path);
         continue;
       }
     };
     let b_rank = ranks[0];
-    let w_rank = ranks[1];*/
-    let b_rank = PlayerRank::Dan(9);
-    let w_rank = PlayerRank::Dan(9);
+    let w_rank = ranks[1];
 
     let outcome = {
       let result_toks: Vec<_> = sgf.result.split("+").collect();
@@ -323,11 +332,14 @@ fn main() {
 
     let mut history = vec![];
     let mut state = TxnState::new(
-        [b_rank, w_rank],
-        RuleSet::KgsJapanese.rules(),
+        TxnStateConfig{
+          rules:  RuleSet::KgsJapanese.rules(),
+          ranks:  [b_rank, w_rank],
+        },
         //TxnStateLibFeaturesData::new(),
         //TxnStateExtLibFeatsData::new(),
-        TxnStateAlphaFeatsV1Data::new(),
+        //TxnStateAlphaFeatsV1Data::new(),
+        TxnStateAlphaFeatsV2Data::new(),
     );
     state.reset();
     for (t, &(ref player, ref mov)) in sgf.moves.iter().enumerate() {
@@ -411,17 +423,24 @@ fn main() {
         unreachable!();
       };
 
-      let frame_dims = state.get_data().feature_dims();
+      /*let frame_dims = state.get_data().feature_dims();
       assert_eq!(expected_dims, frame_dims);
       let mut frame_data: Vec<u8> = repeat(0).take(frame_dims.0 * frame_dims.1 * frame_dims.2).collect();
       state.get_data().extract_relative_features(turn, &mut frame_data);
-
       let frame = Array3d::with_data(frame_data, frame_dims);
       let raw_frame = BitArray3d::from_byte_array(&frame);
+
       let mut serial_frame = vec![];
       //frame.as_view().serialize(&mut serial_frame);
       raw_frame.serialize(&mut serial_frame);
-      assert_eq!(expected_frame_sz, serial_frame.len());
+      assert_eq!(expected_frame_sz, serial_frame.len());*/
+
+      // FIXME(20160202): use custom encoding to get 2 arrays for AlphaV2 feats.
+      let mut serial_frame: Vec<u8> = Vec::with_capacity(expected_frame_sz);
+      let (bit_arr, bytes_arr) = state.get_data().extract_relative_serial_arrays(turn);
+      bit_arr.serialize(&mut serial_frame);
+      bytes_arr.serialize(&mut serial_frame);
+      assert_eq!(serial_frame.len(), expected_frame_sz);
       frames_db.append_frame(&serial_frame);
 
       let mut action_label_cursor = Cursor::new(Vec::with_capacity(4));

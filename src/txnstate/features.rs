@@ -6,6 +6,8 @@ use txnstate::{
 use txnstate::extras::{TxnStateLegalityData, TxnStateNodeData};
 use util::{slice_twice_mut};
 
+use array_new::{Array3d, BitArray3d};
+
 use bit_set::{BitSet};
 use std::cell::{RefCell};
 use std::iter::{repeat};
@@ -586,15 +588,15 @@ impl TxnStateExtLibFeatsData {
   fn update_points_rank(features: &mut [u8], position: &TxnPosition, turn: Stone, rank: PlayerRank) {
     let level = match rank {
       PlayerRank::Kyu(_) => 0,
-      PlayerRank::AmaDan(1) |
-      PlayerRank::AmaDan(2) => 1,
-      PlayerRank::AmaDan(3) |
-      PlayerRank::AmaDan(4) => 2,
-      PlayerRank::AmaDan(5) |
-      PlayerRank::AmaDan(6) |
-      PlayerRank::AmaDan(7) |
-      PlayerRank::AmaDan(8) |
-      PlayerRank::AmaDan(9) => 3,
+      PlayerRank::Ama(1) |
+      PlayerRank::Ama(2) => 1,
+      PlayerRank::Ama(3) |
+      PlayerRank::Ama(4) => 2,
+      PlayerRank::Ama(5) |
+      PlayerRank::Ama(6) |
+      PlayerRank::Ama(7) |
+      PlayerRank::Ama(8) |
+      PlayerRank::Ama(9) => 3,
       PlayerRank::Dan(1) |
       PlayerRank::Dan(2) |
       PlayerRank::Dan(3) => 4,
@@ -604,7 +606,7 @@ impl TxnStateExtLibFeatsData {
       PlayerRank::Dan(7) |
       PlayerRank::Dan(8) |
       PlayerRank::Dan(9) => 6,
-      PlayerRank::AmaDan(_) | PlayerRank::Dan(_) => unimplemented!(),
+      PlayerRank::Ama(_) | PlayerRank::Dan(_) => unimplemented!(),
     };
     let offset = match turn {
       Stone::Black => Self::BLACK,
@@ -1423,66 +1425,176 @@ impl TxnStateData for TxnStateAlphaFeatsV1Data {
 
 #[derive(Clone)]
 pub struct TxnStateAlphaFeatsV2Data {
-  pub legality: TxnStateLegalityData,
+  //pub legality: TxnStateLegalityData,
 
   features:     Vec<u8>,
   prev_moves:   Vec<Option<(Stone, Point)>>,
+  //init_ranks:   bool,
+  black_rank:   Option<PlayerRank>,
+  white_rank:   Option<PlayerRank>,
   tmp_mark:     BitSet,
 }
 
 impl TxnStateAlphaFeatsV2Data {
-  pub const SET: u8 = 1;
+  // XXX(20160202): Notes on V2 of the Alpha-like features:
+  // - Instead of raw one-hot encoding, use "isotonic" encoding where for a
+  //   feature category (e.g., number of turns), if the category has value `k`,
+  //   then set the feature for all k' <= k.
+  // - Turns since features are "sticky".
+  // - While both friend and opponent ranks are stored, only encode the opponent
+  //   rank when extracting features (like TZ features).
+  // - Encode a static "center distance" mask (like TZ features). This requires
+  //   dense values (SET = 255).
+  // - Encode in a sparse part (BitArray3d) and a dense part (Array3d<u8>).
 
-  pub const NUM_PLANES:         usize = 37;
+  pub const SET: u8 = 255;
+
+  pub const NUM_PLANES:         usize = 50;
+  pub const NUM_EXTRACT_PLANES: usize = 44;
+  pub const NUM_SPARSE_PLANES:  usize = 43;
+  pub const NUM_DENSE_PLANES:   usize = 1;
 
   pub const BASELINE_PLANE:     usize = 0 * Board::SIZE;
   pub const EMPTY_PLANE:        usize = 1 * Board::SIZE;
   pub const BLACK_PLANE:        usize = 2 * Board::SIZE;
-  pub const WHITE_PLANE:        usize = 3 * Board::SIZE;
-  pub const KO_PLANE:           usize = 4 * Board::SIZE;
-  pub const TURNS_1_PLANE:      usize = 5 * Board::SIZE;
-  pub const TURNS_2_PLANE:      usize = 6 * Board::SIZE;
-  pub const TURNS_3_PLANE:      usize = 7 * Board::SIZE;
-  pub const TURNS_4_PLANE:      usize = 8 * Board::SIZE;
-  pub const TURNS_5_PLANE:      usize = 9 * Board::SIZE;
-  pub const TURNS_6_PLANE:      usize = 10 * Board::SIZE;
-  pub const TURNS_7_PLANE:      usize = 11 * Board::SIZE;
-  pub const TURNS_8_PLANE:      usize = 12 * Board::SIZE;
-  pub const LIBS_1_PLANE:       usize = 13 * Board::SIZE;
-  pub const LIBS_2_PLANE:       usize = 14 * Board::SIZE;
-  pub const LIBS_3_PLANE:       usize = 15 * Board::SIZE;
-  pub const LIBS_4_PLANE:       usize = 16 * Board::SIZE;
-  pub const LIBS_5_PLANE:       usize = 17 * Board::SIZE;
-  pub const LIBS_6_PLANE:       usize = 18 * Board::SIZE;
-  pub const LIBS_7_PLANE:       usize = 19 * Board::SIZE;
-  pub const LIBS_8_PLANE:       usize = 20 * Board::SIZE;
-  pub const CSUIS_1_PLANE:      usize = 21 * Board::SIZE;
-  pub const CSUIS_2_PLANE:      usize = 22 * Board::SIZE;
-  pub const CSUIS_3_PLANE:      usize = 23 * Board::SIZE;
-  pub const CSUIS_4_PLANE:      usize = 24 * Board::SIZE;
-  pub const CSUIS_5_PLANE:      usize = 25 * Board::SIZE;
-  pub const CSUIS_6_PLANE:      usize = 26 * Board::SIZE;
-  pub const CSUIS_7_PLANE:      usize = 27 * Board::SIZE;
-  pub const CSUIS_8_PLANE:      usize = 28 * Board::SIZE;
-  pub const CCAPS_1_PLANE:      usize = 29 * Board::SIZE;
-  pub const CCAPS_2_PLANE:      usize = 30 * Board::SIZE;
-  pub const CCAPS_3_PLANE:      usize = 31 * Board::SIZE;
-  pub const CCAPS_4_PLANE:      usize = 32 * Board::SIZE;
-  pub const CCAPS_5_PLANE:      usize = 33 * Board::SIZE;
-  pub const CCAPS_6_PLANE:      usize = 34 * Board::SIZE;
-  pub const CCAPS_7_PLANE:      usize = 35 * Board::SIZE;
-  pub const CCAPS_8_PLANE:      usize = 36 * Board::SIZE;
+  pub const B_CAPS_1_PLANE:     usize = 3 * Board::SIZE;
+  pub const B_CAPS_2_PLANE:     usize = 4 * Board::SIZE;
+  pub const B_CAPS_3_PLANE:     usize = 5 * Board::SIZE;
+  pub const B_CAPS_4_PLANE:     usize = 6 * Board::SIZE;
+  pub const B_CAPS_5_PLANE:     usize = 7 * Board::SIZE;
+  pub const B_CAPS_6_PLANE:     usize = 8 * Board::SIZE;
+  pub const B_CAPS_7_PLANE:     usize = 9 * Board::SIZE;
+  pub const B_CAPS_8_PLANE:     usize = 10 * Board::SIZE;
+  pub const B_RANK_1A_2A_PLANE: usize = 11 * Board::SIZE;
+  pub const B_RANK_3A_4A_PLANE: usize = 12 * Board::SIZE;
+  pub const B_RANK_5A_7A_PLANE: usize = 13 * Board::SIZE;
+  pub const B_RANK_1P_3P_PLANE: usize = 14 * Board::SIZE;
+  pub const B_RANK_4P_6P_PLANE: usize = 15 * Board::SIZE;
+  pub const B_RANK_7P_9P_PLANE: usize = 16 * Board::SIZE;
+  pub const WHITE_PLANE:        usize = 17 * Board::SIZE;
+  pub const W_CAPS_1_PLANE:     usize = 18 * Board::SIZE;
+  pub const W_CAPS_2_PLANE:     usize = 19 * Board::SIZE;
+  pub const W_CAPS_3_PLANE:     usize = 20 * Board::SIZE;
+  pub const W_CAPS_4_PLANE:     usize = 21 * Board::SIZE;
+  pub const W_CAPS_5_PLANE:     usize = 22 * Board::SIZE;
+  pub const W_CAPS_6_PLANE:     usize = 23 * Board::SIZE;
+  pub const W_CAPS_7_PLANE:     usize = 24 * Board::SIZE;
+  pub const W_CAPS_8_PLANE:     usize = 25 * Board::SIZE;
+  pub const W_RANK_1A_2A_PLANE: usize = 26 * Board::SIZE;
+  pub const W_RANK_3A_4A_PLANE: usize = 27 * Board::SIZE;
+  pub const W_RANK_5A_7A_PLANE: usize = 28 * Board::SIZE;
+  pub const W_RANK_1P_3P_PLANE: usize = 29 * Board::SIZE;
+  pub const W_RANK_4P_6P_PLANE: usize = 30 * Board::SIZE;
+  pub const W_RANK_7P_9P_PLANE: usize = 31 * Board::SIZE;
+  pub const TURNS_1_PLANE:      usize = 32 * Board::SIZE;
+  pub const TURNS_2_PLANE:      usize = 33 * Board::SIZE;
+  pub const TURNS_3_PLANE:      usize = 34 * Board::SIZE;
+  pub const TURNS_4_PLANE:      usize = 35 * Board::SIZE;
+  pub const TURNS_5_PLANE:      usize = 36 * Board::SIZE;
+  pub const TURNS_6_PLANE:      usize = 37 * Board::SIZE;
+  pub const TURNS_7_PLANE:      usize = 38 * Board::SIZE;
+  pub const TURNS_8_PLANE:      usize = 39 * Board::SIZE;
+  pub const LIBS_1_PLANE:       usize = 40 * Board::SIZE;
+  pub const LIBS_2_PLANE:       usize = 41 * Board::SIZE;
+  pub const LIBS_3_PLANE:       usize = 42 * Board::SIZE;
+  pub const LIBS_4_PLANE:       usize = 43 * Board::SIZE;
+  pub const LIBS_5_PLANE:       usize = 44 * Board::SIZE;
+  pub const LIBS_6_PLANE:       usize = 45 * Board::SIZE;
+  pub const LIBS_7_PLANE:       usize = 46 * Board::SIZE;
+  pub const LIBS_8_PLANE:       usize = 47 * Board::SIZE;
+  pub const KO_PLANE:           usize = 48 * Board::SIZE;
+  pub const CENTER_PLANE:       usize = 49 * Board::SIZE;
+
+  pub const BASELINE_EXT_PLANE:     usize = 0 * Board::SIZE;
+  pub const EMPTY_EXT_PLANE:        usize = 1 * Board::SIZE;
+  pub const FRIEND_EXT_PLANE:       usize = 2 * Board::SIZE;
+  pub const F_CAPS_1_EXT_PLANE:     usize = 3 * Board::SIZE;
+  pub const F_CAPS_2_EXT_PLANE:     usize = 4 * Board::SIZE;
+  pub const F_CAPS_3_EXT_PLANE:     usize = 5 * Board::SIZE;
+  pub const F_CAPS_4_EXT_PLANE:     usize = 6 * Board::SIZE;
+  pub const F_CAPS_5_EXT_PLANE:     usize = 7 * Board::SIZE;
+  pub const F_CAPS_6_EXT_PLANE:     usize = 8 * Board::SIZE;
+  pub const F_CAPS_7_EXT_PLANE:     usize = 9 * Board::SIZE;
+  pub const F_CAPS_8_EXT_PLANE:     usize = 10 * Board::SIZE;
+  pub const ENEMY_EXT_PLANE:        usize = 11 * Board::SIZE;
+  pub const E_CAPS_1_EXT_PLANE:     usize = 12 * Board::SIZE;
+  pub const E_CAPS_2_EXT_PLANE:     usize = 13 * Board::SIZE;
+  pub const E_CAPS_3_EXT_PLANE:     usize = 14 * Board::SIZE;
+  pub const E_CAPS_4_EXT_PLANE:     usize = 15 * Board::SIZE;
+  pub const E_CAPS_5_EXT_PLANE:     usize = 16 * Board::SIZE;
+  pub const E_CAPS_6_EXT_PLANE:     usize = 17 * Board::SIZE;
+  pub const E_CAPS_7_EXT_PLANE:     usize = 18 * Board::SIZE;
+  pub const E_CAPS_8_EXT_PLANE:     usize = 19 * Board::SIZE;
+  pub const E_RANK_1A_2A_EXT_PLANE: usize = 20 * Board::SIZE;
+  pub const E_RANK_3A_4A_EXT_PLANE: usize = 21 * Board::SIZE;
+  pub const E_RANK_5A_7A_EXT_PLANE: usize = 22 * Board::SIZE;
+  pub const E_RANK_1P_3P_EXT_PLANE: usize = 23 * Board::SIZE;
+  pub const E_RANK_4P_6P_EXT_PLANE: usize = 24 * Board::SIZE;
+  pub const E_RANK_7P_9P_EXT_PLANE: usize = 25 * Board::SIZE;
+  pub const TURNS_1_EXT_PLANE:      usize = 26 * Board::SIZE;
+  pub const TURNS_2_EXT_PLANE:      usize = 27 * Board::SIZE;
+  pub const TURNS_3_EXT_PLANE:      usize = 28 * Board::SIZE;
+  pub const TURNS_4_EXT_PLANE:      usize = 29 * Board::SIZE;
+  pub const TURNS_5_EXT_PLANE:      usize = 30 * Board::SIZE;
+  pub const TURNS_6_EXT_PLANE:      usize = 31 * Board::SIZE;
+  pub const TURNS_7_EXT_PLANE:      usize = 32 * Board::SIZE;
+  pub const TURNS_8_EXT_PLANE:      usize = 33 * Board::SIZE;
+  pub const LIBS_1_EXT_PLANE:       usize = 34 * Board::SIZE;
+  pub const LIBS_2_EXT_PLANE:       usize = 35 * Board::SIZE;
+  pub const LIBS_3_EXT_PLANE:       usize = 36 * Board::SIZE;
+  pub const LIBS_4_EXT_PLANE:       usize = 37 * Board::SIZE;
+  pub const LIBS_5_EXT_PLANE:       usize = 38 * Board::SIZE;
+  pub const LIBS_6_EXT_PLANE:       usize = 39 * Board::SIZE;
+  pub const LIBS_7_EXT_PLANE:       usize = 40 * Board::SIZE;
+  pub const LIBS_8_EXT_PLANE:       usize = 41 * Board::SIZE;
+  pub const KO_EXT_PLANE:           usize = 42 * Board::SIZE;
+  pub const CENTER_EXT_PLANE:       usize = 43 * Board::SIZE;
+
+  /*pub const TURNS_1_PLANE:      usize = 4 * Board::SIZE;
+  pub const TURNS_2_PLANE:      usize = 5 * Board::SIZE;
+  pub const TURNS_3_PLANE:      usize = 6 * Board::SIZE;
+  pub const TURNS_4_PLANE:      usize = 7 * Board::SIZE;
+  pub const TURNS_5_PLANE:      usize = 8 * Board::SIZE;
+  pub const TURNS_6_PLANE:      usize = 9 * Board::SIZE;
+  pub const TURNS_7_PLANE:      usize = 10 * Board::SIZE;
+  pub const TURNS_8_PLANE:      usize = 11 * Board::SIZE;
+  pub const LIBS_1_PLANE:       usize = 12 * Board::SIZE;
+  pub const LIBS_2_PLANE:       usize = 13 * Board::SIZE;
+  pub const LIBS_3_PLANE:       usize = 14 * Board::SIZE;
+  pub const LIBS_4_PLANE:       usize = 15 * Board::SIZE;
+  pub const LIBS_5_PLANE:       usize = 16 * Board::SIZE;
+  pub const LIBS_6_PLANE:       usize = 17 * Board::SIZE;
+  pub const LIBS_7_PLANE:       usize = 18 * Board::SIZE;
+  pub const LIBS_8_PLANE:       usize = 19 * Board::SIZE;
+  pub const CSUIS_1_PLANE:      usize = 20 * Board::SIZE;
+  pub const CSUIS_2_PLANE:      usize = 21 * Board::SIZE;
+  pub const CSUIS_3_PLANE:      usize = 22 * Board::SIZE;
+  pub const CSUIS_4_PLANE:      usize = 23 * Board::SIZE;
+  pub const CSUIS_5_PLANE:      usize = 24 * Board::SIZE;
+  pub const CSUIS_6_PLANE:      usize = 25 * Board::SIZE;
+  pub const CSUIS_7_PLANE:      usize = 26 * Board::SIZE;
+  pub const CSUIS_8_PLANE:      usize = 27 * Board::SIZE;
+  pub const CCAPS_1_PLANE:      usize = 28 * Board::SIZE;
+  pub const CCAPS_2_PLANE:      usize = 29 * Board::SIZE;
+  pub const CCAPS_3_PLANE:      usize = 30 * Board::SIZE;
+  pub const CCAPS_4_PLANE:      usize = 31 * Board::SIZE;
+  pub const CCAPS_5_PLANE:      usize = 32 * Board::SIZE;
+  pub const CCAPS_6_PLANE:      usize = 33 * Board::SIZE;
+  pub const CCAPS_7_PLANE:      usize = 34 * Board::SIZE;
+  pub const CCAPS_8_PLANE:      usize = 35 * Board::SIZE;
+  pub const KO_PLANE:           usize = 36 * Board::SIZE;*/
 
   pub fn new() -> TxnStateAlphaFeatsV2Data {
     let feats = TxnStateAlphaFeatsV2Data{
-      legality:     TxnStateLegalityData::new(),
+      //legality:     TxnStateLegalityData::new(),
       features:     repeat(0).take(Self::NUM_PLANES * Board::SIZE).collect(),
       prev_moves:   vec![None, None, None, None, None, None, None, None],
+      //init_ranks:   false,
+      black_rank:   None,
+      white_rank:   None,
       tmp_mark:     BitSet::with_capacity(Board::SIZE),
     };
-    assert_eq!(
-        feats.features.len(),
-        Self::NUM_PLANES * Board::SIZE);
+    assert_eq!(feats.features.len(), Self::NUM_PLANES * Board::SIZE);
     feats
   }
 
@@ -1491,34 +1603,110 @@ impl TxnStateAlphaFeatsV2Data {
   }
 
   pub fn feature_dims(&self) -> (usize, usize, usize) {
-    (Board::DIM, Board::DIM, Self::NUM_PLANES)
+    // XXX(20160202): Smaller than the actual size because we only use the
+    // opponent ranks.
+    (Board::DIM, Board::DIM, Self::NUM_EXTRACT_PLANES)
+  }
+
+  pub fn extract_relative_serial_arrays(&self, turn: Stone) -> (BitArray3d, Array3d<u8>) {
+    let mut buf: Vec<u8> = Vec::with_capacity(Self::NUM_EXTRACT_PLANES * Board::SIZE);
+    unsafe { buf.set_len(Self::NUM_EXTRACT_PLANES * Board::SIZE) };
+    self.extract_relative_features(turn, &mut buf);
+
+    let mut bit_buf: Vec<u8> = Vec::with_capacity(Self::NUM_SPARSE_PLANES * Board::SIZE);
+    unsafe { bit_buf.set_len(Self::NUM_SPARSE_PLANES * Board::SIZE) };
+    copy_memory(
+        &buf[ .. Self::NUM_SPARSE_PLANES * Board::SIZE],
+        &mut bit_buf,
+    );
+
+    let mut bytes_buf: Vec<u8> = Vec::with_capacity(Self::NUM_DENSE_PLANES * Board::SIZE);
+    unsafe { bytes_buf.set_len(Self::NUM_DENSE_PLANES * Board::SIZE) };
+    copy_memory(
+        &buf[Self::NUM_SPARSE_PLANES * Board::SIZE .. ],
+        &mut bytes_buf,
+    );
+
+    let bit_arr = BitArray3d::from_byte_array(&Array3d::with_data(bit_buf, (Board::DIM, Board::DIM, Self::NUM_SPARSE_PLANES)));
+    let bytes_arr = Array3d::with_data(bytes_buf, (Board::DIM, Board::DIM, Self::NUM_DENSE_PLANES));
+
+    (bit_arr, bytes_arr)
   }
 
   pub fn extract_relative_features(&self, turn: Stone, dst_buf: &mut [u8]) {
+    assert_eq!(dst_buf.len(), Self::NUM_EXTRACT_PLANES * Board::SIZE);
     match turn {
       Stone::Black => {
+        /*copy_memory(
+            &self.features[ .. Self::B_RANK_1A_2A_PLANE],
+            &mut dst_buf[ .. Self::B_RANK_1A_2A_PLANE],
+        );
         copy_memory(
-            &self.features,
-            dst_buf,
+            &self.features[Self::W_RANK_1A_2A_PLANE .. ],
+            &mut dst_buf[Self::B_RANK_1A_2A_PLANE .. ],
+        );*/
+        copy_memory(
+            &self.features[ .. Self::BLACK_PLANE],
+            &mut dst_buf[ .. Self::FRIEND_EXT_PLANE],
+        );
+        copy_memory(
+            &self.features[Self::BLACK_PLANE .. Self::B_RANK_1A_2A_PLANE],
+            &mut dst_buf[Self::FRIEND_EXT_PLANE .. Self::ENEMY_EXT_PLANE],
+        );
+        copy_memory(
+            &self.features[Self::WHITE_PLANE .. Self::W_RANK_1A_2A_PLANE],
+            &mut dst_buf[Self::ENEMY_EXT_PLANE .. Self::E_RANK_1A_2A_EXT_PLANE],
+        );
+        copy_memory(
+            &self.features[Self::W_RANK_1A_2A_PLANE .. Self::TURNS_1_PLANE],
+            &mut dst_buf[Self::E_RANK_1A_2A_EXT_PLANE .. Self::TURNS_1_EXT_PLANE],
+        );
+        copy_memory(
+            &self.features[Self::TURNS_1_PLANE .. ],
+            &mut dst_buf[Self::TURNS_1_EXT_PLANE .. ],
         );
       }
       Stone::White => {
         copy_memory(
             &self.features[ .. Self::BLACK_PLANE],
+            &mut dst_buf[ .. Self::FRIEND_EXT_PLANE],
+        );
+        copy_memory(
+            &self.features[Self::WHITE_PLANE .. Self::W_RANK_1A_2A_PLANE],
+            &mut dst_buf[Self::FRIEND_EXT_PLANE .. Self::ENEMY_EXT_PLANE],
+        );
+        copy_memory(
+            &self.features[Self::BLACK_PLANE .. Self::B_RANK_1A_2A_PLANE],
+            &mut dst_buf[Self::ENEMY_EXT_PLANE .. Self::E_RANK_1A_2A_EXT_PLANE],
+        );
+        copy_memory(
+            &self.features[Self::B_RANK_1A_2A_PLANE .. Self::WHITE_PLANE],
+            &mut dst_buf[Self::E_RANK_1A_2A_EXT_PLANE .. Self::TURNS_1_EXT_PLANE],
+        );
+        copy_memory(
+            &self.features[Self::TURNS_1_PLANE .. ],
+            &mut dst_buf[Self::TURNS_1_EXT_PLANE .. ],
+        );
+        /*copy_memory(
+            &self.features[ .. Self::BLACK_PLANE],
             &mut dst_buf[ .. Self::BLACK_PLANE],
         );
         copy_memory(
-            &self.features[Self::BLACK_PLANE .. Self::WHITE_PLANE],
-            &mut dst_buf[Self::WHITE_PLANE .. Self::KO_PLANE],
-        );
-        copy_memory(
-            &self.features[Self::WHITE_PLANE .. Self::KO_PLANE],
+            &self.features[Self::WHITE_PLANE .. Self::TURNS_1_PLANE],
             &mut dst_buf[Self::BLACK_PLANE .. Self::WHITE_PLANE],
         );
         copy_memory(
-            &self.features[Self::KO_PLANE .. ],
-            &mut dst_buf[Self::KO_PLANE .. ],
+            &self.features[Self::BLACK_PLANE .. Self::WHITE_PLANE],
+            &mut dst_buf[Self::WHITE_PLANE .. Self::TURNS_1_PLANE],
         );
+        copy_memory(
+            &self.features[Self::TURNS_1_PLANE .. Self::W_RANK_1A_2A_PLANE],
+            &mut dst_buf[Self::TURNS_1_PLANE .. Self::W_RANK_1A_2A_PLANE],
+        );
+        copy_memory(
+            &self.features[Self::CENTER_PLANE .. ],
+            &mut dst_buf[Self::W_RANK_1A_2A_PLANE .. ],
+        );*/
       }
       _ => unreachable!(),
     }
@@ -1577,11 +1765,11 @@ impl TxnStateAlphaFeatsV2Data {
       let chain = chains.get_chain(head).unwrap();
 
       // Liberty features.
-      let mut is_atari = false;
+      //let mut is_atari = false;
       match chain.count_libs_up_to_8() {
         0 => { unreachable!(); }
         1 => {
-          is_atari = true;
+          //is_atari = true;
           features[Self::LIBS_1_PLANE + p] = Self::SET;
           features[Self::LIBS_2_PLANE + p] = 0;
           features[Self::LIBS_3_PLANE + p] = 0;
@@ -1592,7 +1780,7 @@ impl TxnStateAlphaFeatsV2Data {
           features[Self::LIBS_8_PLANE + p] = 0;
         }
         2 => {
-          features[Self::LIBS_1_PLANE + p] = Self::SET;
+          features[Self::LIBS_1_PLANE + p] = 0;
           features[Self::LIBS_2_PLANE + p] = Self::SET;
           features[Self::LIBS_3_PLANE + p] = 0;
           features[Self::LIBS_4_PLANE + p] = 0;
@@ -1602,8 +1790,8 @@ impl TxnStateAlphaFeatsV2Data {
           features[Self::LIBS_8_PLANE + p] = 0;
         }
         3 => {
-          features[Self::LIBS_1_PLANE + p] = Self::SET;
-          features[Self::LIBS_2_PLANE + p] = Self::SET;
+          features[Self::LIBS_1_PLANE + p] = 0;
+          features[Self::LIBS_2_PLANE + p] = 0;
           features[Self::LIBS_3_PLANE + p] = Self::SET;
           features[Self::LIBS_4_PLANE + p] = 0;
           features[Self::LIBS_5_PLANE + p] = 0;
@@ -1612,9 +1800,9 @@ impl TxnStateAlphaFeatsV2Data {
           features[Self::LIBS_8_PLANE + p] = 0;
         }
         4 => {
-          features[Self::LIBS_1_PLANE + p] = Self::SET;
-          features[Self::LIBS_2_PLANE + p] = Self::SET;
-          features[Self::LIBS_3_PLANE + p] = Self::SET;
+          features[Self::LIBS_1_PLANE + p] = 0;
+          features[Self::LIBS_2_PLANE + p] = 0;
+          features[Self::LIBS_3_PLANE + p] = 0;
           features[Self::LIBS_4_PLANE + p] = Self::SET;
           features[Self::LIBS_5_PLANE + p] = 0;
           features[Self::LIBS_6_PLANE + p] = 0;
@@ -1622,243 +1810,251 @@ impl TxnStateAlphaFeatsV2Data {
           features[Self::LIBS_8_PLANE + p] = 0;
         }
         5 => {
-          features[Self::LIBS_1_PLANE + p] = Self::SET;
-          features[Self::LIBS_2_PLANE + p] = Self::SET;
-          features[Self::LIBS_3_PLANE + p] = Self::SET;
-          features[Self::LIBS_4_PLANE + p] = Self::SET;
+          features[Self::LIBS_1_PLANE + p] = 0;
+          features[Self::LIBS_2_PLANE + p] = 0;
+          features[Self::LIBS_3_PLANE + p] = 0;
+          features[Self::LIBS_4_PLANE + p] = 0;
           features[Self::LIBS_5_PLANE + p] = Self::SET;
           features[Self::LIBS_6_PLANE + p] = 0;
           features[Self::LIBS_7_PLANE + p] = 0;
           features[Self::LIBS_8_PLANE + p] = 0;
         }
         6 => {
-          features[Self::LIBS_1_PLANE + p] = Self::SET;
-          features[Self::LIBS_2_PLANE + p] = Self::SET;
-          features[Self::LIBS_3_PLANE + p] = Self::SET;
-          features[Self::LIBS_4_PLANE + p] = Self::SET;
-          features[Self::LIBS_5_PLANE + p] = Self::SET;
+          features[Self::LIBS_1_PLANE + p] = 0;
+          features[Self::LIBS_2_PLANE + p] = 0;
+          features[Self::LIBS_3_PLANE + p] = 0;
+          features[Self::LIBS_4_PLANE + p] = 0;
+          features[Self::LIBS_5_PLANE + p] = 0;
           features[Self::LIBS_6_PLANE + p] = Self::SET;
           features[Self::LIBS_7_PLANE + p] = 0;
           features[Self::LIBS_8_PLANE + p] = 0;
         }
         7 => {
-          features[Self::LIBS_1_PLANE + p] = Self::SET;
-          features[Self::LIBS_2_PLANE + p] = Self::SET;
-          features[Self::LIBS_3_PLANE + p] = Self::SET;
-          features[Self::LIBS_4_PLANE + p] = Self::SET;
-          features[Self::LIBS_5_PLANE + p] = Self::SET;
-          features[Self::LIBS_6_PLANE + p] = Self::SET;
+          features[Self::LIBS_1_PLANE + p] = 0;
+          features[Self::LIBS_2_PLANE + p] = 0;
+          features[Self::LIBS_3_PLANE + p] = 0;
+          features[Self::LIBS_4_PLANE + p] = 0;
+          features[Self::LIBS_5_PLANE + p] = 0;
+          features[Self::LIBS_6_PLANE + p] = 0;
           features[Self::LIBS_7_PLANE + p] = Self::SET;
           features[Self::LIBS_8_PLANE + p] = 0;
         }
         8 => {
-          features[Self::LIBS_1_PLANE + p] = Self::SET;
-          features[Self::LIBS_2_PLANE + p] = Self::SET;
-          features[Self::LIBS_3_PLANE + p] = Self::SET;
-          features[Self::LIBS_4_PLANE + p] = Self::SET;
-          features[Self::LIBS_5_PLANE + p] = Self::SET;
-          features[Self::LIBS_6_PLANE + p] = Self::SET;
-          features[Self::LIBS_7_PLANE + p] = Self::SET;
+          features[Self::LIBS_1_PLANE + p] = 0;
+          features[Self::LIBS_2_PLANE + p] = 0;
+          features[Self::LIBS_3_PLANE + p] = 0;
+          features[Self::LIBS_4_PLANE + p] = 0;
+          features[Self::LIBS_5_PLANE + p] = 0;
+          features[Self::LIBS_6_PLANE + p] = 0;
+          features[Self::LIBS_7_PLANE + p] = 0;
           features[Self::LIBS_8_PLANE + p] = Self::SET;
         }
         _ => { unreachable!(); }
       }
 
-      // Suicide features.
+      /*// Suicide features.
       if stone == turn {
-        if is_atari {
+        if is_atari {*/
+      match stone {
+        Stone::Black => {
           match chain.count_length() {
             0 => unreachable!(),
             1 => {
-              features[Self::CSUIS_1_PLANE + p] = Self::SET;
-              features[Self::CSUIS_2_PLANE + p] = 0;
-              features[Self::CSUIS_3_PLANE + p] = 0;
-              features[Self::CSUIS_4_PLANE + p] = 0;
-              features[Self::CSUIS_5_PLANE + p] = 0;
-              features[Self::CSUIS_6_PLANE + p] = 0;
-              features[Self::CSUIS_7_PLANE + p] = 0;
-              features[Self::CSUIS_8_PLANE + p] = 0;
+              features[Self::B_CAPS_1_PLANE + p] = Self::SET;
+              features[Self::B_CAPS_2_PLANE + p] = 0;
+              features[Self::B_CAPS_3_PLANE + p] = 0;
+              features[Self::B_CAPS_4_PLANE + p] = 0;
+              features[Self::B_CAPS_5_PLANE + p] = 0;
+              features[Self::B_CAPS_6_PLANE + p] = 0;
+              features[Self::B_CAPS_7_PLANE + p] = 0;
+              features[Self::B_CAPS_8_PLANE + p] = 0;
             }
             2 => {
-              features[Self::CSUIS_1_PLANE + p] = Self::SET;
-              features[Self::CSUIS_2_PLANE + p] = Self::SET;
-              features[Self::CSUIS_3_PLANE + p] = 0;
-              features[Self::CSUIS_4_PLANE + p] = 0;
-              features[Self::CSUIS_5_PLANE + p] = 0;
-              features[Self::CSUIS_6_PLANE + p] = 0;
-              features[Self::CSUIS_7_PLANE + p] = 0;
-              features[Self::CSUIS_8_PLANE + p] = 0;
+              features[Self::B_CAPS_1_PLANE + p] = 0;
+              features[Self::B_CAPS_2_PLANE + p] = Self::SET;
+              features[Self::B_CAPS_3_PLANE + p] = 0;
+              features[Self::B_CAPS_4_PLANE + p] = 0;
+              features[Self::B_CAPS_5_PLANE + p] = 0;
+              features[Self::B_CAPS_6_PLANE + p] = 0;
+              features[Self::B_CAPS_7_PLANE + p] = 0;
+              features[Self::B_CAPS_8_PLANE + p] = 0;
             }
             3 => {
-              features[Self::CSUIS_1_PLANE + p] = Self::SET;
-              features[Self::CSUIS_2_PLANE + p] = Self::SET;
-              features[Self::CSUIS_3_PLANE + p] = Self::SET;
-              features[Self::CSUIS_4_PLANE + p] = 0;
-              features[Self::CSUIS_5_PLANE + p] = 0;
-              features[Self::CSUIS_6_PLANE + p] = 0;
-              features[Self::CSUIS_7_PLANE + p] = 0;
-              features[Self::CSUIS_8_PLANE + p] = 0;
+              features[Self::B_CAPS_1_PLANE + p] = 0;
+              features[Self::B_CAPS_2_PLANE + p] = 0;
+              features[Self::B_CAPS_3_PLANE + p] = Self::SET;
+              features[Self::B_CAPS_4_PLANE + p] = 0;
+              features[Self::B_CAPS_5_PLANE + p] = 0;
+              features[Self::B_CAPS_6_PLANE + p] = 0;
+              features[Self::B_CAPS_7_PLANE + p] = 0;
+              features[Self::B_CAPS_8_PLANE + p] = 0;
             }
             4 => {
-              features[Self::CSUIS_1_PLANE + p] = Self::SET;
-              features[Self::CSUIS_2_PLANE + p] = Self::SET;
-              features[Self::CSUIS_3_PLANE + p] = Self::SET;
-              features[Self::CSUIS_4_PLANE + p] = Self::SET;
-              features[Self::CSUIS_5_PLANE + p] = 0;
-              features[Self::CSUIS_6_PLANE + p] = 0;
-              features[Self::CSUIS_7_PLANE + p] = 0;
-              features[Self::CSUIS_8_PLANE + p] = 0;
+              features[Self::B_CAPS_1_PLANE + p] = 0;
+              features[Self::B_CAPS_2_PLANE + p] = 0;
+              features[Self::B_CAPS_3_PLANE + p] = 0;
+              features[Self::B_CAPS_4_PLANE + p] = Self::SET;
+              features[Self::B_CAPS_5_PLANE + p] = 0;
+              features[Self::B_CAPS_6_PLANE + p] = 0;
+              features[Self::B_CAPS_7_PLANE + p] = 0;
+              features[Self::B_CAPS_8_PLANE + p] = 0;
             }
             5 => {
-              features[Self::CSUIS_1_PLANE + p] = Self::SET;
-              features[Self::CSUIS_2_PLANE + p] = Self::SET;
-              features[Self::CSUIS_3_PLANE + p] = Self::SET;
-              features[Self::CSUIS_4_PLANE + p] = Self::SET;
-              features[Self::CSUIS_5_PLANE + p] = Self::SET;
-              features[Self::CSUIS_6_PLANE + p] = 0;
-              features[Self::CSUIS_7_PLANE + p] = 0;
-              features[Self::CSUIS_8_PLANE + p] = 0;
+              features[Self::B_CAPS_1_PLANE + p] = 0;
+              features[Self::B_CAPS_2_PLANE + p] = 0;
+              features[Self::B_CAPS_3_PLANE + p] = 0;
+              features[Self::B_CAPS_4_PLANE + p] = 0;
+              features[Self::B_CAPS_5_PLANE + p] = Self::SET;
+              features[Self::B_CAPS_6_PLANE + p] = 0;
+              features[Self::B_CAPS_7_PLANE + p] = 0;
+              features[Self::B_CAPS_8_PLANE + p] = 0;
             }
             6 => {
-              features[Self::CSUIS_1_PLANE + p] = Self::SET;
-              features[Self::CSUIS_2_PLANE + p] = Self::SET;
-              features[Self::CSUIS_3_PLANE + p] = Self::SET;
-              features[Self::CSUIS_4_PLANE + p] = Self::SET;
-              features[Self::CSUIS_5_PLANE + p] = Self::SET;
-              features[Self::CSUIS_6_PLANE + p] = Self::SET;
-              features[Self::CSUIS_7_PLANE + p] = 0;
-              features[Self::CSUIS_8_PLANE + p] = 0;
+              features[Self::B_CAPS_1_PLANE + p] = 0;
+              features[Self::B_CAPS_2_PLANE + p] = 0;
+              features[Self::B_CAPS_3_PLANE + p] = 0;
+              features[Self::B_CAPS_4_PLANE + p] = 0;
+              features[Self::B_CAPS_5_PLANE + p] = 0;
+              features[Self::B_CAPS_6_PLANE + p] = Self::SET;
+              features[Self::B_CAPS_7_PLANE + p] = 0;
+              features[Self::B_CAPS_8_PLANE + p] = 0;
             }
             7 => {
-              features[Self::CSUIS_1_PLANE + p] = Self::SET;
-              features[Self::CSUIS_2_PLANE + p] = Self::SET;
-              features[Self::CSUIS_3_PLANE + p] = Self::SET;
-              features[Self::CSUIS_4_PLANE + p] = Self::SET;
-              features[Self::CSUIS_5_PLANE + p] = Self::SET;
-              features[Self::CSUIS_6_PLANE + p] = Self::SET;
-              features[Self::CSUIS_7_PLANE + p] = Self::SET;
-              features[Self::CSUIS_8_PLANE + p] = 0;
+              features[Self::B_CAPS_1_PLANE + p] = 0;
+              features[Self::B_CAPS_2_PLANE + p] = 0;
+              features[Self::B_CAPS_3_PLANE + p] = 0;
+              features[Self::B_CAPS_4_PLANE + p] = 0;
+              features[Self::B_CAPS_5_PLANE + p] = 0;
+              features[Self::B_CAPS_6_PLANE + p] = 0;
+              features[Self::B_CAPS_7_PLANE + p] = Self::SET;
+              features[Self::B_CAPS_8_PLANE + p] = 0;
             }
             n => {
-              features[Self::CSUIS_1_PLANE + p] = Self::SET;
-              features[Self::CSUIS_2_PLANE + p] = Self::SET;
-              features[Self::CSUIS_3_PLANE + p] = Self::SET;
-              features[Self::CSUIS_4_PLANE + p] = Self::SET;
-              features[Self::CSUIS_5_PLANE + p] = Self::SET;
-              features[Self::CSUIS_6_PLANE + p] = Self::SET;
-              features[Self::CSUIS_7_PLANE + p] = Self::SET;
-              features[Self::CSUIS_8_PLANE + p] = Self::SET;
+              features[Self::B_CAPS_1_PLANE + p] = 0;
+              features[Self::B_CAPS_2_PLANE + p] = 0;
+              features[Self::B_CAPS_3_PLANE + p] = 0;
+              features[Self::B_CAPS_4_PLANE + p] = 0;
+              features[Self::B_CAPS_5_PLANE + p] = 0;
+              features[Self::B_CAPS_6_PLANE + p] = 0;
+              features[Self::B_CAPS_7_PLANE + p] = 0;
+              features[Self::B_CAPS_8_PLANE + p] = Self::SET;
             }
           }
-        } else {
-          features[Self::CSUIS_1_PLANE + p] = 0;
-          features[Self::CSUIS_2_PLANE + p] = 0;
-          features[Self::CSUIS_3_PLANE + p] = 0;
-          features[Self::CSUIS_4_PLANE + p] = 0;
-          features[Self::CSUIS_5_PLANE + p] = 0;
-          features[Self::CSUIS_6_PLANE + p] = 0;
-          features[Self::CSUIS_7_PLANE + p] = 0;
-          features[Self::CSUIS_8_PLANE + p] = 0;
+        }
+        /*} else {
+          features[Self::B_CAPS_1_PLANE + p] = 0;
+          features[Self::B_CAPS_2_PLANE + p] = 0;
+          features[Self::B_CAPS_3_PLANE + p] = 0;
+          features[Self::B_CAPS_4_PLANE + p] = 0;
+          features[Self::B_CAPS_5_PLANE + p] = 0;
+          features[Self::B_CAPS_6_PLANE + p] = 0;
+          features[Self::B_CAPS_7_PLANE + p] = 0;
+          features[Self::B_CAPS_8_PLANE + p] = 0;
         }
       }
 
       // Capture features.
       if stone == turn.opponent() {
-        if is_atari {
+        if is_atari {*/
+        Stone::White => {
           match chain.count_length() {
             0 => unreachable!(),
             1 => {
-              features[Self::CCAPS_1_PLANE + p] = Self::SET;
-              features[Self::CCAPS_2_PLANE + p] = 0;
-              features[Self::CCAPS_3_PLANE + p] = 0;
-              features[Self::CCAPS_4_PLANE + p] = 0;
-              features[Self::CCAPS_5_PLANE + p] = 0;
-              features[Self::CCAPS_6_PLANE + p] = 0;
-              features[Self::CCAPS_7_PLANE + p] = 0;
-              features[Self::CCAPS_8_PLANE + p] = 0;
+              features[Self::W_CAPS_1_PLANE + p] = Self::SET;
+              features[Self::W_CAPS_2_PLANE + p] = 0;
+              features[Self::W_CAPS_3_PLANE + p] = 0;
+              features[Self::W_CAPS_4_PLANE + p] = 0;
+              features[Self::W_CAPS_5_PLANE + p] = 0;
+              features[Self::W_CAPS_6_PLANE + p] = 0;
+              features[Self::W_CAPS_7_PLANE + p] = 0;
+              features[Self::W_CAPS_8_PLANE + p] = 0;
             }
             2 => {
-              features[Self::CCAPS_1_PLANE + p] = Self::SET;
-              features[Self::CCAPS_2_PLANE + p] = Self::SET;
-              features[Self::CCAPS_3_PLANE + p] = 0;
-              features[Self::CCAPS_4_PLANE + p] = 0;
-              features[Self::CCAPS_5_PLANE + p] = 0;
-              features[Self::CCAPS_6_PLANE + p] = 0;
-              features[Self::CCAPS_7_PLANE + p] = 0;
-              features[Self::CCAPS_8_PLANE + p] = 0;
+              features[Self::W_CAPS_1_PLANE + p] = 0;
+              features[Self::W_CAPS_2_PLANE + p] = Self::SET;
+              features[Self::W_CAPS_3_PLANE + p] = 0;
+              features[Self::W_CAPS_4_PLANE + p] = 0;
+              features[Self::W_CAPS_5_PLANE + p] = 0;
+              features[Self::W_CAPS_6_PLANE + p] = 0;
+              features[Self::W_CAPS_7_PLANE + p] = 0;
+              features[Self::W_CAPS_8_PLANE + p] = 0;
             }
             3 => {
-              features[Self::CCAPS_1_PLANE + p] = Self::SET;
-              features[Self::CCAPS_2_PLANE + p] = Self::SET;
-              features[Self::CCAPS_3_PLANE + p] = Self::SET;
-              features[Self::CCAPS_4_PLANE + p] = 0;
-              features[Self::CCAPS_5_PLANE + p] = 0;
-              features[Self::CCAPS_6_PLANE + p] = 0;
-              features[Self::CCAPS_7_PLANE + p] = 0;
-              features[Self::CCAPS_8_PLANE + p] = 0;
+              features[Self::W_CAPS_1_PLANE + p] = 0;
+              features[Self::W_CAPS_2_PLANE + p] = 0;
+              features[Self::W_CAPS_3_PLANE + p] = Self::SET;
+              features[Self::W_CAPS_4_PLANE + p] = 0;
+              features[Self::W_CAPS_5_PLANE + p] = 0;
+              features[Self::W_CAPS_6_PLANE + p] = 0;
+              features[Self::W_CAPS_7_PLANE + p] = 0;
+              features[Self::W_CAPS_8_PLANE + p] = 0;
             }
             4 => {
-              features[Self::CCAPS_1_PLANE + p] = Self::SET;
-              features[Self::CCAPS_2_PLANE + p] = Self::SET;
-              features[Self::CCAPS_3_PLANE + p] = Self::SET;
-              features[Self::CCAPS_4_PLANE + p] = Self::SET;
-              features[Self::CCAPS_5_PLANE + p] = 0;
-              features[Self::CCAPS_6_PLANE + p] = 0;
-              features[Self::CCAPS_7_PLANE + p] = 0;
-              features[Self::CCAPS_8_PLANE + p] = 0;
+              features[Self::W_CAPS_1_PLANE + p] = 0;
+              features[Self::W_CAPS_2_PLANE + p] = 0;
+              features[Self::W_CAPS_3_PLANE + p] = 0;
+              features[Self::W_CAPS_4_PLANE + p] = Self::SET;
+              features[Self::W_CAPS_5_PLANE + p] = 0;
+              features[Self::W_CAPS_6_PLANE + p] = 0;
+              features[Self::W_CAPS_7_PLANE + p] = 0;
+              features[Self::W_CAPS_8_PLANE + p] = 0;
             }
             5 => {
-              features[Self::CCAPS_1_PLANE + p] = Self::SET;
-              features[Self::CCAPS_2_PLANE + p] = Self::SET;
-              features[Self::CCAPS_3_PLANE + p] = Self::SET;
-              features[Self::CCAPS_4_PLANE + p] = Self::SET;
-              features[Self::CCAPS_5_PLANE + p] = Self::SET;
-              features[Self::CCAPS_6_PLANE + p] = 0;
-              features[Self::CCAPS_7_PLANE + p] = 0;
-              features[Self::CCAPS_8_PLANE + p] = 0;
+              features[Self::W_CAPS_1_PLANE + p] = 0;
+              features[Self::W_CAPS_2_PLANE + p] = 0;
+              features[Self::W_CAPS_3_PLANE + p] = 0;
+              features[Self::W_CAPS_4_PLANE + p] = 0;
+              features[Self::W_CAPS_5_PLANE + p] = Self::SET;
+              features[Self::W_CAPS_6_PLANE + p] = 0;
+              features[Self::W_CAPS_7_PLANE + p] = 0;
+              features[Self::W_CAPS_8_PLANE + p] = 0;
             }
             6 => {
-              features[Self::CCAPS_1_PLANE + p] = Self::SET;
-              features[Self::CCAPS_2_PLANE + p] = Self::SET;
-              features[Self::CCAPS_3_PLANE + p] = Self::SET;
-              features[Self::CCAPS_4_PLANE + p] = Self::SET;
-              features[Self::CCAPS_5_PLANE + p] = Self::SET;
-              features[Self::CCAPS_6_PLANE + p] = Self::SET;
-              features[Self::CCAPS_7_PLANE + p] = 0;
-              features[Self::CCAPS_8_PLANE + p] = 0;
+              features[Self::W_CAPS_1_PLANE + p] = 0;
+              features[Self::W_CAPS_2_PLANE + p] = 0;
+              features[Self::W_CAPS_3_PLANE + p] = 0;
+              features[Self::W_CAPS_4_PLANE + p] = 0;
+              features[Self::W_CAPS_5_PLANE + p] = 0;
+              features[Self::W_CAPS_6_PLANE + p] = Self::SET;
+              features[Self::W_CAPS_7_PLANE + p] = 0;
+              features[Self::W_CAPS_8_PLANE + p] = 0;
             }
             7 => {
-              features[Self::CCAPS_1_PLANE + p] = Self::SET;
-              features[Self::CCAPS_2_PLANE + p] = Self::SET;
-              features[Self::CCAPS_3_PLANE + p] = Self::SET;
-              features[Self::CCAPS_4_PLANE + p] = Self::SET;
-              features[Self::CCAPS_5_PLANE + p] = Self::SET;
-              features[Self::CCAPS_6_PLANE + p] = Self::SET;
-              features[Self::CCAPS_7_PLANE + p] = Self::SET;
-              features[Self::CCAPS_8_PLANE + p] = 0;
+              features[Self::W_CAPS_1_PLANE + p] = 0;
+              features[Self::W_CAPS_2_PLANE + p] = 0;
+              features[Self::W_CAPS_3_PLANE + p] = 0;
+              features[Self::W_CAPS_4_PLANE + p] = 0;
+              features[Self::W_CAPS_5_PLANE + p] = 0;
+              features[Self::W_CAPS_6_PLANE + p] = 0;
+              features[Self::W_CAPS_7_PLANE + p] = Self::SET;
+              features[Self::W_CAPS_8_PLANE + p] = 0;
             }
             n => {
-              features[Self::CCAPS_1_PLANE + p] = Self::SET;
-              features[Self::CCAPS_2_PLANE + p] = Self::SET;
-              features[Self::CCAPS_3_PLANE + p] = Self::SET;
-              features[Self::CCAPS_4_PLANE + p] = Self::SET;
-              features[Self::CCAPS_5_PLANE + p] = Self::SET;
-              features[Self::CCAPS_6_PLANE + p] = Self::SET;
-              features[Self::CCAPS_7_PLANE + p] = Self::SET;
-              features[Self::CCAPS_8_PLANE + p] = Self::SET;
+              features[Self::W_CAPS_1_PLANE + p] = 0;
+              features[Self::W_CAPS_2_PLANE + p] = 0;
+              features[Self::W_CAPS_3_PLANE + p] = 0;
+              features[Self::W_CAPS_4_PLANE + p] = 0;
+              features[Self::W_CAPS_5_PLANE + p] = 0;
+              features[Self::W_CAPS_6_PLANE + p] = 0;
+              features[Self::W_CAPS_7_PLANE + p] = 0;
+              features[Self::W_CAPS_8_PLANE + p] = Self::SET;
             }
           }
-        } else {
-          features[Self::CCAPS_1_PLANE + p] = 0;
-          features[Self::CCAPS_2_PLANE + p] = 0;
-          features[Self::CCAPS_3_PLANE + p] = 0;
-          features[Self::CCAPS_4_PLANE + p] = 0;
-          features[Self::CCAPS_5_PLANE + p] = 0;
-          features[Self::CCAPS_6_PLANE + p] = 0;
-          features[Self::CCAPS_7_PLANE + p] = 0;
-          features[Self::CCAPS_8_PLANE + p] = 0;
         }
+
+        _ => unreachable!(),
       }
+        /*} else {
+          features[Self::W_CAPS_1_PLANE + p] = 0;
+          features[Self::W_CAPS_2_PLANE + p] = 0;
+          features[Self::W_CAPS_3_PLANE + p] = 0;
+          features[Self::W_CAPS_4_PLANE + p] = 0;
+          features[Self::W_CAPS_5_PLANE + p] = 0;
+          features[Self::W_CAPS_6_PLANE + p] = 0;
+          features[Self::W_CAPS_7_PLANE + p] = 0;
+          features[Self::W_CAPS_8_PLANE + p] = 0;
+        }
+      }*/
 
     } else {
       features[Self::LIBS_1_PLANE + p] = 0;
@@ -1869,22 +2065,22 @@ impl TxnStateAlphaFeatsV2Data {
       features[Self::LIBS_6_PLANE + p] = 0;
       features[Self::LIBS_7_PLANE + p] = 0;
       features[Self::LIBS_8_PLANE + p] = 0;
-      features[Self::CSUIS_1_PLANE + p] = 0;
-      features[Self::CSUIS_2_PLANE + p] = 0;
-      features[Self::CSUIS_3_PLANE + p] = 0;
-      features[Self::CSUIS_4_PLANE + p] = 0;
-      features[Self::CSUIS_5_PLANE + p] = 0;
-      features[Self::CSUIS_6_PLANE + p] = 0;
-      features[Self::CSUIS_7_PLANE + p] = 0;
-      features[Self::CSUIS_8_PLANE + p] = 0;
-      features[Self::CCAPS_1_PLANE + p] = 0;
-      features[Self::CCAPS_2_PLANE + p] = 0;
-      features[Self::CCAPS_3_PLANE + p] = 0;
-      features[Self::CCAPS_4_PLANE + p] = 0;
-      features[Self::CCAPS_5_PLANE + p] = 0;
-      features[Self::CCAPS_6_PLANE + p] = 0;
-      features[Self::CCAPS_7_PLANE + p] = 0;
-      features[Self::CCAPS_8_PLANE + p] = 0;
+      features[Self::B_CAPS_1_PLANE + p] = 0;
+      features[Self::B_CAPS_2_PLANE + p] = 0;
+      features[Self::B_CAPS_3_PLANE + p] = 0;
+      features[Self::B_CAPS_4_PLANE + p] = 0;
+      features[Self::B_CAPS_5_PLANE + p] = 0;
+      features[Self::B_CAPS_6_PLANE + p] = 0;
+      features[Self::B_CAPS_7_PLANE + p] = 0;
+      features[Self::B_CAPS_8_PLANE + p] = 0;
+      features[Self::W_CAPS_1_PLANE + p] = 0;
+      features[Self::W_CAPS_2_PLANE + p] = 0;
+      features[Self::W_CAPS_3_PLANE + p] = 0;
+      features[Self::W_CAPS_4_PLANE + p] = 0;
+      features[Self::W_CAPS_5_PLANE + p] = 0;
+      features[Self::W_CAPS_6_PLANE + p] = 0;
+      features[Self::W_CAPS_7_PLANE + p] = 0;
+      features[Self::W_CAPS_8_PLANE + p] = 0;
     }
     tmp_mark.insert(p);
   }
@@ -1897,17 +2093,105 @@ impl TxnStateAlphaFeatsV2Data {
       features[Self::KO_PLANE + p] = 0;
     }
   }
+
+  fn update_points_rank(features: &mut [u8], position: &TxnPosition, turn: Stone, rank: PlayerRank) {
+    let max_plane = match (turn, rank) {
+      (Stone::Black, PlayerRank::Kyu(_)) => None,
+      (Stone::Black, PlayerRank::Ama(1)) |
+      (Stone::Black, PlayerRank::Ama(2)) => Some(Self::B_RANK_1A_2A_PLANE),
+      (Stone::Black, PlayerRank::Ama(3)) |
+      (Stone::Black, PlayerRank::Ama(4)) => Some(Self::B_RANK_3A_4A_PLANE),
+      (Stone::Black, PlayerRank::Ama(_)) => Some(Self::B_RANK_5A_7A_PLANE),
+      (Stone::Black, PlayerRank::Dan(1)) |
+      (Stone::Black, PlayerRank::Dan(2)) |
+      (Stone::Black, PlayerRank::Dan(3)) => Some(Self::B_RANK_1P_3P_PLANE),
+      (Stone::Black, PlayerRank::Dan(4)) |
+      (Stone::Black, PlayerRank::Dan(5)) |
+      (Stone::Black, PlayerRank::Dan(6)) => Some(Self::B_RANK_4P_6P_PLANE),
+      (Stone::Black, PlayerRank::Dan(7)) |
+      (Stone::Black, PlayerRank::Dan(8)) |
+      (Stone::Black, PlayerRank::Dan(9)) => Some(Self::B_RANK_7P_9P_PLANE),
+      (Stone::Black, _) => panic!("invalid rank for black player: {:?}", rank),
+      (Stone::White, PlayerRank::Kyu(_)) => None,
+      (Stone::White, PlayerRank::Ama(1)) |
+      (Stone::White, PlayerRank::Ama(2)) => Some(Self::W_RANK_1A_2A_PLANE),
+      (Stone::White, PlayerRank::Ama(3)) |
+      (Stone::White, PlayerRank::Ama(4)) => Some(Self::W_RANK_3A_4A_PLANE),
+      (Stone::White, PlayerRank::Ama(_)) => Some(Self::W_RANK_5A_7A_PLANE),
+      (Stone::White, PlayerRank::Dan(1)) |
+      (Stone::White, PlayerRank::Dan(2)) |
+      (Stone::White, PlayerRank::Dan(3)) => Some(Self::W_RANK_1P_3P_PLANE),
+      (Stone::White, PlayerRank::Dan(4)) |
+      (Stone::White, PlayerRank::Dan(5)) |
+      (Stone::White, PlayerRank::Dan(6)) => Some(Self::W_RANK_4P_6P_PLANE),
+      (Stone::White, PlayerRank::Dan(7)) |
+      (Stone::White, PlayerRank::Dan(8)) |
+      (Stone::White, PlayerRank::Dan(9)) => Some(Self::W_RANK_7P_9P_PLANE),
+      (Stone::White, _) => panic!("invalid rank for white player: {:?}", rank),
+      _ => unreachable!(),
+    };
+    match turn {
+      Stone::Black => {
+        for &plane in &[
+          Self::B_RANK_1A_2A_PLANE,
+          Self::B_RANK_3A_4A_PLANE,
+          Self::B_RANK_5A_7A_PLANE,
+          Self::B_RANK_1P_3P_PLANE,
+          Self::B_RANK_4P_6P_PLANE,
+          Self::B_RANK_7P_9P_PLANE,
+        ] {
+          if let Some(max_plane) = max_plane {
+            if plane <= max_plane {
+              for p in 0 .. Board::SIZE {
+                features[plane + p] = Self::SET;
+              }
+            }
+          }
+        }
+      }
+      Stone::White => {
+        for &plane in &[
+          Self::W_RANK_1A_2A_PLANE,
+          Self::W_RANK_3A_4A_PLANE,
+          Self::W_RANK_5A_7A_PLANE,
+          Self::W_RANK_1P_3P_PLANE,
+          Self::W_RANK_4P_6P_PLANE,
+          Self::W_RANK_7P_9P_PLANE,
+        ] {
+          if let Some(max_plane) = max_plane {
+            if plane <= max_plane {
+              for p in 0 .. Board::SIZE {
+                features[plane + p] = Self::SET;
+              }
+            }
+          }
+        }
+      }
+      _ => unreachable!(),
+    }
+  }
 }
 
 impl TxnStateData for TxnStateAlphaFeatsV2Data {
   fn reset(&mut self) {
-    self.legality.reset();
+    // FIXME(20160202): technically, should have ranks when the board is empty,
+    // so would need to pass TxnPosition, but it is not really necessary.
+    //self.legality.reset();
     for p in 0 .. Self::BLACK_PLANE {
       self.features[p] = Self::SET;
     }
-    for p in Self::BLACK_PLANE .. Self::NUM_PLANES * Board::SIZE {
+    for p in Self::BLACK_PLANE .. Self::CENTER_PLANE {
       self.features[p] = 0;
     }
+    assert_eq!(Self::CENTER_PLANE + Board::SIZE, Self::NUM_PLANES * Board::SIZE);
+    for p in 0 .. Board::SIZE {
+      let point = Point::from_idx(p);
+      let coord = point.to_coord();
+      let (u, v) = ((coord.x as i8 - Board::HALF as i8) as f32, (coord.y as i8 - Board::HALF as i8) as f32);
+      let distance = (u * u + v * v).sqrt();
+      self.features[Self::CENTER_PLANE + p] = (Self::SET as f32 * (-0.5 * distance).exp()).round() as u8;
+    }
+    //println!("DEBUG: features: center: {:?}", &self.features[Self::CENTER_PLANE .. ]);
     self.prev_moves[0] = None;
     self.prev_moves[1] = None;
     self.prev_moves[2] = None;
@@ -1916,10 +2200,13 @@ impl TxnStateData for TxnStateAlphaFeatsV2Data {
     self.prev_moves[5] = None;
     self.prev_moves[6] = None;
     self.prev_moves[7] = None;
+    //self.init_ranks = false;
+    self.black_rank = None;
+    self.white_rank = None;
   }
 
   fn update(&mut self, position: &TxnPosition, chains: &TxnChainsList, update_turn: Stone, update_action: Action) {
-    self.legality.update(position, chains, update_turn, update_action);
+    //self.legality.update(position, chains, update_turn, update_action);
 
     // FIXME(20160201): use legality data for "good" move feature.
 
@@ -1953,14 +2240,6 @@ impl TxnStateData for TxnStateAlphaFeatsV2Data {
         features[Self::EMPTY_PLANE + p] = Self::SET;
         features[Self::BLACK_PLANE + p] = 0;
         features[Self::WHITE_PLANE + p] = 0;
-      }
-
-      // Update the ko features.
-      if let Some((prev_ko_turn, prev_ko_point)) = position.prev_ko {
-        Self::update_point_ko(features, position, prev_ko_turn, prev_ko_point, false);
-      }
-      if let Some((ko_turn, ko_point)) = position.ko {
-        Self::update_point_ko(features, position, ko_turn, ko_point, true);
       }
 
       // XXX(20160102): Update previous moves.
@@ -2059,6 +2338,36 @@ impl TxnStateData for TxnStateAlphaFeatsV2Data {
           chains.iter_chain(head, |ch_pt| {
             Self::update_point_libs(tmp_mark, features, position, chains, ch_pt, update_turn);
           });
+        }
+      }
+
+      // Update the ko features.
+      if let Some((prev_ko_turn, prev_ko_point)) = position.prev_ko {
+        Self::update_point_ko(features, position, prev_ko_turn, prev_ko_point, false);
+      }
+      if let Some((ko_turn, ko_point)) = position.ko {
+        Self::update_point_ko(features, position, ko_turn, ko_point, true);
+      }
+
+      // XXX(20160202): Update player rank features.
+      match self.black_rank {
+        None => {
+          let rank = position.ranks[0];
+          Self::update_points_rank(features, position, Stone::Black, rank);
+          self.black_rank = Some(rank);
+        }
+        Some(rank) => {
+          assert_eq!(rank, position.ranks[0]);
+        }
+      }
+      match self.white_rank {
+        None => {
+          let rank = position.ranks[1];
+          Self::update_points_rank(features, position, Stone::White, rank);
+          self.white_rank = Some(rank);
+        }
+        Some(rank) => {
+          assert_eq!(rank, position.ranks[1]);
         }
       }
     }

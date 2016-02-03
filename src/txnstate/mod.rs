@@ -786,6 +786,13 @@ pub struct GnugoPrintSgf {
   pub illegal:  BTreeSet<Point>,
 }
 
+#[derive(Clone, Copy)]
+pub struct TxnStateConfig {
+  pub rules:    Rules,
+  pub ranks:    [PlayerRank; 2],
+  //pub komi:     f32,
+}
+
 /// Transactional board state.
 ///
 /// Some various properties we would like TxnState to have:
@@ -796,6 +803,7 @@ pub struct GnugoPrintSgf {
 ///   rollouts)
 #[derive(Clone)]
 pub struct TxnState<Data=()> where Data: TxnStateData + Clone {
+  pub config:   TxnStateConfig,
   rules:        Rules,
 
   // Transaction markers.
@@ -824,6 +832,7 @@ impl TxnState<()> {
   pub fn shrink_clone_from<Data>(&mut self, other: &TxnState<Data>) where Data: TxnStateData + Clone {
     assert!(!self.in_txn);
     assert!(!other.in_txn);
+    self.config       = other.config;
     self.rules        = other.rules;
     self.in_soft_txn  = false;
     self.in_txn       = false;
@@ -838,11 +847,12 @@ impl TxnState<()> {
 }
 
 impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
-  pub fn new(ranks: [PlayerRank; 2], rules: Rules, data: Data) -> TxnState<Data> {
+  pub fn new(config: TxnStateConfig, data: Data) -> TxnState<Data> {
     let stones: Vec<Stone> = repeat(Stone::Empty).take(Board::SIZE).collect();
     let stone_epochs: Vec<i16> = repeat(0).take(Board::SIZE).collect();
     TxnState{
-      rules: rules,
+      config:   config,
+      rules:    config.rules,
       in_soft_txn: false,
       in_txn: false,
       txn_mut: false,
@@ -850,7 +860,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
       passed: [false, false],
       num_captures: [0, 0],
       position: TxnPosition{
-        ranks:        ranks,
+        ranks:        config.ranks,
         turn:         Stone::Black,
         epoch:        0,
         num_stones:   [0, 0],
@@ -918,6 +928,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
   pub fn replace_clone_from<OtherData>(&mut self, other: &TxnState<OtherData>, data: Data) where OtherData: TxnStateData + Clone {
     assert!(!self.in_txn);
     assert!(!other.in_txn);
+    self.config       = other.config;
     self.rules        = other.rules;
     self.in_soft_txn  = false;
     self.in_txn       = false;
@@ -934,6 +945,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
   pub fn shrink_clone(&self) -> TxnState<()> {
     assert!(!self.in_txn);
     TxnState{
+      config:       self.config,
       rules:        self.rules,
       in_soft_txn:  false,
       in_txn:       false,

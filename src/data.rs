@@ -1,8 +1,9 @@
 use board::{RuleSet, PlayerRank, Coord, Stone, Point, Action};
 use sgf::{Sgf, parse_raw_sgf};
-use txnstate::{TxnState};
+use txnstate::{TxnStateConfig, TxnState};
 use txnstate::extras::{TxnStateNodeData};
 
+use array_new::{Shape};
 use rembrandt::data_new::{Augment, SampleDatum, SampleLabel};
 use rng::xorshift::{Xorshiftplus128Rng};
 
@@ -33,18 +34,22 @@ impl Augment for SymmetryAugment {
     let mut new_datum = datum.clone();
     let mut new_label = maybe_label.clone();
     match (datum, &mut new_datum) {
-      (SampleDatum::RowMajorBytes(ref datum), &mut SampleDatum::RowMajorBytes(ref mut new_datum)) => {
-        let bound = new_datum.bound();
-        let stride = new_datum.stride();
+      (SampleDatum::WHCBytes(ref datum), &mut SampleDatum::WHCBytes(ref mut new_datum)) => {
+        let bound = datum.bound();
+        let stride = datum.stride();
         {
           let old_data = datum.as_slice();
           let mut new_data = new_datum.as_mut_slice();
+          //for (i, j, k) in bound.major_iter() {
           for k in 0 .. bound.2 {
             for j in 0 .. bound.1 {
               for i in 0 .. bound.0 {
                 let c = Coord{x: i as u8, y: j as u8};
                 let nc = c.rotate(rot);
                 let (ni, nj) = (nc.x as usize, nc.y as usize);
+                /*let old_idx = (i, j, k);
+                let new_idx = (ni, nj, k);
+                new_data[new_idx.offset(stride)] = old_data[old_idx.offset(stride)];*/
                 new_data[ni + nj * stride.0 + k * stride.0 * stride.1] = old_data[i + j * stride.0 + k * stride.0 * stride.1];
               }
             }
@@ -123,8 +128,10 @@ impl EpisodePreproc for GogodbEpisodePreproc {
 
     let mut history = vec![];
     let mut state = TxnState::new(
-        [PlayerRank::Dan(9), PlayerRank::Dan(9)],
-        RuleSet::KgsJapanese.rules(),
+        TxnStateConfig{
+          rules:  RuleSet::KgsJapanese.rules(),
+          ranks:  [PlayerRank::Dan(9), PlayerRank::Dan(9)],
+        },
         TxnStateNodeData::new(),
         //TxnStateLibFeaturesData::new(),
     );

@@ -5,6 +5,7 @@
 //#![feature(wrapping)]
 
 extern crate array;
+extern crate array_new;
 extern crate array_cuda;
 extern crate async_cuda;
 extern crate cuda;

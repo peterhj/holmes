@@ -3,7 +3,7 @@ use board::{Board, RuleSet, PlayerRank, Stone, Point, Action};
 use convnet_new::{
   build_12layer384_19x19x37_arch_nodir,
 };
-use txnstate::{TxnState};
+use txnstate::{TxnStateConfig, TxnState};
 use txnstate::features::{
   TxnStateAlphaFeatsV1Data,
 };
@@ -56,8 +56,10 @@ impl ConvnetAgent {
       player:   None,
       history:  vec![],
       state:    TxnState::new(
-          [PlayerRank::Dan(9), PlayerRank::Dan(9)],
-          RuleSet::KgsJapanese.rules(),
+          TxnStateConfig{
+            rules:  RuleSet::KgsJapanese.rules(),
+            ranks:  [PlayerRank::Dan(9), PlayerRank::Dan(9)],
+          },
           TxnStateAlphaFeatsV1Data::new(),
       ),
       context:  context,

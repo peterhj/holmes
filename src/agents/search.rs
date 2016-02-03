@@ -10,7 +10,7 @@ use search::policies::convnet::{
 use search::policies::quasiuniform::{QuasiUniformRolloutPolicy};
 use search::policies::thompson_rave::{ThompsonRaveTreePolicy};
 use search::policies::uct_rave::{UctRaveTreePolicy};
-use txnstate::{TxnState};
+use txnstate::{TxnStateConfig, TxnState};
 use txnstate::extras::{TxnStateNodeData};
 
 use async_cuda::context::{DeviceContext};
@@ -49,8 +49,10 @@ impl SearchAgent {
       player:   None,
       history:  vec![],
       state:    TxnState::new(
-          [PlayerRank::Dan(9), PlayerRank::Dan(9)],
-          RuleSet::KgsJapanese.rules(),
+          TxnStateConfig{
+            rules:  RuleSet::KgsJapanese.rules(),
+            ranks:  [PlayerRank::Dan(9), PlayerRank::Dan(9)],
+          },
           TxnStateNodeData::new(),
       ),
       result:   None,

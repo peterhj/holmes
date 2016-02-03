@@ -52,7 +52,7 @@ fn main() {
 
   let mut iter_count = 0;
   for &(i, ref sgf_entry) in sgf_entries.iter() {
-    for j in (0 .. sgf_entry.sgf_num_moves + 1) {
+    for j in 0 .. sgf_entry.sgf_num_moves + 1 {
       let tx = tx.clone();
       let sgf_body = sgf_entry.sgf_body.clone();
       pool.execute(move || {

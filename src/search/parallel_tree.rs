@@ -7,7 +7,7 @@ use search::parallel_policies::{
   PriorPolicy, TreePolicy,
   RolloutPolicyBuilder, RolloutMode, RolloutLeafs, RolloutPolicy,
 };
-use txnstate::{TxnState, check_good_move_fast};
+use txnstate::{TxnStateConfig, TxnState, check_good_move_fast};
 use txnstate::extras::{TxnStateNodeData};
 use txnstate::features::{
   TxnStateLibFeaturesData,
@@ -106,8 +106,10 @@ impl RolloutTraj {
     RolloutTraj{
       rollout:      false,
       sim_state:    TxnState::new(
-          [PlayerRank::Dan(9), PlayerRank::Dan(9)],
-          RuleSet::KgsJapanese.rules(),
+          TxnStateConfig{
+            rules:  RuleSet::KgsJapanese.rules(),
+            ranks:  [PlayerRank::Dan(9), PlayerRank::Dan(9)],
+          },
           TxnStateLibFeaturesData::new(),
       ),
       sim_pairs:    vec![],
@@ -714,8 +716,10 @@ impl<W> ParallelMonteCarloEvalServer<W> where W: RolloutPolicy<R=Xorshiftplus128
         let out_barrier = out_barrier;
 
         let mut leaf_states: Vec<_> = repeat(TxnState::new(
-            [PlayerRank::Dan(9), PlayerRank::Dan(9)],
-            RuleSet::KgsJapanese.rules(),
+            TxnStateConfig{
+              rules:  RuleSet::KgsJapanese.rules(),
+              ranks:  [PlayerRank::Dan(9), PlayerRank::Dan(9)],
+            },
             TxnStateNodeData::new(),
         )).take(worker_batch_size).collect();
         let mut rollout_trajs: Vec<_> = repeat(RolloutTraj::new()).take(worker_batch_size).collect();
@@ -894,8 +898,10 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
 
         let mut tree_trajs: Vec<_> = repeat(TreeTraj::new()).take(worker_batch_size).collect();
         let mut leaf_states: Vec<_> = repeat(TxnState::new(
-            [PlayerRank::Dan(9), PlayerRank::Dan(9)],
-            RuleSet::KgsJapanese.rules(),
+            TxnStateConfig{
+              rules:  RuleSet::KgsJapanese.rules(),
+              ranks:  [PlayerRank::Dan(9), PlayerRank::Dan(9)],
+            },
             TxnStateNodeData::new(),
         )).take(worker_batch_size).collect();
         let mut rollout_trajs: Vec<_> = repeat(RolloutTraj::new()).take(worker_batch_size).collect();

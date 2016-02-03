@@ -79,7 +79,7 @@ fn train() {
     valid_iters:    3000,
     save_iters:     3000,
   };
-  let datum_cfg = SampleDatumConfig::BitArray3d;
+  let datum_cfg = SampleDatumConfig::Bits3d{scale: 1};
   let train_label_cfg = SampleLabelConfig::LookaheadCategories{
     num_categories: 361,
     lookahead:      3,

@@ -8,7 +8,7 @@ use search::parallel_tree::{
   MonteCarloSearchResult,
   ParallelMonteCarloSearchServer, ParallelMonteCarloSearch,
 };
-use txnstate::{TxnState};
+use txnstate::{TxnStateConfig, TxnState};
 use txnstate::extras::{TxnStateNodeData};
 
 use async_cuda::context::{DeviceContext};
@@ -45,8 +45,10 @@ impl ParallelMonteCarloSearchAgent {
       history:  vec![],
       ply:      0,
       state:    TxnState::new(
-          [PlayerRank::Dan(9), PlayerRank::Dan(9)],
-          RuleSet::KgsJapanese.rules(),
+          TxnStateConfig{
+            rules:  RuleSet::KgsJapanese.rules(),
+            ranks:  [PlayerRank::Dan(9), PlayerRank::Dan(9)],
+          },
           TxnStateNodeData::new(),
       ),
       result:   None,

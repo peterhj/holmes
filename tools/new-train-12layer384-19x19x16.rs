@@ -57,7 +57,7 @@ fn train() {
     valid_iters:    800,
     save_iters:     1600,
   };
-  let datum_cfg = SampleDatumConfig::ByteArray3d;
+  let datum_cfg = SampleDatumConfig::Bytes3d;
   let label_cfg = SampleLabelConfig::Category{num_categories: 361};
 
   let data_layer_cfg = Data3dLayerConfig{

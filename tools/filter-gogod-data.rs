@@ -11,7 +11,7 @@ use std::io::{Read, BufRead, Write, BufReader};
 use std::path::{PathBuf};
 
 fn main() {
-  let index_path = PathBuf::from("/data0/go/gogodb_w2015-preproc/index");
+  let index_path = PathBuf::from("/data0/go/gogodb_w2015-preproc-alphav2/index");
   //let index_path = PathBuf::from("/data0/go/gogodb-preproc/index");
   //let index_path = PathBuf::from("/data0/go/kgs-ugo-preproc/index");
   let index_file = BufReader::new(File::open(&index_path).unwrap());
@@ -29,7 +29,7 @@ fn main() {
     .map(|line| PathBuf::from(line)).collect();
   println!("num sgf paths: {}", sgf_paths.len());
 
-  let mut filterindex_path = PathBuf::from("/data0/go/gogodb_w2015-preproc/filtered_index.v3");
+  let mut filterindex_path = PathBuf::from("/data0/go/gogodb_w2015-preproc-alphav2/filtered_index");
   //let mut filterindex_path = PathBuf::from("/data0/go/kgs-ugo-preproc/filtered_index");
   let mut filterindex = File::create(&filterindex_path).unwrap();
 
@@ -179,8 +179,8 @@ fn main() {
         }
       }
     }
-    if is_semimodern && is_19 {
-    //if is_modern && is_19 {
+    //if is_semimodern && is_19 {
+    if is_modern && is_19 {
     //if is_modern && is_19 && is_nohand && is_goodkomi {
     //if is_modern && is_19 && is_nohand && is_komi65 && is_japanese { // XXX: KGS filter.
       let sgf = Sgf::from_raw(&raw_sgf);

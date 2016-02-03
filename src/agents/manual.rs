@@ -1,6 +1,6 @@
 use agents::{Agent};
 use board::{Board, RuleSet, PlayerRank, Coord, Stone, Point, Action};
-use txnstate::{TxnState};
+use txnstate::{TxnStateConfig, TxnState};
 
 use std::io::{stdin};
 
@@ -19,8 +19,10 @@ impl ManualAgent {
       player:   None,
       history:  vec![],
       state:    TxnState::new(
-          [PlayerRank::Dan(9), PlayerRank::Dan(9)],
-          RuleSet::KgsJapanese.rules(),
+          TxnStateConfig{
+            rules:  RuleSet::KgsJapanese.rules(),
+            ranks:  [PlayerRank::Dan(9), PlayerRank::Dan(9)],
+          },
           (),
       ),
     }

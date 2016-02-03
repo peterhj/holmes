@@ -1,3 +1,5 @@
+use board::{Board};
+
 use std::fmt;
 use std::str::{from_utf8};
 
@@ -129,16 +131,16 @@ impl Coord {
   }
 
   pub fn from_idx(idx: usize) -> Coord {
-    let (x, y) = ((idx % 19) as u8, (idx / 19) as u8);
+    let (x, y) = ((idx % Board::DIM) as u8, (idx / Board::DIM) as u8);
     Coord{x: x, y: y}
   }
 
   pub fn idx(self) -> usize {
-    self.x as usize + self.y as usize * 19
+    self.x as usize + self.y as usize * Board::DIM
   }
 
   pub fn rotate(self, rot: u8) -> Coord {
-    let (u, v) = (self.x as i8 - 9, self.y as i8 - 9);
+    let (u, v) = (self.x as i8 - Board::HALF as i8, self.y as i8 - Board::HALF as i8);
     let (nu, nv) = match rot {
       0 => ( u,  v),
       1 => (-v,  u), // Rot L
@@ -150,7 +152,7 @@ impl Coord {
       7 => (-v, -u), // Rot 180
       _ => unreachable!(),
     };
-    Coord{x: (nu + 9) as u8, y: (nv + 9) as u8}
+    Coord{x: (nu + Board::HALF as i8) as u8, y: (nv + Board::HALF as i8) as u8}
   }
 }
 

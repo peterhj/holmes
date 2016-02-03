@@ -7,7 +7,7 @@ use convnet::arch::{
   build_action_6layer_19x19x16_arch,
   build_action_12layer_19x19x16_arch,
 };
-use txnstate::{TxnState};
+use txnstate::{TxnStateConfig, TxnState};
 use txnstate::features::{
   TxnStateFeaturesData,
   TxnStateLibFeaturesData,
@@ -44,8 +44,10 @@ impl ConvnetAgent {
       player:   None,
       history:  vec![],
       state:    TxnState::new(
-          [PlayerRank::Dan(9), PlayerRank::Dan(9)],
-          RuleSet::KgsJapanese.rules(),
+          TxnStateConfig{
+            rules:  RuleSet::KgsJapanese.rules(),
+            ranks:  [PlayerRank::Dan(9), PlayerRank::Dan(9)],
+          },
           TxnStateLibFeaturesData::new(),
       ),
       ctx:      ctx,

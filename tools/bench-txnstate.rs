@@ -8,7 +8,7 @@ extern crate rand;
 use holmes::board::{RuleSet, PlayerRank, Stone, Point, Action};
 use holmes::discrete::bfilter::{BFilter};
 use holmes::random::{XorShift128PlusRng, choose_without_replace};
-use holmes::txnstate::{TxnState};
+use holmes::txnstate::{TxnStateConfig, TxnState};
 use holmes::txnstate::extras::{TxnStateLegalityData};
 use holmes::txnstate::features::{TxnStateFeaturesData};
 //use statistics_avx2::array::{array_sum};
@@ -29,8 +29,10 @@ fn main() {
 
   //let mut state = TxnState::new(RuleSet::KgsJapanese.rules(), ());
   let mut state = TxnState::new(
-      [PlayerRank::Dan(9), PlayerRank::Dan(9)],
-      RuleSet::KgsJapanese.rules(),
+      TxnStateConfig{
+        rules:  RuleSet::KgsJapanese.rules(),
+        ranks:  [PlayerRank::Dan(9), PlayerRank::Dan(9)],
+      },
       TxnStateLegalityData::new(),
   );
   //let mut state = TxnState::new(RuleSet::KgsJapanese.rules(), TxnStateFeaturesData::new());
@@ -58,7 +60,7 @@ fn main() {
     //for (i, &c) in valid_coords.iter().enumerate() {
     let mut t = 0;
     loop {
-      if t >= 400 {
+      if t >= 542 {
         break;
       }
 

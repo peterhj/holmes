@@ -69,7 +69,7 @@ fn train() {
     valid_iters:    1600,
     save_iters:     1600,
   };
-  let datum_cfg = SampleDatumConfig::ByteArray3d;
+  let datum_cfg = SampleDatumConfig::Bytes3d;
   let label_cfg = SampleLabelConfig::Category{num_categories: 361};
 
   info!("sgd cfg: {:?}", sgd_opt_cfg);

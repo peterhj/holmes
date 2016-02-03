@@ -4,7 +4,7 @@ use hyper::{PWIDE, PWIDE_MU};
 use random::{XorShift128PlusRng, choose_without_replace};
 use search::{SearchResult, SearchStats, ProgWideConfig};
 use search::policies::{PriorPolicy, TreePolicy, RolloutPolicy};
-use txnstate::{TxnState, check_good_move_fast};
+use txnstate::{TxnStateConfig, TxnState, check_good_move_fast};
 use txnstate::extras::{TxnStateNodeData};
 use txnstate::features::{TxnStateLibFeaturesData};
 
@@ -63,8 +63,10 @@ impl Trajectory {
       leaf_node:      None,*/
       rollout:    false,
       sim_state:  TxnState::new(
-          [PlayerRank::Dan(9), PlayerRank::Dan(9)],
-          RuleSet::KgsJapanese.rules(),
+          TxnStateConfig{
+            rules:  RuleSet::KgsJapanese.rules(),
+            ranks:  [PlayerRank::Dan(9), PlayerRank::Dan(9)],
+          },
           TxnStateLibFeaturesData::new(),
       ),
       sim_pairs:  vec![],

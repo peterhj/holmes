@@ -8,6 +8,7 @@ impl Board {
   pub const HALF_PT:    Point = Point(9);
   pub const DIM_PT:     Point = Point(19);
   pub const MAX_PT:     Point = Point(361);
+  pub const HALF:       usize = 9;
   pub const DIM:        usize = 19;
   pub const SIZE:       usize = 361;
 }
@@ -98,7 +99,7 @@ impl RuleSet {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PlayerRank {
   Kyu(u8),
-  AmaDan(u8),
+  Ama(u8),
   Dan(u8),
 }
 
