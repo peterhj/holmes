@@ -19,7 +19,13 @@ use rand::{Rng, thread_rng};
 use std::cmp::{min};
 use std::path::{PathBuf};
 
+pub struct MonteCarloConfig {
+  pub num_rollouts: usize,
+  pub batch_size:   usize,
+}
+
 pub struct ParallelMonteCarloSearchAgent {
+  config:   MonteCarloConfig,
   komi:     f32,
   player:   Option<Stone>,
 
@@ -33,13 +39,14 @@ pub struct ParallelMonteCarloSearchAgent {
 }
 
 impl ParallelMonteCarloSearchAgent {
-  pub fn new(num_workers: Option<usize>) -> ParallelMonteCarloSearchAgent {
-    let batch_size = 256;
+  pub fn new(config: MonteCarloConfig, num_workers: Option<usize>) -> ParallelMonteCarloSearchAgent {
+    let batch_capacity = 256;
     let num_devices = CudaDevice::count().unwrap();
     let num_workers = num_workers.unwrap_or(num_devices);
     let num_workers = min(num_workers, num_devices);
-    let worker_batch_size = batch_size / num_workers;
+    let worker_batch_capacity = batch_capacity / num_workers;
     ParallelMonteCarloSearchAgent{
+      config:   config,
       komi:     0.0,
       player:   None,
       history:  vec![],
@@ -54,8 +61,8 @@ impl ParallelMonteCarloSearchAgent {
       result:   None,
       rng:      Xorshiftplus128Rng::new(&mut thread_rng()),
       server:   ParallelMonteCarloSearchServer::new(
-          num_workers, worker_batch_size,
-          ConvnetPolicyWorkerBuilder::new(num_workers, worker_batch_size),
+          num_workers, worker_batch_capacity,
+          ConvnetPolicyWorkerBuilder::new(num_workers, worker_batch_capacity),
       ),
     }
   }
@@ -125,15 +132,18 @@ impl Agent for ParallelMonteCarloSearchAgent {
     assert_eq!(turn, self.state.current_turn());
 
     // FIXME(20160114): read remaining time and apply a time management policy.
-    let num_rollouts = 5120;
+    //let num_rollouts = 5120;
     //let num_rollouts = 10240;
-    let batch_size = 256;
+
+    let num_rollouts = self.config.num_rollouts;
+    let batch_size = self.config.batch_size;
 
     let mut search = ParallelMonteCarloSearch::new();
     let (search_res, search_stats) = search.join(
         num_rollouts,
         batch_size,
         &mut self.server,
+        self.player.unwrap(),
         &self.state,
         self.result.as_ref(),
         &mut self.rng);

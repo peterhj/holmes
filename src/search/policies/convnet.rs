@@ -155,7 +155,7 @@ impl RolloutPolicy for BatchConvnetRolloutPolicy {
         }
 
         let turn = trajs[idx].sim_state.current_turn();
-        trajs[idx].sim_state.get_data()
+        trajs[idx].sim_state.get_data().features
           .extract_relative_features(
               turn, self.arch.data_layer().expose_host_frame_buf(idx));
         // FIXME(20151125): mask softmax output with valid moves.
@@ -196,14 +196,14 @@ impl RolloutPolicy for BatchConvnetRolloutPolicy {
           if let Some(p) = filters[idx].sample(rng) {
             filters[idx].zero(p);
             let sim_point = Point::from_idx(p);
-            if !valid_moves[sim_turn_off][idx].contains(&p) {
+            if !valid_moves[sim_turn_off][idx].contains(p) {
               continue;
             } else if !check_good_move_fast(&trajs[idx].sim_state.position, &trajs[idx].sim_state.chains, sim_turn, sim_point) {
-              valid_moves[sim_turn_off][idx].remove(&p);
+              valid_moves[sim_turn_off][idx].remove(p);
               bad_moves[sim_turn_off][idx].push(sim_point);
               continue;
             } else {
-              valid_moves[sim_turn_off][idx].remove(&p);
+              valid_moves[sim_turn_off][idx].remove(p);
               if trajs[idx].sim_state.try_place(sim_turn, sim_point).is_err() {
                 trajs[idx].sim_state.undo();
                 continue;
@@ -331,7 +331,7 @@ impl RolloutPolicy for ParallelBatchConvnetRolloutPolicy {
 
           let part_idx = idx - part * part_batch_size;
           let turn = trajs[idx].sim_state.current_turn();
-          trajs[idx].sim_state.get_data()
+          trajs[idx].sim_state.get_data().features
             .extract_relative_features(
                 turn, self.archs[part].data_layer().expose_host_frame_buf(part_idx));
           // FIXME(20151125): mask softmax output with valid moves.
@@ -385,14 +385,14 @@ impl RolloutPolicy for ParallelBatchConvnetRolloutPolicy {
           if let Some(p) = filters[idx].sample(rng) {
             filters[idx].zero(p);
             let sim_point = Point::from_idx(p);
-            if !valid_moves[sim_turn_off][idx].contains(&p) {
+            if !valid_moves[sim_turn_off][idx].contains(p) {
               continue;
             } else if !check_good_move_fast(&trajs[idx].sim_state.position, &trajs[idx].sim_state.chains, sim_turn, sim_point) {
-              valid_moves[sim_turn_off][idx].remove(&p);
+              valid_moves[sim_turn_off][idx].remove(p);
               bad_moves[sim_turn_off][idx].push(sim_point);
               continue;
             } else {
-              valid_moves[sim_turn_off][idx].remove(&p);
+              valid_moves[sim_turn_off][idx].remove(p);
               if trajs[idx].sim_state.try_place(sim_turn, sim_point).is_err() {
                 trajs[idx].sim_state.undo();
                 continue;

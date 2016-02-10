@@ -1,11 +1,13 @@
 use agents::{Agent};
 use board::{Board, RuleSet, PlayerRank, Stone, Point, Action};
 use convnet_new::{
-  build_12layer384_19x19x37_arch_nodir,
+  //build_12layer384_19x19x37_arch_nodir,
+  build_12layer384_19x19x44_arch_nodir,
 };
 use txnstate::{TxnStateConfig, TxnState};
 use txnstate::features::{
-  TxnStateAlphaFeatsV1Data,
+  //TxnStateAlphaFeatsV1Data,
+  TxnStateAlphaFeatsV2Data,
 };
 
 use array_cuda::device::{DeviceContext, for_all_devices};
@@ -25,8 +27,8 @@ pub struct ConvnetAgent {
   komi:     f32,
   player:   Option<Stone>,
 
-  history:  Vec<(TxnState<TxnStateAlphaFeatsV1Data>, Action)>,
-  state:    TxnState<TxnStateAlphaFeatsV1Data>,
+  history:  Vec<(TxnState<TxnStateAlphaFeatsV2Data>, Action)>,
+  state:    TxnState<TxnStateAlphaFeatsV2Data>,
 
   context:  DeviceContext,
   arch:     PipelineArchWorker<()>,
@@ -35,8 +37,10 @@ pub struct ConvnetAgent {
 impl ConvnetAgent {
   pub fn new() -> ConvnetAgent {
     let context = DeviceContext::new(0);
-    let arch_cfg = build_12layer384_19x19x37_arch_nodir(1);
-    let save_path = PathBuf::from("models/kgs_ugo_201505_new_action_12layer384_19x19x37.v3.saved");
+    //let arch_cfg = build_12layer384_19x19x37_arch_nodir(1);
+    //let save_path = PathBuf::from("models/kgs_ugo_201505_new_action_12layer384_19x19x37.v3.saved");
+    let arch_cfg = build_12layer384_19x19x44_arch_nodir(1);
+    let save_path = PathBuf::from("models/gogodb_w2015_alphav2_new_action_12layer384_19x19x44.saved");
     let shared = for_all_devices(1, |contexts| {
       Arc::new(PipelineArchSharedData::new(1, &arch_cfg, contexts))
     });
@@ -60,7 +64,7 @@ impl ConvnetAgent {
             rules:  RuleSet::KgsJapanese.rules(),
             ranks:  [PlayerRank::Dan(9), PlayerRank::Dan(9)],
           },
-          TxnStateAlphaFeatsV1Data::new(),
+          TxnStateAlphaFeatsV2Data::new(),
       ),
       context:  context,
       arch:     arch,

@@ -6,6 +6,7 @@ use txnstate::{
 use txnstate::features::{
   TxnStateFeaturesData,
   TxnStateLibFeaturesData,
+  TxnStateAlphaFeatsV2Data,
 };
 
 use bit_set::{BitSet};
@@ -93,7 +94,7 @@ impl TxnStateLegalityData {
 
   fn update_point(&mut self, position: &TxnPosition, chains: &TxnChainsList, point: Point) {
     let p = point.idx();
-    if self.tmp_mark.contains(&p) {
+    if self.tmp_mark.contains(p) {
       return;
     }
     for &turn in [Stone::Black, Stone::White].iter() {
@@ -104,11 +105,11 @@ impl TxnStateLegalityData {
           self.cached_legal_moves[turn_off].insert(p);
         }
         Some(Err(_)) => {
-          self.cached_legal_moves[turn_off].remove(&p);
+          self.cached_legal_moves[turn_off].remove(p);
         }
         None => {
           if self.test_state.try_place(turn, point).is_err() {
-            self.cached_legal_moves[turn_off].remove(&p);
+            self.cached_legal_moves[turn_off].remove(p);
           } else {
             self.cached_legal_moves[turn_off].insert(p);
           }
@@ -175,9 +176,11 @@ impl TxnStateData for TxnStateLegalityData {
 }
 
 #[derive(Clone)]
+//pub struct TxnStateNodeData<Feats=TxnStateLibFeaturesData> where Feats: TxnStateData + Clone {
 pub struct TxnStateNodeData {
   //pub features: TxnStateFeaturesData,
-  pub features: TxnStateLibFeaturesData,
+  //pub features: TxnStateLibFeaturesData,
+  pub features: TxnStateAlphaFeatsV2Data,
   pub legality: TxnStateLegalityData,
 }
 
@@ -185,12 +188,14 @@ impl TxnStateNodeData {
   pub fn new() -> TxnStateNodeData {
     TxnStateNodeData{
       //features: TxnStateFeaturesData::new(),
-      features: TxnStateLibFeaturesData::new(),
+      //features: TxnStateLibFeaturesData::new(),
+      features: TxnStateAlphaFeatsV2Data::new(),
       legality: TxnStateLegalityData::new(),
     }
   }
 }
 
+//impl<Feats> TxnStateData for TxnStateNodeData<Feats> where Feats: TxnStateData {
 impl TxnStateData for TxnStateNodeData {
   fn reset(&mut self) {
     self.features.reset();
@@ -205,13 +210,21 @@ impl TxnStateData for TxnStateNodeData {
 
 #[derive(Clone)]
 pub struct TxnStateRolloutData {
-  pub features: TxnStateLibFeaturesData,
+  //pub features: TxnStateLibFeaturesData,
+  pub features: TxnStateAlphaFeatsV2Data,
 }
 
 impl TxnStateRolloutData {
   pub fn new() -> TxnStateRolloutData {
     TxnStateRolloutData{
-      features: TxnStateLibFeaturesData::new(),
+      //features: TxnStateLibFeaturesData::new(),
+      features: TxnStateAlphaFeatsV2Data::new(),
+    }
+  }
+
+  pub fn with_features(features: TxnStateAlphaFeatsV2Data) -> TxnStateRolloutData {
+    TxnStateRolloutData{
+      features: features,
     }
   }
 }

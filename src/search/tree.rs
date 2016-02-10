@@ -5,7 +5,7 @@ use random::{XorShift128PlusRng, choose_without_replace};
 use search::{SearchResult, SearchStats, ProgWideConfig};
 use search::policies::{PriorPolicy, TreePolicy, RolloutPolicy};
 use txnstate::{TxnStateConfig, TxnState, check_good_move_fast};
-use txnstate::extras::{TxnStateNodeData};
+use txnstate::extras::{TxnStateNodeData, TxnStateRolloutData};
 use txnstate::features::{TxnStateLibFeaturesData};
 
 use bit_set::{BitSet};
@@ -45,7 +45,8 @@ pub struct Trajectory {
   pub leaf_node:      Option<Rc<RefCell<Node>>>,*/
 
   pub rollout:    bool,
-  pub sim_state:  TxnState<TxnStateLibFeaturesData>,
+  //pub sim_state:  TxnState<TxnStateLibFeaturesData>,
+  pub sim_state:  TxnState<TxnStateRolloutData>,
   pub sim_pairs:  Vec<(Stone, Point)>,
 
   pub raw_score:  Option<f32>,
@@ -67,7 +68,8 @@ impl Trajectory {
             rules:  RuleSet::KgsJapanese.rules(),
             ranks:  [PlayerRank::Dan(9), PlayerRank::Dan(9)],
           },
-          TxnStateLibFeaturesData::new(),
+          //TxnStateLibFeaturesData::new(),
+          TxnStateRolloutData::new(),
       ),
       sim_pairs:  vec![],
       raw_score:  None,
@@ -106,7 +108,7 @@ impl Trajectory {
       //let &mut Trajectory{ref leaf_node, ref mut sim_state, .. } = self;
       //sim_state.shrink_clone_from(&self.leaf_node.as_ref().unwrap().borrow().state);
       let state = &walk.leaf_node.as_ref().unwrap().borrow().state;
-      self.sim_state.replace_clone_from(state, state.get_data().features.clone());
+      self.sim_state.replace_clone_from(state, TxnStateRolloutData::with_features(state.get_data().features.clone()));
     }
     self.sim_pairs.clear();
     self.raw_score = None;

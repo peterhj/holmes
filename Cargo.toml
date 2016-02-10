@@ -110,6 +110,14 @@ name = "new-train-12layer384-19x19x37"
 path = "tools/new-train-12layer384-19x19x37.rs"
 
 [[bin]]
+name = "new-train-2layer16-19x19x44"
+path = "tools/new-train-2layer16-19x19x44.rs"
+
+[[bin]]
+name = "new-train-3layer32-19x19x44"
+path = "tools/new-train-3layer32-19x19x44.rs"
+
+[[bin]]
 name = "new-train-12layer384-19x19x44"
 path = "tools/new-train-12layer384-19x19x44.rs"
 
@@ -128,6 +136,10 @@ path = "tools/holmes-vs-pachi10k_f1-f16.rs"
 [[bin]]
 name = "holmes-convnet-vs-pachi10k_f1-f16"
 path = "tools/holmes-convnet-vs-pachi10k_f1-f16.rs"
+
+[[bin]]
+name = "holmes-search-vs-pachi10k_f1-f16"
+path = "tools/holmes-search-vs-pachi10k_f1-f16.rs"
 
 [[bin]]
 name = "train-action3-narrow-3layer-19x19x16"
@@ -205,13 +217,17 @@ path = "tools/filter-kgs-data.rs"
 name = "manual-gtp"
 path = "tools/manual-gtp.rs"
 
-[[bin]]
-name = "holmes-gtp"
-path = "tools/holmes-gtp.rs"
+#[[bin]]
+#name = "holmes-gtp"
+#path = "tools/holmes-gtp.rs"
 
 [[bin]]
 name = "holmes-convnet-gtp"
 path = "tools/holmes-convnet-gtp.rs"
+
+[[bin]]
+name = "holmes-search-gtp"
+path = "tools/holmes-search-gtp.rs"
 
 [dependencies]
 bit-set = "*"

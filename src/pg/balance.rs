@@ -26,9 +26,9 @@ use cuda::runtime::{CudaDevice};
 use rembrandt::arch_new::{AtomicData, ArchWorker, PipelineArchWorker};
 use rembrandt::layer_new::{Phase};
 use rng::xorshift::{Xorshiftplus128Rng};
-use std::path::{PathBuf};
 
 use rand::{Rng, thread_rng};
+use std::path::{PathBuf};
 use time::{get_time};
 
 pub struct PgBalanceConfig {
@@ -117,6 +117,8 @@ impl PgBalanceMachine {
         self.config.target_num_rollouts,
         self.config.target_batch_size,
         &self.search_server,
+        // FIXME(20160208): what is our player color?
+        init_state.current_turn(),
         init_state,
         None,
         &mut self.rng);
@@ -129,6 +131,8 @@ impl PgBalanceMachine {
         self.config.value_minibatch_size,
         self.config.value_minibatch_size,
         &self.search_server,
+        // FIXME(20160208): what is our player color?
+        init_state.current_turn(),
         init_state,
         &mut self.rng);
     let eval_value = eval_res.expected_value;
@@ -144,6 +148,8 @@ impl PgBalanceMachine {
         eval_value,
         0.5,
         &self.search_server,
+        // FIXME(20160208): what is our player color?
+        init_state.current_turn(),
         init_state,
         &mut self.rng);
 

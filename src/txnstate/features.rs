@@ -253,7 +253,7 @@ impl TxnStateLibFeaturesData {
 
   fn update_point(tmp_mark: &mut BitSet, features: &mut [u8], position: &TxnPosition, chains: &TxnChainsList, point: Point) {
     let p = point.idx();
-    if tmp_mark.contains(&p) {
+    if tmp_mark.contains(p) {
       return;
     }
     let stone = position.stones[p];
@@ -490,7 +490,7 @@ impl TxnStateExtLibFeatsData {
 
   fn update_point_libs(tmp_mark: &mut BitSet, features: &mut [u8], position: &TxnPosition, chains: &TxnChainsList, point: Point) {
     let p = point.idx();
-    if tmp_mark.contains(&p) {
+    if tmp_mark.contains(p) {
       return;
     }
     let stone = position.stones[p];
@@ -932,7 +932,7 @@ impl TxnStateAlphaFeatsV1Data {
 
   fn update_point_libs(tmp_mark: &mut BitSet, features: &mut [u8], position: &TxnPosition, chains: &TxnChainsList, point: Point, turn: Stone) {
     let p = point.idx();
-    if tmp_mark.contains(&p) {
+    if tmp_mark.contains(p) {
       return;
     }
     let stone = position.stones[p];
@@ -1746,16 +1746,16 @@ impl TxnStateAlphaFeatsV2Data {
         //features[Self::TURNS_7_PLANE + p] = 0;
         features[Self::TURNS_8_PLANE + p] = Self::SET;
       }
-      /*9 => {
-        features[Self::TURNS_8_PLANE + p] = 0;
-      }*/
+      9 => {
+        //features[Self::TURNS_8_PLANE + p] = 0;
+      }
       _ => unreachable!(),
     }
   }
 
   fn update_point_libs(tmp_mark: &mut BitSet, features: &mut [u8], position: &TxnPosition, chains: &TxnChainsList, point: Point, turn: Stone) {
     let p = point.idx();
-    if tmp_mark.contains(&p) {
+    if tmp_mark.contains(p) {
       return;
     }
     let stone = position.stones[p];
@@ -2243,10 +2243,9 @@ impl TxnStateData for TxnStateAlphaFeatsV2Data {
       }
 
       // XXX(20160102): Update previous moves.
-      match self.prev_moves[7] {
+      /*match self.prev_moves[7] {
         Some((_, prev_point)) => {
-          // XXX(20160129): Do not erase the oldest moves.
-          //Self::update_point_turns(features, prev_point, 9);
+          Self::update_point_turns(features, prev_point, 9);
         }
         None => {}
       }
@@ -2291,6 +2290,14 @@ impl TxnStateData for TxnStateAlphaFeatsV2Data {
           Self::update_point_turns(features, prev_point, 2);
         }
         None => {}
+      }*/
+      for t in (0 .. 8).rev() {
+        match self.prev_moves[t] {
+          Some((_, prev_point)) => {
+            Self::update_point_turns(features, prev_point, t + 2);
+          }
+          None => {}
+        }
       }
       match update_action {
         Action::Place{point} => {

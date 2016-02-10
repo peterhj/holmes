@@ -80,6 +80,8 @@ impl RolloutEvalOutcomeMachine {
             self.batch_size,
             self.batch_size,
             &self.search_server,
+            // FIXME(20160208): what is our player color?
+            init_state.current_turn(),
             init_state,
             &mut self.rng);
         let eval_value = eval_res.expected_value;

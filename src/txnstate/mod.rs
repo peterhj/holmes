@@ -793,6 +793,18 @@ pub struct TxnStateConfig {
   //pub komi:     f32,
 }
 
+impl Default for TxnStateConfig {
+  fn default() -> TxnStateConfig {
+    TxnStateConfig{
+      rules:    RuleSet::KgsJapanese.rules(),
+      ranks:    [
+        PlayerRank::Dan(9),
+        PlayerRank::Dan(9),
+      ],
+    }
+  }
+}
+
 /// Transactional board state.
 ///
 /// Some various properties we would like TxnState to have:
@@ -1110,6 +1122,28 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
         _ => {}
       }
     }
+    w_score - b_score + komi
+  }
+
+  pub fn current_score_rollout_exact(&self, komi: f32) -> f32 {
+    let mut b_score = 0.0;
+    let mut w_score = 0.0;
+    b_score += self.position.num_stones[0] as f32;
+    w_score += self.position.num_stones[1] as f32;
+
+    for p in 0 .. Board::SIZE {
+      if let Stone::Empty = self.position.stones[p] {
+        if is_eyelike(&self.position, &self.chains, Stone::Black, Point(p as i16)) {
+          b_score += 1.0;
+        } else if is_eyelike(&self.position, &self.chains, Stone::White, Point(p as i16)) {
+          w_score += 1.0;
+        } else {
+          // FIXME(20160209): work in progress: do a flood fill to find territory
+          // and contested empty points.
+        }
+      }
+    }
+
     w_score - b_score + komi
   }
 

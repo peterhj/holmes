@@ -5,6 +5,8 @@ use convnet_new::{
   build_12layer128_19x19x16_arch,
   /*build_3layer32_19x19x16_arch,
   build_12layer384_19x19x30_arch,*/
+  build_2layer16_19x19x44_arch_nodir,
+  build_12layer384_19x19x44_arch_nodir,
 };
 use discrete::{DiscreteFilter};
 use discrete::bfilter::{BFilter};
@@ -47,17 +49,24 @@ pub struct ConvnetPolicyWorkerBuilder {
 
 impl ConvnetPolicyWorkerBuilder {
   pub fn new(num_workers: usize, worker_batch_size: usize) -> ConvnetPolicyWorkerBuilder {
-    let (prior_arch_cfg, prior_save_path) = build_12layer128_19x19x16_arch(1);
+    //let (prior_arch_cfg, prior_save_path) = build_12layer128_19x19x16_arch(1);
+    let prior_arch_cfg = build_12layer384_19x19x44_arch_nodir(1);
+    let prior_save_path = PathBuf::from("models/gogodb_w2015_alphav2_new_action_12layer384_19x19x44.saved");
+
     // FIXME(20160121): temporarily using existing balance run.
     /*let rollout_arch_cfg = build_2layer16_19x19x16_arch_nodir(worker_batch_size);
     let rollout_save_path = PathBuf::from("experiments/models_balance/test");*/
-    let (rollout_arch_cfg, rollout_save_path) = build_2layer16_19x19x16_arch(worker_batch_size);
+    //let (rollout_arch_cfg, rollout_save_path) = build_2layer16_19x19x16_arch(worker_batch_size);
+    let rollout_arch_cfg = build_2layer16_19x19x44_arch_nodir(worker_batch_size);
+    let rollout_save_path = PathBuf::from("models/gogodb_w2015_alphav2_new_action_2layer16_19x19x44_run2.saved");
+
     let prior_shared = for_all_devices(num_workers, |contexts| {
       Arc::new(PipelineArchSharedData::new(num_workers, &prior_arch_cfg, contexts))
     });
     let rollout_shared = for_all_devices(num_workers, |contexts| {
       Arc::new(PipelineArchSharedData::new(num_workers, &rollout_arch_cfg, contexts))
     });
+
     ConvnetPolicyWorkerBuilder{
       prior_arch_cfg:       prior_arch_cfg,
       prior_save_path:      prior_save_path,
@@ -219,9 +228,6 @@ pub struct ConvnetRolloutPolicy {
   arch:         PipelineArchWorker<()>,
 }
 
-/*impl ConvnetRolloutPolicy {
-}*/
-
 impl RolloutPolicy for ConvnetRolloutPolicy {
   fn batch_size(&self) -> usize {
     self.batch_size
@@ -232,7 +238,7 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
     max_iters
   }
 
-  fn rollout_batch(&mut self, batch_size: usize, leafs: RolloutLeafs, rollout_trajs: &mut [RolloutTraj], record_trace: bool, traces: &mut [QuickTrace], rng: &mut Xorshiftplus128Rng) {
+  fn rollout_batch(&mut self, batch_size: usize, green_stone: Stone, leafs: RolloutLeafs, rollout_trajs: &mut [RolloutTraj], record_trace: bool, traces: &mut [QuickTrace], rng: &mut Xorshiftplus128Rng) {
     let ctx = (*self.context).as_ref();
 
     // FIXME(20160120): this allows us to be a little sloppy with how many
@@ -286,7 +292,7 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
         }
 
         let turn = rollout_trajs[batch_idx].sim_state.current_turn();
-        rollout_trajs[batch_idx].sim_state.get_data()
+        rollout_trajs[batch_idx].sim_state.get_data().features
           .extract_relative_features(
               turn, self.arch.input_layer().expose_host_frame_buf(batch_idx));
         // FIXME(20151125): mask softmax output with valid moves.
@@ -330,7 +336,7 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
           if let Some(p) = filters[batch_idx].sample(rng) {
             filters[batch_idx].zero(p);
             let sim_point = Point::from_idx(p);
-            if !valid_move_set[sim_turn_off][batch_idx].contains(&p) {
+            if !valid_move_set[sim_turn_off][batch_idx].contains(p) {
               spin_count += 1;
               continue;
             } else if !check_good_move_fast(
@@ -338,12 +344,12 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
                 &rollout_trajs[batch_idx].sim_state.chains,
                 sim_turn, sim_point)
             {
-              valid_move_set[sim_turn_off][batch_idx].remove(&p);
+              valid_move_set[sim_turn_off][batch_idx].remove(p);
               bad_moves[sim_turn_off][batch_idx].push(sim_point);
               spin_count += 1;
               continue;
             } else {
-              valid_move_set[sim_turn_off][batch_idx].remove(&p);
+              valid_move_set[sim_turn_off][batch_idx].remove(p);
               if rollout_trajs[batch_idx].sim_state.try_place(sim_turn, sim_point).is_err() {
                 rollout_trajs[batch_idx].sim_state.undo();
                 spin_count += 1;
@@ -361,7 +367,7 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
                 {
                   //valid_move_set[sim_turn_off][batch_idx].insert(pt.idx());
                   let pt = pt.idx();
-                  if !valid_move_set[sim_turn_off][batch_idx].contains(&pt) {
+                  if !valid_move_set[sim_turn_off][batch_idx].contains(pt) {
                     valid_move_set[sim_turn_off][batch_idx].insert(pt);
                     valid_move_iter[sim_turn_off][batch_idx].push(pt);
                   }
@@ -379,7 +385,7 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
               spin_count += 1;
               if let Some(p) = choose_without_replace(&mut valid_move_iter[sim_turn_off][batch_idx], rng) {
                 let sim_point = Point::from_idx(p);
-                if !valid_move_set[sim_turn_off][batch_idx].contains(&p) {
+                if !valid_move_set[sim_turn_off][batch_idx].contains(p) {
                   spin_count += 1;
                   continue;
                 } else if !check_good_move_fast(
@@ -387,12 +393,12 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
                     &rollout_trajs[batch_idx].sim_state.chains,
                     sim_turn, sim_point)
                 {
-                  valid_move_set[sim_turn_off][batch_idx].remove(&p);
+                  valid_move_set[sim_turn_off][batch_idx].remove(p);
                   bad_moves[sim_turn_off][batch_idx].push(sim_point);
                   spin_count += 1;
                   continue;
                 } else {
-                  valid_move_set[sim_turn_off][batch_idx].remove(&p);
+                  valid_move_set[sim_turn_off][batch_idx].remove(p);
                   if rollout_trajs[batch_idx].sim_state.try_place(sim_turn, sim_point).is_err() {
                     rollout_trajs[batch_idx].sim_state.undo();
                     spin_count += 1;
@@ -410,7 +416,7 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
                     {
                       //valid_move_set[sim_turn_off][batch_idx].insert(pt.idx());
                       let pt = pt.idx();
-                      if !valid_move_set[sim_turn_off][batch_idx].contains(&pt) {
+                      if !valid_move_set[sim_turn_off][batch_idx].contains(pt) {
                         valid_move_set[sim_turn_off][batch_idx].insert(pt);
                         valid_move_iter[sim_turn_off][batch_idx].push(pt);
                       }
@@ -451,7 +457,7 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
     self.arch.reset_gradients(0.0, &ctx);
   }
 
-  fn rollout_trace(&mut self, trace: &Trace, baseline: f32) -> bool {
+  /*fn rollout_trace(&mut self, trace: &Trace, baseline: f32) -> bool {
     let ctx = (*self.context).as_ref();
 
     let trace_len = trace.pairs.len();
@@ -483,9 +489,9 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
     self.arch.backward(trace_len, (value - baseline) / (trace_len as f32), &ctx);
 
     true
-  }
+  }*/
 
-  fn rollout_quicktrace(&mut self, trace: &QuickTrace, baseline: f32) -> bool {
+  fn rollout_trace(&mut self, trace: &QuickTrace, baseline: f32) -> bool {
     let ctx = (*self.context).as_ref();
 
     let mut trace_len = 0;
@@ -497,7 +503,7 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
       match action {
         Action::Place{point} => {
           let t = trace_len;
-          sim_state.get_data()
+          sim_state.get_data().features
             .extract_relative_features(
                 turn, self.arch.input_layer().expose_host_frame_buf(t),
             );
@@ -528,6 +534,10 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
     true
   }
 
+  fn rollout_green_trace(&mut self, green_stone: Stone, trace: &QuickTrace, baseline: f32) -> bool {
+    unimplemented!();
+  }
+
   fn backup_traces(&mut self, learning_rate: f32, target_value: f32, eval_value: f32, num_traces: usize) {
     let ctx = (*self.context).as_ref();
     self.arch.dev_allreduce_sum_gradients(&ctx);
@@ -546,4 +556,411 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
       self.arch.save_layer_params_dir(save_dir, t, &ctx);
     }
   }
+}
+
+pub struct BiConvnetRolloutPolicy {
+  context:      Rc<DeviceContext>,
+  batch_size:   usize,
+  green_arch:   PipelineArchWorker<()>,
+  red_arch:     PipelineArchWorker<()>,
+}
+
+impl RolloutPolicy for BiConvnetRolloutPolicy {
+  fn batch_size(&self) -> usize {
+    self.batch_size
+  }
+
+  fn max_rollout_len(&self) -> usize {
+    let max_iters = 361 + 361 / 2 + 1;
+    max_iters
+  }
+
+  fn rollout_batch(&mut self, batch_size: usize, green_stone: Stone, leafs: RolloutLeafs, rollout_trajs: &mut [RolloutTraj], record_trace: bool, traces: &mut [QuickTrace], rng: &mut Xorshiftplus128Rng) {
+    let ctx = (*self.context).as_ref();
+
+    // FIXME(20160120): this allows us to be a little sloppy with how many
+    // trajectories we allocate.
+    //assert_eq!(batch_size, rollout_trajs.len());
+    assert!(batch_size <= rollout_trajs.len());
+
+    let mut init_turn = None;
+    let mut valid_move_set = vec![vec![], vec![]];
+    // XXX(20160124): Valid move iterator is an "upper bound" on the valid moves,
+    // since it is easy to add elements but hard to remove them.
+    let mut valid_move_iter: Vec<Vec<Vec<usize>>> = vec![vec![], vec![]];
+    let mut bad_moves = vec![vec![], vec![]];
+    let mut turn_pass = vec![vec![], vec![]];
+    let mut num_both_passed = 0;
+    let mut filters = vec![];
+    for batch_idx in 0 .. batch_size {
+      /*let leaf_node = tree_trajs[idx].leaf_node.as_ref().unwrap().read().unwrap();
+      valid_move_set[0].push(leaf_node.state.get_data().legality.legal_points(Stone::Black));
+      valid_move_set[1].push(leaf_node.state.get_data().legality.legal_points(Stone::White));*/
+      leafs.with_leaf_state(batch_idx, |leaf_state| {
+        match init_turn {
+          None            => init_turn = Some(leaf_state.current_turn()),
+          Some(init_turn) => assert_eq!(init_turn, leaf_state.current_turn()),
+        }
+        valid_move_set[0].push(leaf_state.get_data().legality.legal_points(Stone::Black));
+        valid_move_set[1].push(leaf_state.get_data().legality.legal_points(Stone::White));
+        valid_move_iter[0].push(valid_move_set[0][batch_idx].iter().collect());
+        valid_move_iter[1].push(valid_move_set[1][batch_idx].iter().collect());
+      });
+      bad_moves[0].push(vec![]);
+      bad_moves[1].push(vec![]);
+      turn_pass[0].push(false);
+      turn_pass[1].push(false);
+      filters.push(BFilter::with_capacity(Board::SIZE));
+    }
+
+    if record_trace {
+      for batch_idx in 0 .. batch_size {
+        if rollout_trajs[batch_idx].rollout {
+          traces[batch_idx].reset();
+          traces[batch_idx].init_state = Some(rollout_trajs[batch_idx].sim_state.clone());
+        }
+      }
+    }
+
+    let max_iters = 361 + 361 / 2 + rng.gen_range(0, 2);
+    let mut t_turn = init_turn.unwrap();
+    for t in 0 .. max_iters {
+      if num_both_passed == batch_size {
+        break;
+      }
+
+      for batch_idx in 0 .. batch_size {
+        if !rollout_trajs[batch_idx].rollout {
+          continue;
+        }
+
+        let turn = rollout_trajs[batch_idx].sim_state.current_turn();
+        rollout_trajs[batch_idx].sim_state.get_data().features
+          .extract_relative_features(
+              turn,
+              //self.arch.input_layer().expose_host_frame_buf(batch_idx)
+              match green_stone == t_turn {
+                true  => {
+                  self.green_arch.input_layer().expose_host_frame_buf(batch_idx)
+                }
+                false => {
+                  self.red_arch.input_layer().expose_host_frame_buf(batch_idx)
+                }
+              },
+          );
+        // FIXME(20151125): mask softmax output with valid moves.
+        //self.arch.loss_layer().preload_mask_buf(batch_idx, valid_move_set[turn.offset()][batch_idx].as_slice());
+      }
+
+      /*self.arch.input_layer().load_frames(batch_size, &ctx);
+      // FIXME(20151125): mask softmax output with valid moves.
+      //self.arch.loss_layer().load_masks(batch_size, &ctx);
+      self.arch.forward(batch_size, Phase::Inference, &ctx);
+      self.arch.loss_layer().store_probs(batch_size, &ctx);*/
+      match green_stone == t_turn {
+        true  => {
+          self.green_arch.input_layer().load_frames(batch_size, &ctx);
+          self.green_arch.forward(batch_size, Phase::Inference, &ctx);
+          self.green_arch.loss_layer().store_probs(batch_size, &ctx);
+        }
+        false => {
+          self.red_arch.input_layer().load_frames(batch_size, &ctx);
+          self.red_arch.forward(batch_size, Phase::Inference, &ctx);
+          self.red_arch.loss_layer().store_probs(batch_size, &ctx);
+        }
+      }
+
+      {
+        //let batch_probs = self.arch.loss_layer().get_probs(batch_size).as_slice();
+        let batch_probs = match green_stone == t_turn {
+          true  => {
+            self.green_arch.loss_layer().get_probs(batch_size).as_slice()
+          }
+          false => {
+            self.red_arch.loss_layer().get_probs(batch_size).as_slice()
+          }
+        };
+        for batch_idx in 0 .. batch_size {
+          if !rollout_trajs[batch_idx].rollout {
+            continue;
+          }
+          filters[batch_idx].reset(&batch_probs[batch_idx * Board::SIZE .. (batch_idx + 1) * Board::SIZE]);
+        }
+      }
+
+      for batch_idx in 0 .. batch_size {
+        if !rollout_trajs[batch_idx].rollout {
+          continue;
+        }
+
+        let sim_turn = rollout_trajs[batch_idx].sim_state.current_turn();
+        let sim_turn_off = sim_turn.offset();
+        if turn_pass[0][batch_idx] && turn_pass[1][batch_idx] {
+          continue;
+        }
+
+        if record_trace {
+          traces[batch_idx].actions.push((sim_turn, Action::Pass));
+        }
+
+        let mut made_move = false;
+        let mut spin_count = 0;
+        while !valid_move_set[sim_turn_off][batch_idx].is_empty() {
+          if let Some(p) = filters[batch_idx].sample(rng) {
+            filters[batch_idx].zero(p);
+            let sim_point = Point::from_idx(p);
+            if !valid_move_set[sim_turn_off][batch_idx].contains(p) {
+              spin_count += 1;
+              continue;
+            } else if !check_good_move_fast(
+                &rollout_trajs[batch_idx].sim_state.position,
+                &rollout_trajs[batch_idx].sim_state.chains,
+                sim_turn, sim_point)
+            {
+              valid_move_set[sim_turn_off][batch_idx].remove(p);
+              bad_moves[sim_turn_off][batch_idx].push(sim_point);
+              spin_count += 1;
+              continue;
+            } else {
+              valid_move_set[sim_turn_off][batch_idx].remove(p);
+              if rollout_trajs[batch_idx].sim_state.try_place(sim_turn, sim_point).is_err() {
+                rollout_trajs[batch_idx].sim_state.undo();
+                spin_count += 1;
+                continue;
+              } else {
+                if record_trace {
+                  let trace_len = traces[batch_idx].actions.len();
+                  traces[batch_idx].actions[trace_len - 1].1 = Action::Place{point: sim_point};
+                }
+                rollout_trajs[batch_idx].sim_state.commit();
+                for_each_touched_empty(
+                    &rollout_trajs[batch_idx].sim_state.position,
+                    &rollout_trajs[batch_idx].sim_state.chains,
+                    |_, _, pt|
+                {
+                  //valid_move_set[sim_turn_off][batch_idx].insert(pt.idx());
+                  let pt = pt.idx();
+                  if !valid_move_set[sim_turn_off][batch_idx].contains(pt) {
+                    valid_move_set[sim_turn_off][batch_idx].insert(pt);
+                    valid_move_iter[sim_turn_off][batch_idx].push(pt);
+                  }
+                });
+                made_move = true;
+                spin_count += 1;
+                break;
+              }
+            }
+          } else {
+            // XXX(20151207): Remaining moves were deemed to have probability zero,
+            // so finish the rollout using uniform policy.
+            /*break;*/
+            while !valid_move_set[sim_turn_off][batch_idx].is_empty() {
+              spin_count += 1;
+              if let Some(p) = choose_without_replace(&mut valid_move_iter[sim_turn_off][batch_idx], rng) {
+                let sim_point = Point::from_idx(p);
+                if !valid_move_set[sim_turn_off][batch_idx].contains(p) {
+                  spin_count += 1;
+                  continue;
+                } else if !check_good_move_fast(
+                    &rollout_trajs[batch_idx].sim_state.position,
+                    &rollout_trajs[batch_idx].sim_state.chains,
+                    sim_turn, sim_point)
+                {
+                  valid_move_set[sim_turn_off][batch_idx].remove(p);
+                  bad_moves[sim_turn_off][batch_idx].push(sim_point);
+                  spin_count += 1;
+                  continue;
+                } else {
+                  valid_move_set[sim_turn_off][batch_idx].remove(p);
+                  if rollout_trajs[batch_idx].sim_state.try_place(sim_turn, sim_point).is_err() {
+                    rollout_trajs[batch_idx].sim_state.undo();
+                    spin_count += 1;
+                    continue;
+                  } else {
+                    if record_trace {
+                      let trace_len = traces[batch_idx].actions.len();
+                      traces[batch_idx].actions[trace_len - 1].1 = Action::Place{point: sim_point};
+                    }
+                    rollout_trajs[batch_idx].sim_state.commit();
+                    for_each_touched_empty(
+                        &rollout_trajs[batch_idx].sim_state.position,
+                        &rollout_trajs[batch_idx].sim_state.chains,
+                        |_, _, pt|
+                    {
+                      //valid_move_set[sim_turn_off][batch_idx].insert(pt.idx());
+                      let pt = pt.idx();
+                      if !valid_move_set[sim_turn_off][batch_idx].contains(pt) {
+                        valid_move_set[sim_turn_off][batch_idx].insert(pt);
+                        valid_move_iter[sim_turn_off][batch_idx].push(pt);
+                      }
+                    });
+                    made_move = true;
+                    spin_count += 1;
+                    break;
+                  }
+                }
+              }
+            }
+          }
+        }
+        assert!(spin_count <= Board::SIZE);
+
+        // XXX: Bad moves are not technically illegal.
+        valid_move_set[sim_turn_off][batch_idx].extend(bad_moves[sim_turn_off][batch_idx].iter().map(|&pt| pt.idx()));
+
+        turn_pass[sim_turn_off][batch_idx] = false;
+        if !made_move {
+          rollout_trajs[batch_idx].sim_state.try_action(sim_turn, Action::Pass);
+          rollout_trajs[batch_idx].sim_state.commit();
+          for_each_touched_empty(&rollout_trajs[batch_idx].sim_state.position, &rollout_trajs[batch_idx].sim_state.chains, |position, chains, pt| {
+            valid_move_set[sim_turn_off][batch_idx].insert(pt.idx());
+          });
+          turn_pass[sim_turn_off][batch_idx] = true;
+          if turn_pass[0][batch_idx] && turn_pass[1][batch_idx] {
+            num_both_passed += 1;
+            continue;
+          }
+        }
+      }
+
+      t_turn = t_turn.opponent();
+    }
+  }
+
+  fn init_traces(&mut self) {
+    let ctx = (*self.context).as_ref();
+
+    // FIXME(20160209)
+    unimplemented!();
+
+    //self.arch.reset_gradients(0.0, &ctx);
+  }
+
+  fn rollout_trace(&mut self, trace: &QuickTrace, baseline: f32) -> bool {
+    //let ctx = (*self.context).as_ref();
+
+    // FIXME(20160209)
+    unimplemented!();
+
+    /*let mut trace_len = 0;
+    let mut sim_state = match trace.init_state {
+      Some(ref init_state) => init_state.clone(),
+      None => return false,
+    };
+    for &(turn, action) in trace.actions.iter() {
+      match action {
+        Action::Place{point} => {
+          let t = trace_len;
+          sim_state.get_data().features
+            .extract_relative_features(
+                turn, self.arch.input_layer().expose_host_frame_buf(t),
+            );
+          let label = SampleLabel::Category{category: point.idx() as i32};
+          self.arch.loss_layer().preload_label(t, &label, Phase::Inference);
+          trace_len += 1;
+        }
+        _ => {}
+      }
+      match sim_state.try_action(turn, action) {
+        Ok(_) => sim_state.commit(),
+        Err(_) => panic!("quicktrace actions should always be legal!"),
+      }
+    }
+    if trace_len == 0 {
+      return false;
+    }
+
+    let value = match trace.value {
+      Some(value) => value,
+      None => panic!("missing quicktrace value!"),
+    };
+    self.arch.input_layer().load_frames(trace_len, &ctx);
+    self.arch.loss_layer().load_labels(trace_len, &ctx);
+    self.arch.forward(trace_len, Phase::Training, &ctx);
+    self.arch.backward(trace_len, (value - baseline) / (trace_len as f32), &ctx);
+
+    true*/
+  }
+
+  fn rollout_green_trace(&mut self, green_stone: Stone, trace: &QuickTrace, baseline: f32) -> bool {
+    let ctx = (*self.context).as_ref();
+
+    let mut trace_size = 0;
+    let mut sim_state = match trace.init_state {
+      Some(ref init_state) => init_state.clone(),
+      None => return false,
+    };
+    for &(turn, action) in trace.actions.iter() {
+      if turn != green_stone {
+        continue;
+      }
+      match action {
+        Action::Place{point} => {
+          let t = trace_size;
+          sim_state.get_data().features
+            .extract_relative_features(
+                turn,
+                self.green_arch.input_layer().expose_host_frame_buf(t),
+            );
+          let label = SampleLabel::Category{category: point.idx() as i32};
+          self.green_arch.loss_layer().preload_label(t, &label, Phase::Inference);
+          trace_size += 1;
+        }
+        _ => {}
+      }
+      match sim_state.try_action(turn, action) {
+        Ok(_) => sim_state.commit(),
+        Err(_) => panic!("quicktrace actions should always be legal!"),
+      }
+    }
+    if trace_size == 0 {
+      return false;
+    }
+
+    let value = match trace.value {
+      Some(value) => value,
+      None => panic!("missing quicktrace value!"),
+    };
+    self.green_arch.input_layer().load_frames(trace_size, &ctx);
+    self.green_arch.loss_layer().load_labels(trace_size, &ctx);
+    self.green_arch.forward(trace_size, Phase::Training, &ctx);
+    self.green_arch.backward(trace_size, (value - baseline) / (trace_size as f32), &ctx);
+
+    true
+
+    // FIXME(20160209)
+    //unimplemented!();
+  }
+
+  fn backup_traces(&mut self, learning_rate: f32, target_value: f32, eval_value: f32, num_traces: usize) {
+    let ctx = (*self.context).as_ref();
+
+    // FIXME(20160209)
+    unimplemented!();
+
+    /*self.arch.dev_allreduce_sum_gradients(&ctx);
+    // FIXME(20160122): forgot to scale by total number of traces, not the
+    // number of traces processed by this worker...
+    // as an approximation, just multiply local number of traces by number of
+    // workers.
+    //self.arch.descend(learning_rate * (target_value - eval_value) / (num_traces as f32), 0.0, &ctx);
+    let num_workers = self.arch.num_workers();
+    self.arch.descend(learning_rate * (target_value - eval_value) / ((num_workers * num_traces) as f32), 0.0, &ctx);*/
+  }
+
+  fn save_params(&mut self, save_dir: &Path, t: usize) {
+    unimplemented!();
+    /*if self.arch.tid() == 0 {
+      let ctx = (*self.context).as_ref();
+      self.arch.save_layer_params_dir(save_dir, t, &ctx);
+    }*/
+  }
+
+  fn load_green_params(&mut self, blob: &[u8]) { unimplemented!(); }
+
+  fn load_red_params(&mut self, blob: &[u8]) { unimplemented!(); }
+
+  fn save_green_params(&mut self, save_dir: &Path, t: usize) -> Vec<u8> { unimplemented!(); }
+
+  fn save_red_params(&mut self) -> Vec<u8> { unimplemented!(); }
 }

@@ -8,7 +8,10 @@ use search::parallel_policies::{
   RolloutPolicyBuilder, RolloutMode, RolloutLeafs, RolloutPolicy,
 };
 use txnstate::{TxnStateConfig, TxnState, check_good_move_fast};
-use txnstate::extras::{TxnStateNodeData};
+use txnstate::extras::{
+  TxnStateNodeData,
+  TxnStateRolloutData,
+};
 use txnstate::features::{
   TxnStateLibFeaturesData,
   TxnStateExtLibFeatsData,
@@ -67,6 +70,13 @@ impl HyperparamConfig {
   }
 }
 
+#[derive(Clone, Copy)]
+pub enum HorizonConfig {
+  All,
+  Fixed{max_horizon: usize},
+  Pwide{mu: f32},
+}
+
 #[derive(Clone)]
 pub struct TreeTraj {
   pub backup_triples: Vec<(Arc<RwLock<Node>>, Point, usize)>,
@@ -90,7 +100,8 @@ impl TreeTraj {
 #[derive(Clone)]
 pub struct RolloutTraj {
   pub rollout:      bool,
-  pub sim_state:    TxnState<TxnStateLibFeaturesData>,
+  //pub sim_state:    TxnState<TxnStateLibFeaturesData>,
+  pub sim_state:    TxnState<TxnStateRolloutData>,
   pub sim_pairs:    Vec<(Stone, Point)>,
 
   pub raw_score:    Option<f32>,
@@ -110,7 +121,8 @@ impl RolloutTraj {
             rules:  RuleSet::KgsJapanese.rules(),
             ranks:  [PlayerRank::Dan(9), PlayerRank::Dan(9)],
           },
-          TxnStateLibFeaturesData::new(),
+          //TxnStateLibFeaturesData::new(),
+          TxnStateRolloutData::new(),
       ),
       sim_pairs:    vec![],
       raw_score:    None,
@@ -125,7 +137,7 @@ impl RolloutTraj {
   pub fn reset_terminal(&mut self, leaf_state: &TxnState<TxnStateNodeData>) {
     self.rollout = false;
     //self.sim_state.reset();
-    self.sim_state.replace_clone_from(leaf_state, leaf_state.get_data().features.clone());
+    self.sim_state.replace_clone_from(leaf_state, TxnStateRolloutData::with_features(leaf_state.get_data().features.clone()));
     self.sim_pairs.clear();
     self.raw_score = None;
     self.adj_score = None;
@@ -135,7 +147,7 @@ impl RolloutTraj {
 
   pub fn reset_rollout(&mut self, leaf_state: &TxnState<TxnStateNodeData>) {
     self.rollout = true;
-    self.sim_state.replace_clone_from(leaf_state, leaf_state.get_data().features.clone());
+    self.sim_state.replace_clone_from(leaf_state, TxnStateRolloutData::with_features(leaf_state.get_data().features.clone()));
     self.sim_pairs.clear();
     self.raw_score = None;
     self.adj_score = None;
@@ -184,7 +196,8 @@ impl Trace {
 
 #[derive(Clone)]
 pub struct QuickTrace {
-  pub init_state:   Option<TxnState<TxnStateLibFeaturesData>>,
+  //pub init_state:   Option<TxnState<TxnStateLibFeaturesData>>,
+  pub init_state:   Option<TxnState<TxnStateRolloutData>>,
   pub actions:      Vec<(Stone, Action)>,
   pub value:        Option<f32>,
 }
@@ -249,8 +262,9 @@ impl NodeBox for ArcNodeBox {
 }
 
 pub trait NodeValues {
-  fn new(num_arms: usize) -> Self where Self: Sized;
+  fn new(num_arms: usize, horizon_cfg: HorizonConfig) -> Self where Self: Sized;
   fn horizon(&self) -> usize;
+  fn succ_ratios_float(&self) -> Vec<f32>;
   fn num_trials_float(&self) -> Vec<f32>;
 }
 
@@ -266,9 +280,10 @@ pub struct FloatNodeValues {
 }
 
 impl NodeValues for RefCell<FloatNodeValues> {
-  fn new(num_arms: usize) -> Self where Self: Sized {
+  fn new(num_arms: usize, horizon_cfg: HorizonConfig) -> Self where Self: Sized {
     RefCell::new(FloatNodeValues{
       prior_values:     repeat(0.5).take(num_arms).collect(),
+      // FIXME(20160208): horizon.
       horizon:          min(1, num_arms),
       total_trials:     0.0,
       num_trials:       repeat(0.0).take(num_arms).collect(),
@@ -282,6 +297,11 @@ impl NodeValues for RefCell<FloatNodeValues> {
   fn horizon(&self) -> usize {
     let values = self.borrow();
     values.horizon
+  }
+
+  fn succ_ratios_float(&self) -> Vec<f32> {
+    // FIXME(20160209)
+    unimplemented!();
   }
 
   fn num_trials_float(&self) -> Vec<f32> {
@@ -302,7 +322,7 @@ pub struct AtomicNodeValues {
 }
 
 impl NodeValues for AtomicNodeValues {
-  fn new(num_arms: usize) -> AtomicNodeValues {
+  fn new(num_arms: usize, horizon_cfg: HorizonConfig) -> AtomicNodeValues {
     let mut num_trials = Vec::with_capacity(num_arms);
     for _ in 0 .. num_arms {
       num_trials.push(AtomicUsize::new(0));
@@ -326,7 +346,17 @@ impl NodeValues for AtomicNodeValues {
     AtomicNodeValues{
       prior_values:     repeat(0.5).take(num_arms).collect(),
       // FIXME(20160125): switch on progressive widening.
-      horizon:          AtomicUsize::new(min(1, num_arms)),
+      horizon:          match horizon_cfg {
+        HorizonConfig::All => {
+          AtomicUsize::new(num_arms)
+        }
+        HorizonConfig::Fixed{max_horizon} => {
+          AtomicUsize::new(min(max_horizon, num_arms))
+        }
+        HorizonConfig::Pwide{..} => {
+          AtomicUsize::new(min(1, num_arms))
+        }
+      },
       total_trials:     AtomicUsize::new(0),
       num_trials:       num_trials,
       num_succs:        num_succs,
@@ -338,6 +368,22 @@ impl NodeValues for AtomicNodeValues {
 
   fn horizon(&self) -> usize {
     self.horizon.load(Ordering::Acquire)
+  }
+
+  fn succ_ratios_float(&self) -> Vec<f32> {
+    let mut xs = vec![];
+    for j in 0 .. self.num_trials.len() {
+      // XXX(20160209): Using the "adjusted" number of successes rather than the
+      // raw count.
+      let s_j = self.num_succs[j].load(Ordering::Acquire) as f32;
+      let n_j = self.num_trials[j].load(Ordering::Acquire) as f32;
+      if n_j < 1.0 {
+        xs.push(0.0);
+      } else {
+        xs.push(s_j / n_j);
+      }
+    }
+    xs
   }
 
   fn num_trials_float(&self) -> Vec<f32> {
@@ -361,16 +407,18 @@ pub struct Node<N=ArcNodeBox, V=AtomicNodeValues> where N: NodeBox, V: NodeValue
 }
 
 impl<N, V> Node<N, V> where N: NodeBox, V: NodeValues {
-  pub fn new(state: TxnState<TxnStateNodeData>, prior_policy: &mut PriorPolicy) -> Node<N, V> {
+  pub fn new(state: TxnState<TxnStateNodeData>, prior_policy: &mut PriorPolicy, horizon_cfg: HorizonConfig) -> Node<N, V> {
     let mut valid_moves = vec![];
     state.get_data().legality.fill_legal_points(state.current_turn(), &mut valid_moves);
     let num_arms = valid_moves.len();
 
     // FIXME(20160109): depends on progressive widening.
     //let init_horizon = min(1, num_arms);
+    //let horizon_cfg = HorizonConfig::Fixed{max_horizon: 10};
+    //let horizon_cfg = HorizonConfig::Pwide{mu: 1.8};
 
     // XXX(20151224): Sort moves by descending value for progressive widening.
-    let mut values = AtomicNodeValues::new(num_arms);
+    let mut values = AtomicNodeValues::new(num_arms, horizon_cfg);
     let mut action_priors = Vec::with_capacity(num_arms);
     prior_policy.fill_prior_values(&state, &valid_moves, &mut action_priors);
     action_priors.sort_by(|left, right| {
@@ -402,20 +450,27 @@ impl<N, V> Node<N, V> where N: NodeBox, V: NodeValues {
     self.valid_moves.is_empty()
   }
 
-  pub fn update_visits(&self) {
+  pub fn update_visits(&self, horizon_cfg: HorizonConfig) {
     self.values.total_trials.fetch_add(1, Ordering::AcqRel);
-    let num_arms = self.valid_moves.len();
-    // FIXME(20160111): read progressive widening hyperparameter.
-    let pwide_mu = 1.8f32;
-    loop {
-      // XXX(20160111): Need to read from `total_trials` again because other
-      // threads may also be updating this node's horizon.
-      let total_trials = self.values.total_trials.load(Ordering::Acquire);
-      let next_horizon = min(num_arms, (((1 + total_trials) as f32).ln() / pwide_mu.ln()).ceil() as usize);
-      let prev_horizon = self.values.horizon.load(Ordering::Acquire);
-      let curr_horizon = self.values.horizon.compare_and_swap(prev_horizon, next_horizon, Ordering::AcqRel);
-      if prev_horizon == curr_horizon {
-        return;
+    match horizon_cfg {
+      HorizonConfig::All => {}
+      HorizonConfig::Fixed{..} => {}
+      HorizonConfig::Pwide{mu} => {
+        let num_arms = self.valid_moves.len();
+        // FIXME(20160111): read progressive widening hyperparameter.
+        //let pwide_mu = 1.8f32;
+        let pwide_mu = mu;
+        loop {
+          // XXX(20160111): Need to read from `total_trials` again because other
+          // threads may also be updating this node's horizon.
+          let total_trials = self.values.total_trials.load(Ordering::Acquire);
+          let next_horizon = min(num_arms, (((1 + total_trials) as f32).ln() / pwide_mu.ln()).ceil() as usize);
+          let prev_horizon = self.values.horizon.load(Ordering::Acquire);
+          let curr_horizon = self.values.horizon.compare_and_swap(prev_horizon, next_horizon, Ordering::AcqRel);
+          if prev_horizon == curr_horizon {
+            return;
+          }
+        }
       }
     }
   }
@@ -464,6 +519,7 @@ struct InnerTree {
 #[derive(Clone)]
 pub struct SharedTree {
   inner:    Arc<Mutex<InnerTree>>,
+  horizon_cfg:   HorizonConfig,
 }
 
 impl SharedTree {
@@ -473,13 +529,18 @@ impl SharedTree {
         root_node:      None,
         mean_raw_score: 0.0,
       })),
+
+      // XXX(20160208): HACK: This is where the horizon policy is specified.
+      // It should really belong to the hyperparam file, but whatever.
+      //horizon_cfg: HorizonConfig::Fixed{max_horizon: 5},
+      horizon_cfg: HorizonConfig::Pwide{mu: 1.8},
     }
   }
 
-  pub fn try_reset(&self, init_state: TxnState<TxnStateNodeData>, prior_policy: &mut PriorPolicy) {
+  pub fn try_reset(&self, init_state: TxnState<TxnStateNodeData>, prior_policy: &mut PriorPolicy, horizon_cfg: HorizonConfig) {
     let mut inner = self.inner.lock().unwrap();
     if inner.root_node.is_none() {
-      inner.root_node = Some(Arc::new(RwLock::new(Node::new(init_state, prior_policy))));
+      inner.root_node = Some(Arc::new(RwLock::new(Node::new(init_state, prior_policy, horizon_cfg))));
       inner.mean_raw_score = 0.0;
     }
   }
@@ -496,6 +557,7 @@ pub trait TreeOpsTrait {
       rng:          &mut Xorshiftplus128Rng)
       -> TreeResult;
   fn backup(
+      horizon_cfg: HorizonConfig,
       tree_traj: &TreeTraj,
       rollout_traj: &mut RolloutTraj,
       rng: &mut Xorshiftplus128Rng);
@@ -505,12 +567,13 @@ pub struct TreeOps;
 
 impl TreeOps {
   pub fn traverse(
-      root_node:    Arc<RwLock<Node>>,
-      tree_traj:    &mut TreeTraj,
-      prior_policy: &mut PriorPolicy,
-      tree_policy:  &mut TreePolicy<R=Xorshiftplus128Rng>,
-      stats:        &mut SearchStats,
-      rng:          &mut Xorshiftplus128Rng)
+      horizon_cfg:   HorizonConfig,
+      root_node:        Arc<RwLock<Node>>,
+      tree_traj:        &mut TreeTraj,
+      prior_policy:     &mut PriorPolicy,
+      tree_policy:      &mut TreePolicy<R=Xorshiftplus128Rng>,
+      stats:            &mut SearchStats,
+      rng:              &mut Xorshiftplus128Rng)
       -> TreeResult
   {
     tree_traj.reset();
@@ -553,7 +616,7 @@ impl TreeOps {
                       panic!("walk failed due to illegal move: {:?}", e);
                     }
                   }
-                  let mut leaf_node = Arc::new(RwLock::new(Node::new(leaf_state, prior_policy)));
+                  let mut leaf_node = Arc::new(RwLock::new(Node::new(leaf_state, prior_policy, horizon_cfg)));
                   cursor_node.child_nodes[j] = Some(leaf_node.clone());
                   //cursor_node = leaf_node;
                   stats.new_leaf_count += 1;
@@ -592,6 +655,7 @@ impl TreeOps {
   }
 
   pub fn backup(
+      horizon_cfg: HorizonConfig,
       tree_traj: &TreeTraj,
       rollout_traj: &mut RolloutTraj,
       rng: &mut Xorshiftplus128Rng)
@@ -638,7 +702,7 @@ impl TreeOps {
 
     {
       let leaf_node = tree_traj.leaf_node.as_ref().unwrap().read().unwrap();
-      leaf_node.update_visits();
+      leaf_node.update_visits(horizon_cfg);
     }
 
     for &(ref node, update_point, update_j) in tree_traj.backup_triples.iter().rev() {
@@ -657,12 +721,12 @@ impl TreeOps {
         }
       }
 
-      node.update_visits();
+      node.update_visits(horizon_cfg);
     }
   }
 }
 
-#[derive(Clone)]
+/*#[derive(Clone)]
 pub enum EvalWorkerCommand {
   Eval{cfg: EvalWorkerConfig, init_state: TxnState<TxnStateNodeData>},
   EvalGradientsAndBackup,
@@ -803,9 +867,9 @@ impl<W> ParallelMonteCarloEvalServer<W> where W: RolloutPolicy<R=Xorshiftplus128
     self.num_workers
   }
 
-  pub fn worker_batch_size(&self) -> usize {
+  /*pub fn worker_batch_size(&self) -> usize {
     self.worker_batch_size
-  }
+  }*/
 
   pub fn enqueue(&self, tid: usize, cmd: EvalWorkerCommand) {
     self.in_txs[tid].send(cmd).unwrap();
@@ -814,7 +878,7 @@ impl<W> ParallelMonteCarloEvalServer<W> where W: RolloutPolicy<R=Xorshiftplus128
   pub fn join(&self) {
     self.out_barrier.wait();
   }
-}
+}*/
 
 #[derive(Clone)]
 pub enum SearchWorkerCommand {
@@ -825,12 +889,14 @@ pub enum SearchWorkerCommand {
   ResetSearch{
     cfg:            SearchWorkerConfig,
     shared_tree:    SharedTree,
+    green_stone:    Stone,
     init_state:     TxnState<TxnStateNodeData>,
   },
   ResetEval{
     cfg:            SearchWorkerConfig,
     shared_data:    EvalSharedData,
     record_trace:   bool,
+    green_stone:    Stone,
     init_state:     TxnState<TxnStateNodeData>,
   },
   EvalGradientsAndBackup{
@@ -842,6 +908,20 @@ pub enum SearchWorkerCommand {
   SaveRolloutParams{
     save_dir:   PathBuf,
     num_iters:  usize,
+  },
+  /*ResetRollout{
+    cfg:            SearchWorkerConfig,
+    shared_data:    EvalSharedData,
+    init_state:     TxnState<TxnStateNodeData>,
+    record_trace:   bool,
+  },
+  TraceGradientsAndBackup{
+    step_size:      f32,
+    baseline:       f32,
+  },*/
+  SaveOpponentRolloutParamsToMem,
+  LoadOpponentRolloutParamsFromMem{
+    params_blob:    Arc<Vec<u8>>,
   },
   Quit,
 }
@@ -856,8 +936,8 @@ pub struct SearchWorkerConfig {
 }
 
 pub struct ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
-  num_workers:          usize,
-  worker_batch_size:    usize,
+  num_workers:              usize,
+  worker_batch_capacity:    usize,
   pool:         ThreadPool,
   in_txs:       Vec<Sender<SearchWorkerCommand>>,
   out_barrier:  Arc<Barrier>,
@@ -874,7 +954,10 @@ impl<W> Drop for ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
 }
 
 impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
-  pub fn new<B>(num_workers: usize, worker_batch_size: usize, worker_builder: B) -> ParallelMonteCarloSearchServer<W>
+  pub fn new<B>(
+      num_workers: usize,
+      worker_batch_capacity: usize,
+      worker_builder: B) -> ParallelMonteCarloSearchServer<W>
   where B: 'static + SearchPolicyWorkerBuilder<Worker=W> {
     let barrier = Arc::new(Barrier::new(num_workers));
     let pool = ThreadPool::new(num_workers);
@@ -891,21 +974,22 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
 
       pool.execute(move || {
         let mut rng = Xorshiftplus128Rng::new(&mut thread_rng());
-        let mut worker = worker_builder.into_worker(tid, worker_batch_size);
+        let mut worker = worker_builder.into_worker(tid, worker_batch_capacity);
+
         let barrier = barrier;
         let in_rx = in_rx;
         let out_barrier = out_barrier;
 
-        let mut tree_trajs: Vec<_> = repeat(TreeTraj::new()).take(worker_batch_size).collect();
+        let mut tree_trajs: Vec<_> = repeat(TreeTraj::new()).take(worker_batch_capacity).collect();
         let mut leaf_states: Vec<_> = repeat(TxnState::new(
             TxnStateConfig{
               rules:  RuleSet::KgsJapanese.rules(),
               ranks:  [PlayerRank::Dan(9), PlayerRank::Dan(9)],
             },
             TxnStateNodeData::new(),
-        )).take(worker_batch_size).collect();
-        let mut rollout_trajs: Vec<_> = repeat(RolloutTraj::new()).take(worker_batch_size).collect();
-        let mut traces: Vec<_> = repeat(QuickTrace::new()).take(worker_batch_size * 40).collect();
+        )).take(worker_batch_capacity).collect();
+        let mut rollout_trajs: Vec<_> = repeat(RolloutTraj::new()).take(worker_batch_capacity).collect();
+        let mut traces: Vec<_> = repeat(QuickTrace::new()).take(worker_batch_capacity * 40).collect();
 
         loop {
           // FIXME(20151222): for real time search, num batches is just an
@@ -917,11 +1001,11 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
               unimplemented!();
             }
 
-            SearchWorkerCommand::ResetSearch{cfg, shared_tree, init_state} => {
+            SearchWorkerCommand::ResetSearch{cfg, shared_tree, green_stone, init_state} => {
               // XXX(20160107): If the tree has no root node, this sets it;
               // otherwise use the existing root node.
               let tree = shared_tree;
-              tree.try_reset(init_state, worker.prior_policy());
+              tree.try_reset(init_state, worker.prior_policy(), tree.horizon_cfg);
 
               let root_node = {
                 let inner = tree.inner.lock().unwrap();
@@ -930,7 +1014,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
 
               let batch_size = cfg.batch_size;
               let num_batches = cfg.num_batches;
-              assert!(batch_size <= worker_batch_size);
+              assert!(batch_size <= worker_batch_capacity);
 
               let mut worker_mean_score: f32 = 0.0;
               let mut worker_backup_count: f32 = 0.0;
@@ -956,7 +1040,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
                   for batch_idx in 0 .. batch_size {
                     let tree_traj = &mut tree_trajs[batch_idx];
                     let rollout_traj = &mut rollout_trajs[batch_idx];
-                    match TreeOps::traverse(root_node.clone(), tree_traj, prior_policy, tree_policy, &mut stats, &mut rng) {
+                    match TreeOps::traverse(tree.horizon_cfg, root_node.clone(), tree_traj, prior_policy, tree_policy, &mut stats, &mut rng) {
                       TreeResult::Terminal => {
                         let leaf_state = &tree_traj.leaf_node.as_ref().unwrap().read().unwrap().state;
                         rollout_traj.reset_terminal(leaf_state);
@@ -973,6 +1057,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
 
                 worker.rollout_policy().rollout_batch(
                     batch_size,
+                    green_stone,
                     RolloutLeafs::TreeTrajs(&tree_trajs),
                     &mut rollout_trajs,
                     false, &mut traces[batch * batch_size .. (batch + 1) * batch_size],
@@ -984,7 +1069,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
                   let tree_traj = &tree_trajs[batch_idx];
                   let rollout_traj = &mut rollout_trajs[batch_idx];
                   rollout_traj.score(cfg.komi, cfg.prev_expected_score);
-                  TreeOps::backup(tree_traj, rollout_traj, &mut rng);
+                  TreeOps::backup(tree.horizon_cfg, tree_traj, rollout_traj, &mut rng);
                   let raw_score = rollout_traj.raw_score.unwrap();
                   worker_backup_count += 1.0;
                   worker_mean_score += (raw_score - worker_mean_score) / worker_backup_count;
@@ -1001,10 +1086,10 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
               out_barrier.wait();
             }
 
-            SearchWorkerCommand::ResetEval{cfg, shared_data, record_trace, init_state} => {
+            SearchWorkerCommand::ResetEval{cfg, shared_data, record_trace, green_stone, init_state} => {
               let batch_size = cfg.batch_size;
               let num_batches = cfg.num_batches;
-              assert!(batch_size <= worker_batch_size);
+              assert!(batch_size <= worker_batch_capacity);
 
               let mut worker_mean_value: f32 = 0.0;
               let mut worker_backup_count: f32 = 0.0;
@@ -1031,6 +1116,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
 
                 worker.rollout_policy().rollout_batch(
                     batch_size,
+                    green_stone,
                     RolloutLeafs::LeafStates(&leaf_states),
                     &mut rollout_trajs,
                     record_trace, &mut traces[batch * batch_size .. (batch + 1) * batch_size],
@@ -1081,7 +1167,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
               let mut num_traces = 0;
               worker.rollout_policy().init_traces();
               for trace in traces.iter() {
-                if worker.rollout_policy().rollout_quicktrace(trace, baseline) {
+                if worker.rollout_policy().rollout_trace(trace, baseline) {
                   num_traces += 1;
                 }
               }
@@ -1098,6 +1184,16 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
               out_barrier.wait();
             }
 
+            SearchWorkerCommand::SaveOpponentRolloutParamsToMem => {
+              // FIXME(20160207)
+              unimplemented!();
+            }
+
+            SearchWorkerCommand::LoadOpponentRolloutParamsFromMem{params_blob} => {
+              // FIXME(20160207)
+              unimplemented!();
+            }
+
             SearchWorkerCommand::Quit => {
               break;
             }
@@ -1110,8 +1206,8 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
     }
 
     ParallelMonteCarloSearchServer{
-      num_workers:          num_workers,
-      worker_batch_size:    worker_batch_size,
+      num_workers:              num_workers,
+      worker_batch_capacity:    worker_batch_capacity,
       pool:         pool,
       in_txs:       in_txs,
       out_barrier:  out_barrier,
@@ -1123,9 +1219,9 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
     self.num_workers
   }
 
-  pub fn worker_batch_size(&self) -> usize {
-    self.worker_batch_size
-  }
+  /*pub fn worker_batch_size(&self) -> usize {
+    self.worker_batch_capacity
+  }*/
 
   pub fn enqueue(&self, tid: usize, cmd: SearchWorkerCommand) {
     self.in_txs[tid].send(cmd).unwrap();
@@ -1190,6 +1286,7 @@ impl ParallelMonteCarloSearch {
       total_num_rollouts: usize,
       total_batch_size:   usize,
       server:       &ParallelMonteCarloSearchServer<W>,
+      green_stone:  Stone,
       init_state:   &TxnState<TxnStateNodeData>,
       prev_result:  Option<&MonteCarloSearchResult>,
       rng:          &mut Xorshiftplus128Rng)
@@ -1226,6 +1323,7 @@ impl ParallelMonteCarloSearch {
       server.enqueue(tid, SearchWorkerCommand::ResetSearch{
         cfg:            cfg,
         shared_tree:    tree.clone(),
+        green_stone:    Stone::White, // FIXME FIXME FIXME(20160208): use correct color.
         init_state:     init_state.clone(),
       });
     }
@@ -1244,7 +1342,15 @@ impl ParallelMonteCarloSearch {
     };
     let root_node = root_node.read().unwrap();
     let root_trials = root_node.values.num_trials_float();
+    //let root_ratios = root_node.values.succ_ratios_float();
+    // XXX(20160209): Maximize the winning rate rather than the number of plays.
+    // The argument is that it should be highly unlikely for an arm with high
+    // value to be played only a small number of times.
+    // FIXME(20160209): the above, except in the case of progressive widening
+    // horizon, where there _may_ be such arms; a hacky remedy may be to stop
+    // widening at some fixed fraction of the total rollout number.
     let (action, adj_value, raw_value) = if let Some(argmax_j) = array_argmax(&root_trials) {
+    //let (action, adj_value, raw_value) = if let Some(argmax_j) = array_argmax(&root_ratios) {
       stats.argmax_rank = Some(argmax_j);
       stats.argmax_ntrials = root_trials[argmax_j] as usize;
       let argmax_point = root_node.valid_moves[argmax_j];
@@ -1306,6 +1412,7 @@ impl ParallelMonteCarloEval {
       total_num_rollouts: usize,
       total_batch_size:   usize,
       server:       &ParallelMonteCarloSearchServer<W>,
+      green_stone:  Stone,
       init_state:   &TxnState<TxnStateNodeData>,
       //eval_mode:    RolloutMode,
       rng:          &mut Xorshiftplus128Rng)
@@ -1341,6 +1448,7 @@ impl ParallelMonteCarloEval {
         cfg:            cfg,
         shared_data:    shared_data.clone(),
         record_trace:   false,
+        green_stone:    green_stone,
         init_state:     init_state.clone(),
       });
     }
@@ -1374,6 +1482,7 @@ impl ParallelMonteCarloBackup {
       target_value:       f32,
       eval_value:         f32,
       server:       &ParallelMonteCarloSearchServer<W>,
+      green_stone:  Stone,
       init_state:   &TxnState<TxnStateNodeData>,
       //eval_mode:    RolloutMode,
       rng:          &mut Xorshiftplus128Rng)
@@ -1410,6 +1519,7 @@ impl ParallelMonteCarloBackup {
         cfg:            cfg,
         shared_data:    shared_data.clone(),
         record_trace:   true,
+        green_stone:    green_stone,
         init_state:     init_state.clone(),
       });
     }
@@ -1453,5 +1563,49 @@ impl ParallelMonteCarloSave {
       });
     }
     server.join();
+  }
+}
+
+pub struct ParallelMonteCarloRollout;
+
+impl ParallelMonteCarloRollout {
+  pub fn join<W>(&self,
+      server:       &ParallelMonteCarloSearchServer<W>,
+      batch_size:   usize,
+      init_state:   TxnState<TxnStateNodeData>,
+      rng:          &mut Xorshiftplus128Rng)
+      where W: SearchPolicyWorker
+  {
+    // FIXME(20160207)
+    unimplemented!();
+  }
+}
+
+pub struct ParallelMonteCarloRolloutBackup;
+
+impl ParallelMonteCarloRolloutBackup {
+  pub fn join<W>(&self,
+      server:       &ParallelMonteCarloSearchServer<W>,
+      batch_size:   usize,
+      step_size:    f32,
+      baseline:     f32,
+      rng:          &mut Xorshiftplus128Rng)
+      where W: SearchPolicyWorker
+  {
+    // FIXME(20160207)
+    unimplemented!();
+  }
+}
+
+pub struct ParallelMonteCarloLoadOpponentParams;
+
+impl ParallelMonteCarloLoadOpponentParams {
+  pub fn join<W>(&self,
+      server:       &ParallelMonteCarloSearchServer<W>,
+      params_blob:  Arc<Vec<u8>>)
+      where W: SearchPolicyWorker
+  {
+    // FIXME(20160207)
+    unimplemented!();
   }
 }

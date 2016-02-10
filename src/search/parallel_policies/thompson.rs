@@ -22,8 +22,12 @@ pub struct ThompsonTreePolicy {
 impl ThompsonTreePolicy {
   pub fn new() -> ThompsonTreePolicy {
     ThompsonTreePolicy{
+      /*prior:        false,
+      prior_equiv:  1.0,*/
       prior:        true,
-      prior_equiv:  100.0,
+      prior_equiv:  32.0,
+      /*prior:        true,
+      prior_equiv:  100.0,*/
       rave:         true,
       rave_equiv:   3000.0,
       tmp_values:   repeat(0.0).take(Board::SIZE).collect(),
@@ -38,23 +42,23 @@ impl TreePolicy for ThompsonTreePolicy {
       let n = node.values.num_trials[j].load(Ordering::Acquire) as f32;
       let s = node.values.num_succs[j].load(Ordering::Acquire) as f32;
       let (pn, ps) = if !self.prior {
-        (0.0, 0.0)
+        (1.0, 1.0)
       } else {
         (self.prior_equiv, self.prior_equiv * node.values.prior_values[j])
       };
       let rn = node.values.num_trials_rave[j].load(Ordering::Acquire) as f32;
       let (es, ef) = if !self.rave || rn == 0.0 {
-        ((s + ps), (n + pn) - (s + ps))
+        ((s + ps), 0.0f32.max((n + pn) - (s + ps)))
       } else {
         let rs = node.values.num_succs_rave[j].load(Ordering::Acquire) as f32;
         let beta_rave = rn / (rn + (n + pn) + (n + pn) * rn / self.rave_equiv);
         let ev =
-            0.0f32.max(1.0 - beta_rave) * ((s + ps) / (n + pn))
+            0.0f32.max((1.0 - beta_rave) * ((s + ps) / (n + pn)))
             + beta_rave * (rs / rn)
         ;
         // FIXME(20151124): rounding?
         let es = ev * (n + pn);
-        let ef = 0.0f32.max(1.0 - ev) * (n + pn);
+        let ef = 0.0f32.max((1.0 - ev) * (n + pn));
         (es, ef)
       };
       // XXX: Sample two gamma distributions to get a beta distributed

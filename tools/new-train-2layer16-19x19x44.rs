@@ -57,44 +57,37 @@ fn train() {
 
   let input_channels = 44;
 
-  let conv1_channels = 96;
-  let hidden_channels = 384;
-
-  // XXX(20160104): combos that work (maybe?):
-  // - LR 0.01, momentum 0.9, init 0.05 (only worked once, unstable init?)
-  // - LR 0.005, momentum 0.9, init 0.01 (currently running; failed once, worked 2nd time?)
-  // - LR 0.005, momentum 0.1, init 0.05 (works)
-  // - LR 0.01, momentum 0.1, init 0.05 (also works)
-  // - LR 0.05, momentum 0.1, init 0.05 (does not work)
+  let hidden_channels = 16;
 
   let sgd_opt_cfg = SgdOptConfig{
-    //init_t:         240000,
-    //init_t:         279000,
-    init_t:         720000,
+    init_t:         0,
     minibatch_size: num_workers * batch_size,
     step_size:      StepSizeSchedule::Decay{
-      //init_step:    0.000244140625,
-      //init_step:    0.00048828125,
-      //init_step:    0.0009765625,
-      init_step:    0.015625,
-      decay_rate:   0.125,
-      //decay_iters:  240000,
-      //decay_iters:  480000,
-      decay_iters:  360000,
+      init_step:    0.0625,
+      //decay_rate:   0.25,
+      decay_rate:   0.5,
+      decay_iters:  60000,
     },
+    /*step_size:      StepSizeSchedule::DecayOnce{
+      step0:        0.0625,
+      step0_iters:  60000,
+      final_step:   0.015625,
+    },*/
     //momentum:       0.5,
-    momentum:       0.0,
+    //momentum:       0.0,
+    momentum:       0.125,
     l2_reg_coef:    0.0,
-    display_iters:  20,
-    /*valid_iters:    1500,
-    save_iters:     1500,*/
-    valid_iters:    3000,
-    save_iters:     3000,
+    display_iters:  100,
+    valid_iters:    10000,
+    save_iters:     10000,
   };
   let datum_cfg = SampleDatumConfig::BitsThenBytes3d{scale: 255};
-  let train_label_cfg = SampleLabelConfig::LookaheadCategories{
+  /*let train_label_cfg = SampleLabelConfig::LookaheadCategories{
     num_categories: 361,
     lookahead:      3,
+  };*/
+  let train_label_cfg = SampleLabelConfig::Category{
+    num_categories: 361,
   };
   let valid_label_cfg = SampleLabelConfig::Category{
     num_categories: 361,
@@ -111,23 +104,14 @@ fn train() {
   };
   let conv1_layer_cfg = Conv2dLayerConfig{
     in_dims:        (19, 19, input_channels),
-    conv_size:      5,
+    conv_size:      9,
     conv_stride:    1,
-    conv_pad:       2,
-    out_channels:   conv1_channels,
-    act_func:       ActivationFunction::Rect,
-    init_weights:   ParamsInitialization::Uniform{half_range: 0.05},
-  };
-  let conv2_layer_cfg = Conv2dLayerConfig{
-    in_dims:        (19, 19, conv1_channels),
-    conv_size:      3,
-    conv_stride:    1,
-    conv_pad:       1,
+    conv_pad:       4,
     out_channels:   hidden_channels,
     act_func:       ActivationFunction::Rect,
     init_weights:   ParamsInitialization::Uniform{half_range: 0.05},
   };
-  let inner_conv_layer_cfg = Conv2dLayerConfig{
+  /*let inner_conv_layer_cfg = Conv2dLayerConfig{
     in_dims:        (19, 19, hidden_channels),
     conv_size:      3,
     conv_stride:    1,
@@ -135,38 +119,33 @@ fn train() {
     out_channels:   hidden_channels,
     act_func:       ActivationFunction::Rect,
     init_weights:   ParamsInitialization::Uniform{half_range: 0.05},
-  };
+  };*/
   let final_conv_layer_cfg = Conv2dLayerConfig{
     in_dims:        (19, 19, hidden_channels),
     conv_size:      3,
     conv_stride:    1,
     conv_pad:       1,
-    out_channels:   3,
+    out_channels:   1,
     act_func:       ActivationFunction::Identity,
     init_weights:   ParamsInitialization::Uniform{half_range: 0.05},
   };
-  let loss_layer_cfg = MultiCategoricalLossLayerConfig{
+  /*let loss_layer_cfg = MultiCategoricalLossLayerConfig{
     num_categories:     361,
     train_lookahead:    3,
     infer_lookahead:    1,
+  };*/
+  let loss_layer_cfg = CategoricalLossLayerConfig{
+    num_categories:     361,
   };
 
   let mut arch_cfg = PipelineArchConfig::new();
   arch_cfg
     .data3d(data_layer_cfg)
     .conv2d(conv1_layer_cfg)
-    .conv2d(conv2_layer_cfg)
-    .conv2d(inner_conv_layer_cfg)
-    .conv2d(inner_conv_layer_cfg)
-    .conv2d(inner_conv_layer_cfg)
-    .conv2d(inner_conv_layer_cfg)
-    .conv2d(inner_conv_layer_cfg)
-    .conv2d(inner_conv_layer_cfg)
-    .conv2d(inner_conv_layer_cfg)
-    .conv2d(inner_conv_layer_cfg)
-    .conv2d(inner_conv_layer_cfg)
+    //.conv2d(inner_conv_layer_cfg)
     .conv2d(final_conv_layer_cfg)
-    .multi_softmax_kl_loss(loss_layer_cfg);
+    //.multi_softmax_kl_loss(loss_layer_cfg);
+    .softmax_kl_loss(loss_layer_cfg);
 
   let shared_seed = [thread_rng().next_u64(), thread_rng().next_u64()];
   let arch_shared = for_all_devices(num_workers, |contexts| {
@@ -186,7 +165,8 @@ fn train() {
         let mut arch_worker = PipelineArchWorker::new(
             batch_size,
             arch_cfg,
-            PathBuf::from("models/tmp_gogodb_w2015_alphav2_new_action_12layer384_19x19x44"),
+            PathBuf::from("models/tmp2_gogodb_w2015_alphav2_new_action_2layer16_19x19x44.half_decay"),
+            //PathBuf::from("models/tmp_gogodb_w2015_alphav2_new_action_3layer32_19x19x44.decay_once_momentum"),
             tid,
             shared_seed,
             &arch_shared,
@@ -194,6 +174,7 @@ fn train() {
             &ctx,
         );
 
+        //let dataset_cfg = DatasetConfig::open(&PathBuf::from("data/kgs_ugo_201505_19x19x37_episode.v3.data"));
         let dataset_cfg = DatasetConfig::open(&PathBuf::from("data/gogodb_w2015_alphav2_19x19x44_episode.data"));
 
         let mut train_data =
