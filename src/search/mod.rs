@@ -33,3 +33,17 @@ pub struct SearchStats {
   pub term_count:       i32,
   pub nonterm_count:    i32,
 }
+
+pub fn translate_score_to_reward(side: Stone, score: f32) -> usize {
+  match (side, score >= 0.0) {
+    (Stone::Black, false) |
+    (Stone::White, true)  => {
+      1
+    }
+    (Stone::Black, true)  |
+    (Stone::White, false) => {
+      0
+    }
+    _ => unreachable!(),
+  }
+}

@@ -6,6 +6,7 @@ use convnet_new::{
   /*build_3layer32_19x19x16_arch,
   build_12layer384_19x19x30_arch,*/
   build_2layer16_19x19x44_arch_nodir,
+  build_3layer32_19x19x44_arch_nodir,
   build_12layer384_19x19x44_arch_nodir,
 };
 use discrete::{DiscreteFilter};
@@ -17,11 +18,12 @@ use search::parallel_policies::{
   RolloutPolicyBuilder, RolloutMode, RolloutLeafs, RolloutPolicy,
 };
 use search::parallel_policies::thompson::{ThompsonTreePolicy};
-use search::parallel_tree::{TreeTraj, RolloutTraj, Trace, QuickTrace};
+use search::parallel_tree::{TreeTraj, RolloutTraj, QuickTrace};
 use txnstate::{TxnState, check_good_move_fast};
 use txnstate::extras::{TxnStateNodeData, for_each_touched_empty};
 
 use array_cuda::device::{DeviceContext, for_all_devices};
+use float::ord::{F32SupNan};
 use rembrandt::arch_new::{
   Worker, ArchWorker,
   PipelineArchConfig, PipelineArchSharedData, PipelineArchWorker,
@@ -56,9 +58,15 @@ impl ConvnetPolicyWorkerBuilder {
     // FIXME(20160121): temporarily using existing balance run.
     /*let rollout_arch_cfg = build_2layer16_19x19x16_arch_nodir(worker_batch_size);
     let rollout_save_path = PathBuf::from("experiments/models_balance/test");*/
+
     //let (rollout_arch_cfg, rollout_save_path) = build_2layer16_19x19x16_arch(worker_batch_size);
+
     let rollout_arch_cfg = build_2layer16_19x19x44_arch_nodir(worker_batch_size);
     let rollout_save_path = PathBuf::from("models/gogodb_w2015_alphav2_new_action_2layer16_19x19x44_run2.saved");
+    //let rollout_save_path = PathBuf::from("models/balance_2layer16_19x19x44_run1.saved");
+
+    //let rollout_arch_cfg = build_3layer32_19x19x44_arch_nodir(worker_batch_size);
+    //let rollout_save_path = PathBuf::from("models/gogodb_w2015_alphav2_new_action_3layer32_19x19x44_run2.saved");
 
     let prior_shared = for_all_devices(num_workers, |contexts| {
       Arc::new(PipelineArchSharedData::new(num_workers, &prior_arch_cfg, contexts))
@@ -275,7 +283,7 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
       for batch_idx in 0 .. batch_size {
         if rollout_trajs[batch_idx].rollout {
           traces[batch_idx].reset();
-          traces[batch_idx].init_state = Some(rollout_trajs[batch_idx].sim_state.clone());
+          traces[batch_idx].init_state = Some(rollout_trajs[batch_idx].init_state.clone());
         }
       }
     }
@@ -300,8 +308,6 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
       }
 
       self.arch.input_layer().load_frames(batch_size, &ctx);
-      // FIXME(20151125): mask softmax output with valid moves.
-      //self.arch.loss_layer().load_masks(batch_size, &ctx);
       self.arch.forward(batch_size, Phase::Inference, &ctx);
       self.arch.loss_layer().store_probs(batch_size, &ctx);
 
@@ -319,12 +325,12 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
         if !rollout_trajs[batch_idx].rollout {
           continue;
         }
-
-        let sim_turn = rollout_trajs[batch_idx].sim_state.current_turn();
-        let sim_turn_off = sim_turn.offset();
         if turn_pass[0][batch_idx] && turn_pass[1][batch_idx] {
           continue;
         }
+
+        let sim_turn = rollout_trajs[batch_idx].sim_state.current_turn();
+        let sim_turn_off = sim_turn.offset();
 
         if record_trace {
           traces[batch_idx].actions.push((sim_turn, Action::Pass));
@@ -433,6 +439,7 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
         assert!(spin_count <= Board::SIZE);
 
         // XXX: Bad moves are not technically illegal.
+        // FIXME(20160217): insert bad moves into valid moves vector too.
         valid_move_set[sim_turn_off][batch_idx].extend(bad_moves[sim_turn_off][batch_idx].iter().map(|&pt| pt.idx()));
 
         turn_pass[sim_turn_off][batch_idx] = false;
@@ -534,10 +541,6 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
     true
   }
 
-  fn rollout_green_trace(&mut self, green_stone: Stone, trace: &QuickTrace, baseline: f32) -> bool {
-    unimplemented!();
-  }
-
   fn backup_traces(&mut self, learning_rate: f32, target_value: f32, eval_value: f32, num_traces: usize) {
     let ctx = (*self.context).as_ref();
     self.arch.dev_allreduce_sum_gradients(&ctx);
@@ -555,6 +558,109 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
       let ctx = (*self.context).as_ref();
       self.arch.save_layer_params_dir(save_dir, t, &ctx);
     }
+  }
+
+  fn rollout_green_trace(&mut self, baseline: f32, green_stone: Stone, trace: &QuickTrace) -> bool {
+    unimplemented!();
+  }
+
+  fn backup_green_traces(&mut self, step_size: f32, num_traces: usize, green_stone: Stone) {
+    unimplemented!();
+  }
+}
+
+#[derive(Clone)]
+pub struct BiConvnetPolicyWorkerBuilder {
+  rollout_arch_cfg:     PipelineArchConfig,
+  rollout_save_path:    PathBuf,
+  green_rollout_shared:     Arc<PipelineArchSharedData>,
+  green_rollout_shared2:    Arc<()>,
+  red_rollout_shared:       Arc<PipelineArchSharedData>,
+  red_rollout_shared2:      Arc<()>,
+}
+
+impl BiConvnetPolicyWorkerBuilder {
+  pub fn new(num_workers: usize, worker_batch_size: usize) -> BiConvnetPolicyWorkerBuilder {
+    let rollout_arch_cfg = build_2layer16_19x19x44_arch_nodir(worker_batch_size);
+    let rollout_save_path = PathBuf::from("models/gogodb_w2015_alphav2_new_action_2layer16_19x19x44_run2.saved");
+
+    let green_rollout_shared = for_all_devices(num_workers, |contexts| {
+      Arc::new(PipelineArchSharedData::new(num_workers, &rollout_arch_cfg, contexts))
+    });
+    let red_rollout_shared = for_all_devices(num_workers, |contexts| {
+      Arc::new(PipelineArchSharedData::new(num_workers, &rollout_arch_cfg, contexts))
+    });
+
+    BiConvnetPolicyWorkerBuilder{
+      rollout_arch_cfg:     rollout_arch_cfg,
+      rollout_save_path:    rollout_save_path,
+      green_rollout_shared:     green_rollout_shared,
+      green_rollout_shared2:    Arc::new(()),
+      red_rollout_shared:       red_rollout_shared,
+      red_rollout_shared2:      Arc::new(()),
+    }
+  }
+}
+
+impl SearchPolicyWorkerBuilder for BiConvnetPolicyWorkerBuilder {
+  type Worker = BiConvnetPolicyWorker;
+
+  fn into_worker(self, tid: usize, worker_batch_size: usize) -> BiConvnetPolicyWorker {
+    let context = Rc::new(DeviceContext::new(tid));
+    let ctx = (*context).as_ref();
+    let mut green_rollout_arch = PipelineArchWorker::new(
+        worker_batch_size,
+        self.rollout_arch_cfg.clone(),
+        self.rollout_save_path.clone(),
+        tid,
+        [thread_rng().next_u64(), thread_rng().next_u64()],
+        &self.green_rollout_shared.clone(),
+        self.green_rollout_shared2.clone(),
+        &ctx,
+    );
+    green_rollout_arch.load_layer_params(None, &ctx);
+    let mut red_rollout_arch = PipelineArchWorker::new(
+        worker_batch_size,
+        self.rollout_arch_cfg,
+        self.rollout_save_path,
+        tid,
+        [thread_rng().next_u64(), thread_rng().next_u64()],
+        &self.red_rollout_shared,
+        self.red_rollout_shared2,
+        &ctx,
+    );
+    red_rollout_arch.load_layer_params(None, &ctx);
+    let rollout_policy = BiConvnetRolloutPolicy{
+      context:      context.clone(),
+      batch_size:   worker_batch_size,
+      green_arch:   green_rollout_arch,
+      red_arch:     red_rollout_arch,
+    };
+    BiConvnetPolicyWorker{
+      rollout_policy:   rollout_policy,
+    }
+  }
+}
+
+pub struct BiConvnetPolicyWorker {
+  rollout_policy:   BiConvnetRolloutPolicy,
+}
+
+impl SearchPolicyWorker for BiConvnetPolicyWorker {
+  fn prior_policy(&mut self) -> &mut PriorPolicy {
+    unimplemented!();
+  }
+
+  fn tree_policy(&mut self) -> &mut TreePolicy<R=Xorshiftplus128Rng> {
+    unimplemented!();
+  }
+
+  fn exploration_policies(&mut self) -> (&mut PriorPolicy, &mut TreePolicy<R=Xorshiftplus128Rng>) {
+    unimplemented!();
+  }
+
+  fn rollout_policy(&mut self) -> &mut RolloutPolicy<R=Xorshiftplus128Rng> {
+    &mut self.rollout_policy
   }
 }
 
@@ -617,7 +723,7 @@ impl RolloutPolicy for BiConvnetRolloutPolicy {
       for batch_idx in 0 .. batch_size {
         if rollout_trajs[batch_idx].rollout {
           traces[batch_idx].reset();
-          traces[batch_idx].init_state = Some(rollout_trajs[batch_idx].sim_state.clone());
+          traces[batch_idx].init_state = Some(rollout_trajs[batch_idx].init_state.clone());
         }
       }
     }
@@ -652,11 +758,6 @@ impl RolloutPolicy for BiConvnetRolloutPolicy {
         //self.arch.loss_layer().preload_mask_buf(batch_idx, valid_move_set[turn.offset()][batch_idx].as_slice());
       }
 
-      /*self.arch.input_layer().load_frames(batch_size, &ctx);
-      // FIXME(20151125): mask softmax output with valid moves.
-      //self.arch.loss_layer().load_masks(batch_size, &ctx);
-      self.arch.forward(batch_size, Phase::Inference, &ctx);
-      self.arch.loss_layer().store_probs(batch_size, &ctx);*/
       match green_stone == t_turn {
         true  => {
           self.green_arch.input_layer().load_frames(batch_size, &ctx);
@@ -669,6 +770,9 @@ impl RolloutPolicy for BiConvnetRolloutPolicy {
           self.red_arch.loss_layer().store_probs(batch_size, &ctx);
         }
       }
+
+      // FIXME(20160210): below is the _greedy_ action selection.
+      if false {
 
       {
         //let batch_probs = self.arch.loss_layer().get_probs(batch_size).as_slice();
@@ -684,144 +788,201 @@ impl RolloutPolicy for BiConvnetRolloutPolicy {
           if !rollout_trajs[batch_idx].rollout {
             continue;
           }
-          filters[batch_idx].reset(&batch_probs[batch_idx * Board::SIZE .. (batch_idx + 1) * Board::SIZE]);
+
+          let mut ranked_probs: Vec<_> = batch_probs[batch_idx * Board::SIZE .. (batch_idx + 1) * Board::SIZE].iter()
+            .enumerate()
+            .filter_map(|(k, &x)| {
+              Some((F32SupNan(-x), k))
+            })
+            .collect();
+          ranked_probs.sort();
+          assert_eq!(361, ranked_probs.len());
+
+          // FIXME(20160210): try to place until we find a legal one.
+          let sim_turn = rollout_trajs[batch_idx].sim_state.current_turn();
+          let mut sim_action = Action::Pass;
+          for k in 0 .. Board::SIZE {
+            let place_point = Point(ranked_probs[k].1 as i16);
+            if rollout_trajs[batch_idx].sim_state.try_action(sim_turn, Action::Place{point: place_point}).is_err() {
+              rollout_trajs[batch_idx].sim_state.undo();
+              continue;
+            } else {
+              rollout_trajs[batch_idx].sim_state.commit();
+              sim_action = Action::Place{point: place_point};
+              break;
+            }
+          }
+          if let Action::Pass = sim_action {
+            assert!(rollout_trajs[batch_idx].sim_state.try_action(sim_turn, Action::Pass).is_ok());
+            rollout_trajs[batch_idx].sim_state.commit();
+          }
+          if record_trace {
+            traces[batch_idx].actions.push((sim_turn, sim_action));
+          }
         }
       }
 
-      for batch_idx in 0 .. batch_size {
-        if !rollout_trajs[batch_idx].rollout {
-          continue;
-        }
+      } // if false
 
-        let sim_turn = rollout_trajs[batch_idx].sim_state.current_turn();
-        let sim_turn_off = sim_turn.offset();
-        if turn_pass[0][batch_idx] && turn_pass[1][batch_idx] {
-          continue;
-        }
+      // FIXME(20160210): below is the _stochastic_ action selection.
+      if true{
 
-        if record_trace {
-          traces[batch_idx].actions.push((sim_turn, Action::Pass));
-        }
-
-        let mut made_move = false;
-        let mut spin_count = 0;
-        while !valid_move_set[sim_turn_off][batch_idx].is_empty() {
-          if let Some(p) = filters[batch_idx].sample(rng) {
-            filters[batch_idx].zero(p);
-            let sim_point = Point::from_idx(p);
-            if !valid_move_set[sim_turn_off][batch_idx].contains(p) {
-              spin_count += 1;
+        {
+          //let batch_probs = self.arch.loss_layer().get_probs(batch_size).as_slice();
+          let batch_probs = match green_stone == t_turn {
+            true  => {
+              self.green_arch.loss_layer().get_probs(batch_size).as_slice()
+            }
+            false => {
+              self.red_arch.loss_layer().get_probs(batch_size).as_slice()
+            }
+          };
+          for batch_idx in 0 .. batch_size {
+            if !rollout_trajs[batch_idx].rollout {
               continue;
-            } else if !check_good_move_fast(
-                &rollout_trajs[batch_idx].sim_state.position,
-                &rollout_trajs[batch_idx].sim_state.chains,
-                sim_turn, sim_point)
-            {
-              valid_move_set[sim_turn_off][batch_idx].remove(p);
-              bad_moves[sim_turn_off][batch_idx].push(sim_point);
-              spin_count += 1;
-              continue;
-            } else {
-              valid_move_set[sim_turn_off][batch_idx].remove(p);
-              if rollout_trajs[batch_idx].sim_state.try_place(sim_turn, sim_point).is_err() {
-                rollout_trajs[batch_idx].sim_state.undo();
+            }
+            filters[batch_idx].reset(&batch_probs[batch_idx * Board::SIZE .. (batch_idx + 1) * Board::SIZE]);
+          }
+        }
+
+        for batch_idx in 0 .. batch_size {
+          if !rollout_trajs[batch_idx].rollout {
+            continue;
+          }
+
+          let sim_turn = rollout_trajs[batch_idx].sim_state.current_turn();
+          let sim_turn_off = sim_turn.offset();
+          if turn_pass[0][batch_idx] && turn_pass[1][batch_idx] {
+            continue;
+          }
+
+          if record_trace {
+            traces[batch_idx].actions.push((sim_turn, Action::Pass));
+          }
+
+          let mut made_move = false;
+          let mut spin_count = 0;
+          while !valid_move_set[sim_turn_off][batch_idx].is_empty() {
+            if let Some(p) = filters[batch_idx].sample(rng) {
+              filters[batch_idx].zero(p);
+              let sim_point = Point::from_idx(p);
+              if !valid_move_set[sim_turn_off][batch_idx].contains(p) {
+                spin_count += 1;
+                continue;
+              } else if !check_good_move_fast(
+                  &rollout_trajs[batch_idx].sim_state.position,
+                  &rollout_trajs[batch_idx].sim_state.chains,
+                  sim_turn, sim_point)
+              {
+                valid_move_set[sim_turn_off][batch_idx].remove(p);
+                bad_moves[sim_turn_off][batch_idx].push(sim_point);
                 spin_count += 1;
                 continue;
               } else {
-                if record_trace {
-                  let trace_len = traces[batch_idx].actions.len();
-                  traces[batch_idx].actions[trace_len - 1].1 = Action::Place{point: sim_point};
-                }
-                rollout_trajs[batch_idx].sim_state.commit();
-                for_each_touched_empty(
-                    &rollout_trajs[batch_idx].sim_state.position,
-                    &rollout_trajs[batch_idx].sim_state.chains,
-                    |_, _, pt|
-                {
-                  //valid_move_set[sim_turn_off][batch_idx].insert(pt.idx());
-                  let pt = pt.idx();
-                  if !valid_move_set[sim_turn_off][batch_idx].contains(pt) {
-                    valid_move_set[sim_turn_off][batch_idx].insert(pt);
-                    valid_move_iter[sim_turn_off][batch_idx].push(pt);
-                  }
-                });
-                made_move = true;
-                spin_count += 1;
-                break;
-              }
-            }
-          } else {
-            // XXX(20151207): Remaining moves were deemed to have probability zero,
-            // so finish the rollout using uniform policy.
-            /*break;*/
-            while !valid_move_set[sim_turn_off][batch_idx].is_empty() {
-              spin_count += 1;
-              if let Some(p) = choose_without_replace(&mut valid_move_iter[sim_turn_off][batch_idx], rng) {
-                let sim_point = Point::from_idx(p);
-                if !valid_move_set[sim_turn_off][batch_idx].contains(p) {
-                  spin_count += 1;
-                  continue;
-                } else if !check_good_move_fast(
-                    &rollout_trajs[batch_idx].sim_state.position,
-                    &rollout_trajs[batch_idx].sim_state.chains,
-                    sim_turn, sim_point)
-                {
-                  valid_move_set[sim_turn_off][batch_idx].remove(p);
-                  bad_moves[sim_turn_off][batch_idx].push(sim_point);
+                valid_move_set[sim_turn_off][batch_idx].remove(p);
+                if rollout_trajs[batch_idx].sim_state.try_place(sim_turn, sim_point).is_err() {
+                  rollout_trajs[batch_idx].sim_state.undo();
                   spin_count += 1;
                   continue;
                 } else {
-                  valid_move_set[sim_turn_off][batch_idx].remove(p);
-                  if rollout_trajs[batch_idx].sim_state.try_place(sim_turn, sim_point).is_err() {
-                    rollout_trajs[batch_idx].sim_state.undo();
+                  if record_trace {
+                    let trace_len = traces[batch_idx].actions.len();
+                    traces[batch_idx].actions[trace_len - 1].1 = Action::Place{point: sim_point};
+                  }
+                  rollout_trajs[batch_idx].sim_state.commit();
+                  for_each_touched_empty(
+                      &rollout_trajs[batch_idx].sim_state.position,
+                      &rollout_trajs[batch_idx].sim_state.chains,
+                      |_, _, pt|
+                  {
+                    //valid_move_set[sim_turn_off][batch_idx].insert(pt.idx());
+                    let pt = pt.idx();
+                    if !valid_move_set[sim_turn_off][batch_idx].contains(pt) {
+                      valid_move_set[sim_turn_off][batch_idx].insert(pt);
+                      valid_move_iter[sim_turn_off][batch_idx].push(pt);
+                    }
+                  });
+                  made_move = true;
+                  spin_count += 1;
+                  break;
+                }
+              }
+            } else {
+              break;
+
+              /*// XXX(20151207): Remaining moves were deemed to have probability zero,
+              // so finish the rollout using uniform policy.
+              while !valid_move_set[sim_turn_off][batch_idx].is_empty() {
+                spin_count += 1;
+                if let Some(p) = choose_without_replace(&mut valid_move_iter[sim_turn_off][batch_idx], rng) {
+                  let sim_point = Point::from_idx(p);
+                  if !valid_move_set[sim_turn_off][batch_idx].contains(p) {
+                    spin_count += 1;
+                    continue;
+                  } else if !check_good_move_fast(
+                      &rollout_trajs[batch_idx].sim_state.position,
+                      &rollout_trajs[batch_idx].sim_state.chains,
+                      sim_turn, sim_point)
+                  {
+                    valid_move_set[sim_turn_off][batch_idx].remove(p);
+                    bad_moves[sim_turn_off][batch_idx].push(sim_point);
                     spin_count += 1;
                     continue;
                   } else {
-                    if record_trace {
-                      let trace_len = traces[batch_idx].actions.len();
-                      traces[batch_idx].actions[trace_len - 1].1 = Action::Place{point: sim_point};
-                    }
-                    rollout_trajs[batch_idx].sim_state.commit();
-                    for_each_touched_empty(
-                        &rollout_trajs[batch_idx].sim_state.position,
-                        &rollout_trajs[batch_idx].sim_state.chains,
-                        |_, _, pt|
-                    {
-                      //valid_move_set[sim_turn_off][batch_idx].insert(pt.idx());
-                      let pt = pt.idx();
-                      if !valid_move_set[sim_turn_off][batch_idx].contains(pt) {
-                        valid_move_set[sim_turn_off][batch_idx].insert(pt);
-                        valid_move_iter[sim_turn_off][batch_idx].push(pt);
+                    valid_move_set[sim_turn_off][batch_idx].remove(p);
+                    if rollout_trajs[batch_idx].sim_state.try_place(sim_turn, sim_point).is_err() {
+                      rollout_trajs[batch_idx].sim_state.undo();
+                      spin_count += 1;
+                      continue;
+                    } else {
+                      if record_trace {
+                        let trace_len = traces[batch_idx].actions.len();
+                        traces[batch_idx].actions[trace_len - 1].1 = Action::Place{point: sim_point};
                       }
-                    });
-                    made_move = true;
-                    spin_count += 1;
-                    break;
+                      rollout_trajs[batch_idx].sim_state.commit();
+                      for_each_touched_empty(
+                          &rollout_trajs[batch_idx].sim_state.position,
+                          &rollout_trajs[batch_idx].sim_state.chains,
+                          |_, _, pt|
+                      {
+                        //valid_move_set[sim_turn_off][batch_idx].insert(pt.idx());
+                        let pt = pt.idx();
+                        if !valid_move_set[sim_turn_off][batch_idx].contains(pt) {
+                          valid_move_set[sim_turn_off][batch_idx].insert(pt);
+                          valid_move_iter[sim_turn_off][batch_idx].push(pt);
+                        }
+                      });
+                      made_move = true;
+                      spin_count += 1;
+                      break;
+                    }
                   }
                 }
               }
+              break;*/
+            }
+          }
+          assert!(spin_count <= Board::SIZE, "too many spins: {}", spin_count);
+
+          // XXX: Bad moves are not technically illegal.
+          valid_move_set[sim_turn_off][batch_idx].extend(bad_moves[sim_turn_off][batch_idx].iter().map(|&pt| pt.idx()));
+
+          turn_pass[sim_turn_off][batch_idx] = false;
+          if !made_move {
+            rollout_trajs[batch_idx].sim_state.try_action(sim_turn, Action::Pass);
+            rollout_trajs[batch_idx].sim_state.commit();
+            for_each_touched_empty(&rollout_trajs[batch_idx].sim_state.position, &rollout_trajs[batch_idx].sim_state.chains, |position, chains, pt| {
+              valid_move_set[sim_turn_off][batch_idx].insert(pt.idx());
+            });
+            turn_pass[sim_turn_off][batch_idx] = true;
+            if turn_pass[0][batch_idx] && turn_pass[1][batch_idx] {
+              num_both_passed += 1;
+              continue;
             }
           }
         }
-        assert!(spin_count <= Board::SIZE);
 
-        // XXX: Bad moves are not technically illegal.
-        valid_move_set[sim_turn_off][batch_idx].extend(bad_moves[sim_turn_off][batch_idx].iter().map(|&pt| pt.idx()));
-
-        turn_pass[sim_turn_off][batch_idx] = false;
-        if !made_move {
-          rollout_trajs[batch_idx].sim_state.try_action(sim_turn, Action::Pass);
-          rollout_trajs[batch_idx].sim_state.commit();
-          for_each_touched_empty(&rollout_trajs[batch_idx].sim_state.position, &rollout_trajs[batch_idx].sim_state.chains, |position, chains, pt| {
-            valid_move_set[sim_turn_off][batch_idx].insert(pt.idx());
-          });
-          turn_pass[sim_turn_off][batch_idx] = true;
-          if turn_pass[0][batch_idx] && turn_pass[1][batch_idx] {
-            num_both_passed += 1;
-            continue;
-          }
-        }
-      }
+      } // if false
 
       t_turn = t_turn.opponent();
     }
@@ -829,84 +990,50 @@ impl RolloutPolicy for BiConvnetRolloutPolicy {
 
   fn init_traces(&mut self) {
     let ctx = (*self.context).as_ref();
-
-    // FIXME(20160209)
-    unimplemented!();
-
-    //self.arch.reset_gradients(0.0, &ctx);
+    self.green_arch.reset_gradients(0.0, &ctx);
   }
 
   fn rollout_trace(&mut self, trace: &QuickTrace, baseline: f32) -> bool {
-    //let ctx = (*self.context).as_ref();
-
-    // FIXME(20160209)
     unimplemented!();
-
-    /*let mut trace_len = 0;
-    let mut sim_state = match trace.init_state {
-      Some(ref init_state) => init_state.clone(),
-      None => return false,
-    };
-    for &(turn, action) in trace.actions.iter() {
-      match action {
-        Action::Place{point} => {
-          let t = trace_len;
-          sim_state.get_data().features
-            .extract_relative_features(
-                turn, self.arch.input_layer().expose_host_frame_buf(t),
-            );
-          let label = SampleLabel::Category{category: point.idx() as i32};
-          self.arch.loss_layer().preload_label(t, &label, Phase::Inference);
-          trace_len += 1;
-        }
-        _ => {}
-      }
-      match sim_state.try_action(turn, action) {
-        Ok(_) => sim_state.commit(),
-        Err(_) => panic!("quicktrace actions should always be legal!"),
-      }
-    }
-    if trace_len == 0 {
-      return false;
-    }
-
-    let value = match trace.value {
-      Some(value) => value,
-      None => panic!("missing quicktrace value!"),
-    };
-    self.arch.input_layer().load_frames(trace_len, &ctx);
-    self.arch.loss_layer().load_labels(trace_len, &ctx);
-    self.arch.forward(trace_len, Phase::Training, &ctx);
-    self.arch.backward(trace_len, (value - baseline) / (trace_len as f32), &ctx);
-
-    true*/
   }
 
-  fn rollout_green_trace(&mut self, green_stone: Stone, trace: &QuickTrace, baseline: f32) -> bool {
+  fn backup_traces(&mut self, learning_rate: f32, target_value: f32, eval_value: f32, num_traces: usize) {
+    unimplemented!();
+  }
+
+  fn save_params(&mut self, save_dir: &Path, t: usize) {
+    unimplemented!();
+  }
+
+  fn rollout_green_trace(&mut self, baseline: f32, green_stone: Stone, trace: &QuickTrace) -> bool {
     let ctx = (*self.context).as_ref();
 
-    let mut trace_size = 0;
     let mut sim_state = match trace.init_state {
       Some(ref init_state) => init_state.clone(),
       None => return false,
     };
+    let mut trace_size = 0;
     for &(turn, action) in trace.actions.iter() {
-      if turn != green_stone {
-        continue;
-      }
-      match action {
-        Action::Place{point} => {
-          let t = trace_size;
-          sim_state.get_data().features
-            .extract_relative_features(
-                turn,
-                self.green_arch.input_layer().expose_host_frame_buf(t),
-            );
-          let label = SampleLabel::Category{category: point.idx() as i32};
-          self.green_arch.loss_layer().preload_label(t, &label, Phase::Inference);
-          trace_size += 1;
+      if turn == green_stone {
+        match action {
+          Action::Place{point} => {
+            let t = trace_size;
+            sim_state.get_data().features
+              .extract_relative_features(
+                  turn,
+                  self.green_arch.input_layer().expose_host_frame_buf(t),
+              );
+            let label = SampleLabel::Category{category: point.idx() as i32};
+            self.green_arch.loss_layer().preload_label(t, &label, Phase::Training);
+            sim_state.get_data().legality
+              .extract_legal_mask(
+                  turn,
+                  self.green_arch.loss_layer().expose_host_mask_buf(t),
+              );
+            trace_size += 1;
+          }
+          _ => {}
         }
-        _ => {}
       }
       match sim_state.try_action(turn, action) {
         Ok(_) => sim_state.commit(),
@@ -923,44 +1050,35 @@ impl RolloutPolicy for BiConvnetRolloutPolicy {
     };
     self.green_arch.input_layer().load_frames(trace_size, &ctx);
     self.green_arch.loss_layer().load_labels(trace_size, &ctx);
+    self.green_arch.loss_layer().load_masks(trace_size, &ctx);
     self.green_arch.forward(trace_size, Phase::Training, &ctx);
+    self.green_arch.loss_layer().apply_masks(trace_size, &ctx);
     self.green_arch.backward(trace_size, (value - baseline) / (trace_size as f32), &ctx);
 
     true
-
-    // FIXME(20160209)
-    //unimplemented!();
   }
 
-  fn backup_traces(&mut self, learning_rate: f32, target_value: f32, eval_value: f32, num_traces: usize) {
+  fn backup_green_traces(&mut self, step_size: f32, traces_count: usize, green_stone: Stone) {
+    assert!(step_size >= 0.0);
+    assert!(traces_count > 0);
+
     let ctx = (*self.context).as_ref();
 
-    // FIXME(20160209)
-    unimplemented!();
-
-    /*self.arch.dev_allreduce_sum_gradients(&ctx);
-    // FIXME(20160122): forgot to scale by total number of traces, not the
-    // number of traces processed by this worker...
-    // as an approximation, just multiply local number of traces by number of
-    // workers.
-    //self.arch.descend(learning_rate * (target_value - eval_value) / (num_traces as f32), 0.0, &ctx);
-    let num_workers = self.arch.num_workers();
-    self.arch.descend(learning_rate * (target_value - eval_value) / ((num_workers * num_traces) as f32), 0.0, &ctx);*/
-  }
-
-  fn save_params(&mut self, save_dir: &Path, t: usize) {
-    unimplemented!();
-    /*if self.arch.tid() == 0 {
-      let ctx = (*self.context).as_ref();
-      self.arch.save_layer_params_dir(save_dir, t, &ctx);
-    }*/
+    self.green_arch.dev_allreduce_sum_gradients(&ctx);
+    self.green_arch.descend(step_size / (traces_count as f32), 0.0, &ctx);
   }
 
   fn load_green_params(&mut self, blob: &[u8]) { unimplemented!(); }
 
   fn load_red_params(&mut self, blob: &[u8]) { unimplemented!(); }
 
-  fn save_green_params(&mut self, save_dir: &Path, t: usize) -> Vec<u8> { unimplemented!(); }
+  fn save_green_params(&mut self) -> Vec<u8> {
+    let ctx = (*self.context).as_ref();
+    self.green_arch.save_layer_params_to_mem(&ctx)
+  }
 
-  fn save_red_params(&mut self) -> Vec<u8> { unimplemented!(); }
+  fn save_red_params(&mut self) -> Vec<u8> {
+    let ctx = (*self.context).as_ref();
+    self.red_arch.save_layer_params_to_mem(&ctx)
+  }
 }

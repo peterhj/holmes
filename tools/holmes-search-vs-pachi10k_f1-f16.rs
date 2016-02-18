@@ -25,6 +25,10 @@ fn main() {
       Asset::SymlinkAs{
         src: PathBuf::from("models/gogodb_w2015_alphav2_new_action_2layer16_19x19x44_run2.saved/layer_params.latest.blob"),
         dst: PathBuf::from("models/gogodb_w2015_alphav2_new_action_2layer16_19x19x44_run2.saved/layer_params.latest.blob"),
+        /*src: PathBuf::from("models/balance_2layer16_19x19x44_run1.saved/layer_params.latest.blob"),
+        dst: PathBuf::from("models/balance_2layer16_19x19x44_run1.saved/layer_params.latest.blob"),*/
+        /*src: PathBuf::from("models/gogodb_w2015_alphav2_new_action_3layer32_19x19x44_run2.saved/layer_params.latest.blob"),
+        dst: PathBuf::from("models/gogodb_w2015_alphav2_new_action_3layer32_19x19x44_run2.saved/layer_params.latest.blob"),*/
       },
     ],
     programs:   vec![
@@ -73,7 +77,11 @@ fn main() {
   let experiment = Experiment{
     trial_cfg:      trial_cfg,
     //trials_path:    PathBuf::from("experiments/convnet_t_630k_white.0.experiment"),
-    trials_path:    PathBuf::from("experiments/search_alphav2_t_561k_batchsize_32_white.1.experiment"),
+    //trials_path:    PathBuf::from("experiments/search_alphav2_t_561k_batchsize_32_white.1.experiment"),
+    //trials_path:    PathBuf::from("experiments/search_alphav2_t_561k_rollouts_5k_batchsize_256_white.2.experiment"),
+    //trials_path:    PathBuf::from("experiments/search_alphav2_balance_6k_rollouts_1k_batchsize_32_white.0.experiment"),
+    //trials_path:    PathBuf::from("experiments/search_alphav2_12ppn_t_561k_3rpn_t_560k_rollouts_1k_batchsize_32_white.0.experiment"),
+    trials_path:    PathBuf::from("experiments/search_alphav2_12ppn_t_561k_2rpn_t_560k_norave_rollouts_1k_batchsize_32_white.0.experiment"),
     scratch_prefix: PathBuf::from("/scratch/phj/space/holmes-project/holmes"),
     num_trials:     256,
   };

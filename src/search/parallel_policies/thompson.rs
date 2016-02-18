@@ -28,21 +28,27 @@ impl ThompsonTreePolicy {
       prior_equiv:  32.0,
       /*prior:        true,
       prior_equiv:  100.0,*/
-      rave:         true,
-      rave_equiv:   3000.0,
+      /*rave:         true,
+      rave_equiv:   3000.0,*/
+      rave:         false,
+      rave_equiv:   0.0,
       tmp_values:   repeat(0.0).take(Board::SIZE).collect(),
     }
   }
 }
 
 impl TreePolicy for ThompsonTreePolicy {
+  fn use_rave(&self) -> bool {
+    self.rave
+  }
+
   fn execute_search(&mut self, node: &Node, rng: &mut Xorshiftplus128Rng) -> Option<(Point, usize)> {
     let horizon = node.values.horizon();
     for j in 0 .. horizon {
       let n = node.values.num_trials[j].load(Ordering::Acquire) as f32;
       let s = node.values.num_succs[j].load(Ordering::Acquire) as f32;
       let (pn, ps) = if !self.prior {
-        (1.0, 1.0)
+        (1.0, 2.0)
       } else {
         (self.prior_equiv, self.prior_equiv * node.values.prior_values[j])
       };

@@ -130,6 +130,10 @@ name = "policygrad-evalout"
 path = "tools/policygrad-evalout.rs"
 
 [[bin]]
+name = "policygrad-autoplay"
+path = "tools/policygrad-autoplay.rs"
+
+[[bin]]
 name = "holmes-vs-pachi10k_f1-f16"
 path = "tools/holmes-vs-pachi10k_f1-f16.rs"
 

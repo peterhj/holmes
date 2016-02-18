@@ -40,7 +40,8 @@ impl ConvnetAgent {
     //let arch_cfg = build_12layer384_19x19x37_arch_nodir(1);
     //let save_path = PathBuf::from("models/kgs_ugo_201505_new_action_12layer384_19x19x37.v3.saved");
     let arch_cfg = build_12layer384_19x19x44_arch_nodir(1);
-    let save_path = PathBuf::from("models/gogodb_w2015_alphav2_new_action_12layer384_19x19x44.saved");
+    //let save_path = PathBuf::from("models/gogodb_w2015_alphav2_new_action_12layer384_19x19x44.saved");
+    let save_path = PathBuf::from("models/gogodb_w2015_alphav2_new_action_12layer384_19x19x44_run2.saved");
     let shared = for_all_devices(1, |contexts| {
       Arc::new(PipelineArchSharedData::new(1, &arch_cfg, contexts))
     });

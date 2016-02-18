@@ -46,14 +46,14 @@ fn train() {
   env_logger::init().unwrap();
   //let mut rng = thread_rng();
 
-  let num_workers = 1;
-  let batch_size = 256;
+  /*let num_workers = 1;
+  let batch_size = 256;*/
 
   /*let num_workers = 2;
   let batch_size = 128;*/
 
-  /*let num_workers = 4;
-  let batch_size = 64;*/
+  let num_workers = 4;
+  let batch_size = 64;
 
   let input_channels = 44;
 
@@ -64,25 +64,28 @@ fn train() {
     minibatch_size: num_workers * batch_size,
     step_size:      StepSizeSchedule::Decay{
       init_step:    0.0625,
-      decay_rate:   0.25,
-      decay_iters:  60000,
+      decay_rate:   0.5,
+      decay_iters:  120000,
     },
     /*step_size:      StepSizeSchedule::DecayOnce{
       step0:        0.0625,
       step0_iters:  60000,
       final_step:   0.015625,
     },*/
-    momentum:       0.0,
-    //momentum:       0.5,
+    //momentum:       0.0,
+    momentum:       0.125,
     l2_reg_coef:    0.0,
-    display_iters:  100,
+    display_iters:  200,
     valid_iters:    10000,
     save_iters:     10000,
   };
   let datum_cfg = SampleDatumConfig::BitsThenBytes3d{scale: 255};
-  let train_label_cfg = SampleLabelConfig::LookaheadCategories{
+  /*let train_label_cfg = SampleLabelConfig::LookaheadCategories{
     num_categories: 361,
     lookahead:      3,
+  };*/
+  let train_label_cfg = SampleLabelConfig::Category{
+    num_categories: 361,
   };
   let valid_label_cfg = SampleLabelConfig::Category{
     num_categories: 361,
@@ -120,14 +123,18 @@ fn train() {
     conv_size:      3,
     conv_stride:    1,
     conv_pad:       1,
-    out_channels:   3,
+    //out_channels:   3,
+    out_channels:   1,
     act_func:       ActivationFunction::Identity,
     init_weights:   ParamsInitialization::Uniform{half_range: 0.05},
   };
-  let loss_layer_cfg = MultiCategoricalLossLayerConfig{
+  /*let loss_layer_cfg = MultiCategoricalLossLayerConfig{
     num_categories:     361,
     train_lookahead:    3,
     infer_lookahead:    1,
+  };*/
+  let loss_layer_cfg = CategoricalLossLayerConfig{
+    num_categories:     361,
   };
 
   let mut arch_cfg = PipelineArchConfig::new();
@@ -136,7 +143,8 @@ fn train() {
     .conv2d(conv1_layer_cfg)
     .conv2d(inner_conv_layer_cfg)
     .conv2d(final_conv_layer_cfg)
-    .multi_softmax_kl_loss(loss_layer_cfg);
+    //.multi_softmax_kl_loss(loss_layer_cfg);
+    .softmax_kl_loss(loss_layer_cfg);
 
   let shared_seed = [thread_rng().next_u64(), thread_rng().next_u64()];
   let arch_shared = for_all_devices(num_workers, |contexts| {
@@ -156,7 +164,7 @@ fn train() {
         let mut arch_worker = PipelineArchWorker::new(
             batch_size,
             arch_cfg,
-            PathBuf::from("models/tmp_gogodb_w2015_alphav2_new_action_3layer32_19x19x44"),
+            PathBuf::from("models/tmp_gogodb_w2015_alphav2_new_action_3layer32_19x19x44_run2"),
             //PathBuf::from("models/tmp_gogodb_w2015_alphav2_new_action_3layer32_19x19x44.decay_once_momentum"),
             tid,
             shared_seed,

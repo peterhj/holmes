@@ -23,8 +23,14 @@ fn main() {
   println!("DEBUG: holmes: host: {}", host);
   println!("DEBUG: holmes: port: {}", port);
   let mc_cfg = MonteCarloConfig{
+    /*num_rollouts:   1024,
+    batch_size:     32,*/
     num_rollouts:   1024,
-    batch_size:     32,
+    batch_size:     128,
+    /*num_rollouts:   2048,
+    batch_size:     64,*/
+    /*num_rollouts:   5120,
+    batch_size:     256,*/
   };
   let agent = ParallelMonteCarloSearchAgent::new(mc_cfg, None);
   let client = Client::new(agent, host, port, None);

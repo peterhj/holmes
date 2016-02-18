@@ -5,8 +5,10 @@ use search::parallel_policies::convnet::{
   ConvnetPolicyWorkerBuilder, ConvnetPolicyWorker,
 };
 use search::parallel_tree::{
+  SharedTree,
   MonteCarloSearchResult,
-  ParallelMonteCarloSearchServer, ParallelMonteCarloSearch,
+  ParallelMonteCarloSearchServer,
+  ParallelMonteCarloSearch,
 };
 use txnstate::{TxnStateConfig, TxnState};
 use txnstate::extras::{TxnStateNodeData};
@@ -25,17 +27,18 @@ pub struct MonteCarloConfig {
 }
 
 pub struct ParallelMonteCarloSearchAgent {
-  config:   MonteCarloConfig,
-  komi:     f32,
-  player:   Option<Stone>,
+  config:       MonteCarloConfig,
+  komi:         f32,
+  player:       Option<Stone>,
 
-  history:  Vec<(TxnState<TxnStateNodeData>, Action, Option<MonteCarloSearchResult>)>,
-  ply:      usize,
-  state:    TxnState<TxnStateNodeData>,
-  result:   Option<MonteCarloSearchResult>,
+  history:      Vec<(TxnState<TxnStateNodeData>, Action, Option<MonteCarloSearchResult>)>,
+  ply:          usize,
+  state:        TxnState<TxnStateNodeData>,
+  result:       Option<MonteCarloSearchResult>,
+  tree:         Option<SharedTree>,
 
-  rng:      Xorshiftplus128Rng,
-  server:   ParallelMonteCarloSearchServer<ConvnetPolicyWorker>,
+  rng:          Xorshiftplus128Rng,
+  server:       ParallelMonteCarloSearchServer<ConvnetPolicyWorker>,
 }
 
 impl ParallelMonteCarloSearchAgent {
@@ -59,6 +62,7 @@ impl ParallelMonteCarloSearchAgent {
           TxnStateNodeData::new(),
       ),
       result:   None,
+      tree:     None,
       rng:      Xorshiftplus128Rng::new(&mut thread_rng()),
       server:   ParallelMonteCarloSearchServer::new(
           num_workers, worker_batch_capacity,
@@ -101,6 +105,17 @@ impl Agent for ParallelMonteCarloSearchAgent {
       Ok(_)   => { self.state.commit(); }
       Err(_)  => { panic!("agent tried to apply an illegal action!"); }
     }
+
+    // XXX(20160210): Step forward the tree, if possible.
+    let mut advance_failed = false;
+    if let Some(ref tree) = self.tree {
+      if !tree.try_advance(turn, action) {
+        advance_failed = true;
+      }
+    }
+    if advance_failed {
+      self.tree = None;
+    }
   }
 
   fn undo(&mut self) {
@@ -108,10 +123,12 @@ impl Agent for ParallelMonteCarloSearchAgent {
     if let Some((prev_state, _, prev_result)) = self.history.pop() {
       self.ply -= 1;
       self.state.clone_from(&prev_state);
+      self.tree = None;
       self.result = prev_result;
     } else {
       self.ply = 0;
       self.state.reset();
+      self.tree = None;
       self.result = None;
     }
   }
@@ -132,12 +149,14 @@ impl Agent for ParallelMonteCarloSearchAgent {
     assert_eq!(turn, self.state.current_turn());
 
     // FIXME(20160114): read remaining time and apply a time management policy.
-    //let num_rollouts = 5120;
-    //let num_rollouts = 10240;
 
     let num_rollouts = self.config.num_rollouts;
     let batch_size = self.config.batch_size;
 
+    let shared_tree = match self.tree {
+      None => SharedTree::new(),
+      Some(ref tree) => tree.clone(),
+    };
     let mut search = ParallelMonteCarloSearch::new();
     let (search_res, search_stats) = search.join(
         num_rollouts,
@@ -145,6 +164,7 @@ impl Agent for ParallelMonteCarloSearchAgent {
         &mut self.server,
         self.player.unwrap(),
         &self.state,
+        shared_tree,
         self.result.as_ref(),
         &mut self.rng);
     println!("DEBUG: search result: {:?}", search_res);

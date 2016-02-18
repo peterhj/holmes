@@ -7,6 +7,7 @@ use bit_vec::{BitVec};
 use std::cmp::{max};
 use std::collections::{BTreeSet};
 use std::iter::{repeat};
+use vec_map::{VecMap};
 
 pub mod extras;
 pub mod features;
@@ -786,6 +787,57 @@ pub struct GnugoPrintSgf {
   pub illegal:  BTreeSet<Point>,
 }
 
+//#[derive(Clone)]
+pub struct BensonScratch {
+  enclosed_map:     VecMap<usize>,
+  enclosed:         Vec<Vec<usize>>,
+
+  //small_enc_map:    VecMap<usize>,
+  //small_enc:        Vec<Vec<usize>>,
+  small_enc_extchs: Vec<Vec<usize>>,
+  chain_small_encs: VecMap<Vec<usize>>,
+
+  small_enc:        Vec<bool>,
+  healthy:          VecMap<Vec<(usize, bool)>>,
+
+  vital_chains:     VecMap<()>,
+  vital_regions:    VecMap<()>,
+
+  queue:            Vec<usize>,
+}
+
+impl BensonScratch {
+  pub fn new() -> BensonScratch {
+    BensonScratch{
+      enclosed_map:     VecMap::with_capacity(Board::SIZE),
+      enclosed:         Vec::with_capacity(Board::SIZE),
+      small_enc_extchs: Vec::with_capacity(Board::SIZE),
+      chain_small_encs: VecMap::with_capacity(Board::SIZE),
+      small_enc:        Vec::with_capacity(Board::SIZE),
+      healthy:          VecMap::with_capacity(Board::SIZE),
+      vital_chains:     VecMap::with_capacity(Board::SIZE),
+      vital_regions:    VecMap::with_capacity(Board::SIZE),
+      queue:            Vec::with_capacity(Board::SIZE),
+    }
+  }
+
+  pub fn clear(&mut self) {
+    self.enclosed_map.clear();
+    self.enclosed.clear();
+
+    self.small_enc_extchs.clear();
+    self.chain_small_encs.clear();
+
+    self.small_enc.clear();
+    self.healthy.clear();
+
+    self.vital_chains.clear();
+    self.vital_regions.clear();
+
+    self.queue.clear();
+  }
+}
+
 #[derive(Clone, Copy)]
 pub struct TxnStateConfig {
   pub rules:    Rules,
@@ -1145,6 +1197,186 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
     }
 
     w_score - b_score + komi
+  }
+
+  pub fn count_unconditionally_alive(&self, turn: Stone, scratch: &mut BensonScratch) -> (usize, usize) {
+    scratch.clear();
+
+    let oppo = turn.opponent();
+
+    // Define enclosed regions: they are surrounded by X stones,
+    // and they consist of empty or -X stones.
+    for root_p in 0 .. Board::SIZE {
+      if self.position.stones[root_p] != turn {
+        if !scratch.enclosed_map.contains_key(&root_p) {
+          let root_idx = scratch.enclosed.len();
+          scratch.enclosed_map.insert(root_p, root_idx);
+          scratch.enclosed.push(vec![root_p]);
+          scratch.queue.clear();
+          for_each_adjacent(Point::from_idx(root_p), |adj_pt| {
+            scratch.queue.push(adj_pt.idx());
+          });
+          let mut head = 0;
+          while head < scratch.queue.len() {
+            let p = scratch.queue[head];
+            if self.position.stones[p] != turn {
+              if !scratch.enclosed_map.contains_key(&p) {
+                scratch.enclosed_map.insert(p, root_idx);
+                scratch.enclosed[root_idx].push(p);
+                for_each_adjacent(Point::from_idx(p), |adj_pt| {
+                  scratch.queue.push(adj_pt.idx());
+                });
+              }
+            }
+            head += 1;
+          }
+        }
+      }
+    }
+
+    // Define small enclosed regions: their internal vertices must all be
+    // -X stones.
+    for (idx, enclosed_ps) in scratch.enclosed.iter().enumerate() {
+      let mut is_small_enc = true;
+      for &p in enclosed_ps.iter() {
+        let mut interior = true;
+        for_each_adjacent(Point::from_idx(p), |adj_pt| {
+          let adj_p = adj_pt.idx();
+          if !scratch.enclosed_map.contains_key(&adj_p) {
+            interior = false;
+          } else {
+            assert_eq!(idx, scratch.enclosed_map[adj_p]);
+          }
+        });
+        if interior && self.position.stones[p] == Stone::Empty {
+          is_small_enc = false;
+          break;
+        }
+      }
+      scratch.small_enc[idx] = is_small_enc;
+    }
+
+    // Find X chains adjacent to the small enclosed regions.
+    {
+      let &mut BensonScratch{
+        ref enclosed,
+        ref mut small_enc_extchs,
+        ref mut chain_small_encs,
+        .. } = scratch;
+      for (idx, enclosed_ps) in enclosed.iter().enumerate() {
+        if !scratch.small_enc[idx] {
+          continue;
+        }
+        for &p in enclosed_ps.iter() {
+          for_each_adjacent(Point::from_idx(p), |adj_pt| {
+            let adj_p = adj_pt.idx();
+            if self.position.stones[adj_p] == turn {
+              let chain_head = self.chains.find_chain(adj_pt);
+              assert!(chain_head != TOMBSTONE);
+              let chain_head_idx = chain_head.idx();
+              if !small_enc_extchs[idx].contains(&chain_head_idx) {
+                small_enc_extchs[idx].push(chain_head_idx);
+                if !chain_small_encs.contains_key(&chain_head_idx) {
+                  chain_small_encs.insert(chain_head_idx, vec![idx]);
+                } else {
+                  chain_small_encs[chain_head_idx].push(idx);
+                }
+              }
+            }
+          });
+        }
+      }
+    }
+
+    // Define healthy small enclosed regions: their empty intersections are
+    // all liberties of the adjacent X chain.
+    for (idx, enclosed_ps) in scratch.enclosed.iter().enumerate() {
+      if !scratch.small_enc[idx] {
+        continue;
+      }
+      for &chain_head_idx in scratch.small_enc_extchs[idx].iter() {
+        let mut is_healthy = true;
+        let chain = self.chains.get_chain(Point::from_idx(chain_head_idx)).unwrap();
+        for &p in enclosed_ps.iter() {
+          let pt = Point::from_idx(p);
+          if self.position.stones[p] == Stone::Empty {
+            if !chain.ps_libs.contains(&pt) {
+              is_healthy = false;
+              break;
+            }
+          }
+        }
+        //scratch.healthy[idx].push(chain_head_idx, is_healthy);
+        if !scratch.healthy.contains_key(&chain_head_idx) {
+          scratch.healthy.insert(chain_head_idx, vec![(idx, is_healthy)]);
+        } else {
+          scratch.healthy[chain_head_idx].push((idx, is_healthy));
+        }
+      }
+    }
+
+    let mut prev_vital_chains_count = None;
+    loop {
+      scratch.queue.clear();
+      for chain_head_idx in scratch.vital_chains.keys() {
+        let mut healthy_count = 0;
+        for &(region_idx, is_healthy) in scratch.healthy[chain_head_idx].iter() {
+          if scratch.vital_regions.contains_key(&region_idx) && is_healthy {
+            healthy_count += 1;
+            if healthy_count >= 2 {
+              scratch.queue.push(chain_head_idx);
+              break;
+            }
+          }
+        }
+      }
+      scratch.vital_chains.clear();
+      for &chain_head_idx in scratch.queue.iter() {
+        scratch.vital_chains.insert(chain_head_idx, ());
+      }
+
+      scratch.queue.clear();
+      for region_idx in scratch.vital_regions.keys() {
+        let mut contained = true;
+        for &chain_head_idx in scratch.small_enc_extchs[region_idx].iter() {
+          if !scratch.vital_chains.contains_key(&chain_head_idx) {
+            contained = false;
+            break;
+          }
+        }
+        if contained {
+          scratch.queue.push(region_idx);
+        }
+      }
+      scratch.vital_regions.clear();
+      for &region_idx in scratch.queue.iter() {
+        scratch.vital_regions.insert(region_idx, ());
+      }
+
+      match prev_vital_chains_count {
+        None => {
+          prev_vital_chains_count = Some(scratch.vital_chains.len());
+        }
+        Some(prev_count) => {
+          if prev_count == scratch.vital_chains.len() {
+            break;
+          }
+        }
+      }
+    }
+
+    let mut live_chain_count = 0;
+    let mut live_region_count = 0;
+    for chain_head_idx in scratch.vital_chains.keys() {
+      let chain = self.chains.get_chain(Point::from_idx(chain_head_idx)).unwrap();
+      live_chain_count += chain.size as usize;
+    }
+    for region_idx in scratch.vital_regions.keys() {
+      assert!(scratch.small_enc[region_idx]);
+      let region = &scratch.enclosed[region_idx];
+      live_region_count += region.len();
+    }
+    (live_chain_count, live_region_count)
   }
 
   pub fn iter_legal_moves_accurate<F>(&mut self, turn: Stone, /*scratch: &mut TxnStateScratch,*/ mut f: F) where F: FnMut(Point) {

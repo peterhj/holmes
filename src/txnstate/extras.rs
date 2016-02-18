@@ -92,6 +92,17 @@ impl TxnStateLegalityData {
     self.cached_legal_moves[turn_off].clone()
   }
 
+  pub fn extract_legal_mask(&self, turn: Stone, mask: &mut [u8]) {
+    assert_eq!(Board::SIZE, mask.len());
+    let turn_off = turn.offset();
+    for (i, elem) in self.cached_legal_moves[turn_off].get_ref().iter().enumerate() {
+      match elem {
+        false => mask[i] = 0,
+        true  => mask[i] = 1,
+      }
+    }
+  }
+
   fn update_point(&mut self, position: &TxnPosition, chains: &TxnChainsList, point: Point) {
     let p = point.idx();
     if self.tmp_mark.contains(p) {

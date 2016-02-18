@@ -1,6 +1,6 @@
 use board::{Stone, Point};
 //use random::{XorShift128PlusRng};
-use search::parallel_tree::{TreeTraj, RolloutTraj, Trace, QuickTrace, Node};
+use search::parallel_tree::{TreeTraj, RolloutTraj, QuickTrace, Node};
 use txnstate::{TxnState};
 use txnstate::extras::{TxnStateNodeData};
 
@@ -33,6 +33,7 @@ pub trait PriorPolicy {
 pub trait TreePolicy {
   type R: Rng = Xorshiftplus128Rng;
 
+  fn use_rave(&self) -> bool;
   fn execute_search(&mut self, node: &Node, rng: &mut Self::R) -> Option<(Point, usize)>;
 }
 
@@ -77,12 +78,14 @@ pub trait RolloutPolicy {
   fn init_traces(&mut self);
   //fn rollout_trace(&mut self, trace: &Trace, baseline: f32) -> bool;
   fn rollout_trace(&mut self, trace: &QuickTrace, baseline: f32) -> bool;
-  fn rollout_green_trace(&mut self, green_stone: Stone, trace: &QuickTrace, baseline: f32) -> bool;
   fn backup_traces(&mut self, learning_rate: f32, target_value: f32, eval_value: f32, num_traces: usize);
 
   fn save_params(&mut self, save_dir: &Path, t: usize);
+
+  fn rollout_green_trace(&mut self, baseline: f32, green_stone: Stone, trace: &QuickTrace) -> bool;
+  fn backup_green_traces(&mut self, step_size: f32, traces_count: usize, green_stone: Stone);
   fn load_green_params(&mut self, blob: &[u8]) { unimplemented!(); }
   fn load_red_params(&mut self, blob: &[u8]) { unimplemented!(); }
-  fn save_green_params(&mut self, save_dir: &Path, t: usize) -> Vec<u8> { unimplemented!(); }
+  fn save_green_params(&mut self) -> Vec<u8> { unimplemented!(); }
   fn save_red_params(&mut self) -> Vec<u8> { unimplemented!(); }
 }

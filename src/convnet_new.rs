@@ -246,6 +246,56 @@ pub fn build_2layer16_19x19x44_arch_nodir(batch_size: usize) -> PipelineArchConf
   arch_cfg
 }
 
+pub fn build_3layer32_19x19x44_arch_nodir(batch_size: usize) -> PipelineArchConfig {
+  let input_channels = 44;
+  let hidden_channels = 32;
+
+  let data_layer_cfg = Data3dLayerConfig{
+    dims:           (19, 19, input_channels),
+    normalize:      true,
+  };
+  let conv1_layer_cfg = Conv2dLayerConfig{
+    in_dims:        (19, 19, input_channels),
+    conv_size:      5,
+    conv_stride:    1,
+    conv_pad:       2,
+    out_channels:   hidden_channels,
+    act_func:       ActivationFunction::Rect,
+    init_weights:   ParamsInitialization::Uniform{half_range: 0.05},
+  };
+  let inner_conv_layer_cfg = Conv2dLayerConfig{
+    in_dims:        (19, 19, hidden_channels),
+    conv_size:      3,
+    conv_stride:    1,
+    conv_pad:       1,
+    out_channels:   hidden_channels,
+    act_func:       ActivationFunction::Rect,
+    init_weights:   ParamsInitialization::Uniform{half_range: 0.05},
+  };
+  let final_conv_layer_cfg = Conv2dLayerConfig{
+    in_dims:        (19, 19, hidden_channels),
+    conv_size:      3,
+    conv_stride:    1,
+    conv_pad:       1,
+    out_channels:   1,
+    act_func:       ActivationFunction::Identity,
+    init_weights:   ParamsInitialization::Uniform{half_range: 0.05},
+  };
+  let loss_layer_cfg = CategoricalLossLayerConfig{
+    num_categories:     361,
+  };
+
+  let mut arch_cfg = PipelineArchConfig::new();
+  arch_cfg
+    .data3d(data_layer_cfg)
+    .conv2d(conv1_layer_cfg)
+    .conv2d(inner_conv_layer_cfg)
+    .conv2d(final_conv_layer_cfg)
+    .softmax_kl_loss(loss_layer_cfg);
+
+  arch_cfg
+}
+
 pub fn build_12layer384_19x19x44_arch_nodir(batch_size: usize) -> PipelineArchConfig {
   let input_channels = 44;
   let conv1_channels = 96;

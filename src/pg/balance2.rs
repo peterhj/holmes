@@ -32,7 +32,7 @@ use rand::{Rng, thread_rng};
 use std::path::{PathBuf};
 use time::{get_time};
 
-pub struct PgBalanceConfig {
+pub struct PolicyGradBalanceConfig {
   pub num_epochs:           usize,
   pub save_interval:        usize,
   pub target_num_rollouts:  usize,
@@ -42,12 +42,12 @@ pub struct PgBalanceConfig {
   pub learning_rate:        f32,
 }
 
-impl Default for PgBalanceConfig {
-  fn default() -> PgBalanceConfig {
-    PgBalanceConfig{
+impl Default for PolicyGradBalanceConfig {
+  fn default() -> PolicyGradBalanceConfig {
+    PolicyGradBalanceConfig{
       num_epochs:           10,
-      save_interval:        50,
-      target_num_rollouts:  5120,
+      save_interval:        100,
+      target_num_rollouts:  1024,
       target_batch_size:    256,
       value_minibatch_size: 512,
       grad_minibatch_size:  512,
@@ -56,29 +56,32 @@ impl Default for PgBalanceConfig {
   }
 }
 
-pub struct PgBalanceMachine {
-  config:           PgBalanceConfig,
+pub struct PolicyGradBalanceMachine {
+  config:           PolicyGradBalanceConfig,
   rng:              Xorshiftplus128Rng,
-  search_server:    ParallelMonteCarloSearchServer<ConvnetPolicyWorker>,
-  /*target_value: Option<f32>,
-  eval_value:   Option<f32>,*/
+  target_server:    ParallelMonteCarloSearchServer<ConvnetPolicyWorker>,
+  rollout_server:   ParallelMonteCarloSearchServer<ConvnetPolicyWorker>,
 }
 
-impl PgBalanceMachine {
-  pub fn new(config: PgBalanceConfig) -> PgBalanceMachine {
+impl PolicyGradBalanceMachine {
+  pub fn new(config: PolicyGradBalanceConfig) -> PolicyGradBalanceMachine {
     let num_workers = CudaDevice::count().unwrap();
-    let worker_batch_size = 544;
-    PgBalanceMachine{
+    let worker_batch_capacity = 544;
+    PolicyGradBalanceMachine{
       config:           config,
       rng:              Xorshiftplus128Rng::new(&mut thread_rng()),
-      search_server:    ParallelMonteCarloSearchServer::new(
-          num_workers, worker_batch_size,
-          ConvnetPolicyWorkerBuilder::new(num_workers, worker_batch_size),
+      target_server:    ParallelMonteCarloSearchServer::new(
+          num_workers, 256,
+          ConvnetPolicyWorkerBuilder::new(num_workers, 256),
+      ),
+      rollout_server:   ParallelMonteCarloSearchServer::new(
+          num_workers, worker_batch_capacity,
+          ConvnetPolicyWorkerBuilder::new(num_workers, worker_batch_capacity),
       ),
     }
   }
 
-  pub fn estimate(&mut self, episodes: &mut EpisodeIter) {
+  pub fn train(&mut self, episodes: &mut EpisodeIter) {
     /*// FIXME(20160121): temporarily using existing balance run.
     let mut idx = 1000;*/
     let mut idx = 0;
@@ -88,28 +91,28 @@ impl PgBalanceMachine {
       save.join(
           &PathBuf::from("experiments/models_balance/test"),
           0,
-          &self.search_server);
+          &self.rollout_server);
     }
 
     loop {
       episodes.for_each_random_sample(|_, frame| {
         let state = frame.state;
-        self.estimate_sample(idx, state);
+        self.train_sample(idx, state);
 
         idx += 1;
         if idx % self.config.save_interval == 0 {
-          println!("DEBUG: pg::balance: saving params (iter {})", idx);
+          println!("DEBUG: pg::balance2: saving params (iter {})", idx);
           let save = ParallelMonteCarloSave::new();
           save.join(
               &PathBuf::from("experiments/models_balance/test"),
               idx,
-              &self.search_server);
+              &self.rollout_server);
         }
       });
     }
   }
 
-  fn estimate_sample(&mut self, idx: usize, init_state: &TxnState<TxnStateNodeData>) {
+  fn train_sample(&mut self, idx: usize, init_state: &TxnState<TxnStateNodeData>) {
     let start_time = get_time();
 
     // XXX(20160106): Estimate target value using search.
@@ -118,7 +121,7 @@ impl PgBalanceMachine {
     let (search_res, _) = search.join(
         self.config.target_num_rollouts,
         self.config.target_batch_size,
-        &self.search_server,
+        &self.rollout_server,
         // FIXME(20160208): what is our player color?
         init_state.current_turn(),
         init_state,
@@ -133,7 +136,7 @@ impl PgBalanceMachine {
     let (eval_res, _) = eval.join(
         self.config.value_minibatch_size,
         self.config.value_minibatch_size,
-        &self.search_server,
+        &self.rollout_server,
         // FIXME(20160208): what is our player color?
         init_state.current_turn(),
         init_state,
@@ -150,7 +153,7 @@ impl PgBalanceMachine {
         target_value,
         eval_value,
         0.5,
-        &self.search_server,
+        &self.rollout_server,
         // FIXME(20160208): what is our player color?
         init_state.current_turn(),
         init_state,
@@ -158,7 +161,7 @@ impl PgBalanceMachine {
 
     let lap_time = get_time();
     let elapsed_ms = (lap_time - start_time).num_milliseconds();
-    println!("DEBUG: sample {}: target: {:.4} eval: {:.4} elapsed: {:.3} s",
+    println!("DEBUG: pg::balance2: sample {}: target: {:.4} eval: {:.4} elapsed: {:.3} s",
         idx, target_value, eval_value, elapsed_ms as f32 * 0.001);
   }
 }

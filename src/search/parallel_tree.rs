@@ -1,13 +1,17 @@
 use array_util::{array_argmax};
 use board::{Board, RuleSet, PlayerRank, Stone, Point, Action};
 use hyper::{load_hyperparam};
-use search::{SearchStats};
+use search::{SearchStats, translate_score_to_reward};
 use search::parallel_policies::{
   SearchPolicyWorkerBuilder, SearchPolicyWorker,
   PriorPolicy, TreePolicy,
   RolloutPolicyBuilder, RolloutMode, RolloutLeafs, RolloutPolicy,
 };
-use txnstate::{TxnStateConfig, TxnState, check_good_move_fast};
+use txnstate::{
+  TxnStateConfig, TxnState,
+  //BensonScratch,
+  check_good_move_fast, is_eyelike,
+};
 use txnstate::extras::{
   TxnStateNodeData,
   TxnStateRolloutData,
@@ -100,6 +104,7 @@ impl TreeTraj {
 #[derive(Clone)]
 pub struct RolloutTraj {
   pub rollout:      bool,
+  pub init_state:   TxnState<TxnStateNodeData>,
   //pub sim_state:    TxnState<TxnStateLibFeaturesData>,
   pub sim_state:    TxnState<TxnStateRolloutData>,
   pub sim_pairs:    Vec<(Stone, Point)>,
@@ -110,17 +115,25 @@ pub struct RolloutTraj {
   // FIXME(20151222): should probably move this to a `CommonTraj` data structure
   // but not critical.
   rave_mask:        Vec<BitSet>,
+
+  // XXX(20160217): For counting live stones at terminal states.
+  //term_count:       Vec<Vec<usize>>,
 }
 
 impl RolloutTraj {
   pub fn new() -> RolloutTraj {
     RolloutTraj{
       rollout:      false,
+      init_state:   TxnState::new(
+          TxnStateConfig::default(),
+          TxnStateNodeData::new(),
+      ),
       sim_state:    TxnState::new(
-          TxnStateConfig{
+          /*TxnStateConfig{
             rules:  RuleSet::KgsJapanese.rules(),
             ranks:  [PlayerRank::Dan(9), PlayerRank::Dan(9)],
-          },
+          },*/
+          TxnStateConfig::default(),
           //TxnStateLibFeaturesData::new(),
           TxnStateRolloutData::new(),
       ),
@@ -131,11 +144,16 @@ impl RolloutTraj {
         BitSet::with_capacity(Board::SIZE),
         BitSet::with_capacity(Board::SIZE),
       ],
+      /*term_count:   vec![
+        repeat(0).take(Board::SIZE).collect(),
+        repeat(0).take(Board::SIZE).collect(),
+      ],*/
     }
   }
 
   pub fn reset_terminal(&mut self, leaf_state: &TxnState<TxnStateNodeData>) {
     self.rollout = false;
+    self.init_state = leaf_state.clone();
     //self.sim_state.reset();
     self.sim_state.replace_clone_from(leaf_state, TxnStateRolloutData::with_features(leaf_state.get_data().features.clone()));
     self.sim_pairs.clear();
@@ -143,16 +161,25 @@ impl RolloutTraj {
     self.adj_score = None;
     self.rave_mask[0].clear();
     self.rave_mask[1].clear();
+    /*for p in 0 .. Board::SIZE {
+      self.term_count[0][p] = 0;
+      self.term_count[1][p] = 0;
+    }*/
   }
 
   pub fn reset_rollout(&mut self, leaf_state: &TxnState<TxnStateNodeData>) {
     self.rollout = true;
+    self.init_state = leaf_state.clone();
     self.sim_state.replace_clone_from(leaf_state, TxnStateRolloutData::with_features(leaf_state.get_data().features.clone()));
     self.sim_pairs.clear();
     self.raw_score = None;
     self.adj_score = None;
     self.rave_mask[0].clear();
     self.rave_mask[1].clear();
+    /*for p in 0 .. Board::SIZE {
+      self.term_count[0][p] = 0;
+      self.term_count[1][p] = 0;
+    }*/
   }
 
   pub fn score(&mut self, komi: f32, expected_score: f32) {
@@ -175,9 +202,31 @@ impl RolloutTraj {
     let w_adj_score = self.sim_state.current_score_rollout(komi - 0.0f32.max(expected_score));
     self.adj_score = Some([b_adj_score, w_adj_score]);
   }
+
+  pub fn count_term(&mut self, term_counts: &mut [Vec<usize>]) {
+    for p in 0 .. Board::SIZE {
+      let pt = Point::from_idx(p);
+      let stone = self.sim_state.current_stone(pt);
+      match stone {
+        Stone::Black => {
+          term_counts[0][p] += 1;
+        }
+        Stone::White => {
+          term_counts[1][p] += 1;
+        }
+        Stone::Empty => {
+          if is_eyelike(&self.sim_state.position, &self.sim_state.chains, Stone::Black, pt) {
+            term_counts[0][p] += 1;
+          } else if is_eyelike(&self.sim_state.position, &self.sim_state.chains, Stone::White, pt) {
+            term_counts[1][p] += 1;
+          }
+        }
+      }
+    }
+  }
 }
 
-#[derive(Clone)]
+/*#[derive(Clone)]
 pub struct Trace {
   //pub pairs:    Vec<(TxnState<TxnStateExtLibFeatsData>, Action)>,
   //pub pairs:    Vec<(TxnState<TxnStateLibFeaturesData>, Action)>,
@@ -192,12 +241,12 @@ impl Trace {
       value:    None,
     }
   }
-}
+}*/
 
 #[derive(Clone)]
 pub struct QuickTrace {
-  //pub init_state:   Option<TxnState<TxnStateLibFeaturesData>>,
-  pub init_state:   Option<TxnState<TxnStateRolloutData>>,
+  //pub init_state:   Option<TxnState<TxnStateRolloutData>>,
+  pub init_state:   Option<TxnState<TxnStateNodeData>>,
   pub actions:      Vec<(Stone, Action)>,
   pub value:        Option<f32>,
 }
@@ -216,6 +265,42 @@ impl QuickTrace {
     self.actions.clear();
     self.value = None;
   }
+}
+
+pub struct SearchTrace {
+  pub batch_size:   usize,
+  pub root_state:   Option<TxnState<TxnStateNodeData>>,
+  pub batches:      Vec<SearchTraceBatch>,
+}
+
+impl SearchTrace {
+  pub fn new() -> SearchTrace {
+    SearchTrace{
+      batch_size:   0,
+      root_state:   None,
+      batches:      vec![],
+    }
+  }
+
+  pub fn reset(&mut self, batch_size: usize, root_state: TxnState<TxnStateNodeData>) {
+    self.batch_size = batch_size;
+    self.root_state = Some(root_state);
+  }
+}
+
+pub struct SearchTraceBatch {
+  pub explore_traces:   Vec<ExploreTrace>,
+  pub rollout_traces:   Vec<RolloutTrace>,
+}
+
+pub struct ExploreTrace {
+  pub actions:      Vec<Action>,
+  pub horizons:     Vec<usize>,
+}
+
+pub struct RolloutTrace {
+  pub actions:      Vec<Action>,
+  pub score:        f32,
 }
 
 pub trait NodeBox: Sized {
@@ -372,12 +457,12 @@ impl NodeValues for AtomicNodeValues {
 
   fn succ_ratios_float(&self) -> Vec<f32> {
     let mut xs = vec![];
-    for j in 0 .. self.num_trials.len() {
-      // XXX(20160209): Using the "adjusted" number of successes rather than the
-      // raw count.
-      let s_j = self.num_succs[j].load(Ordering::Acquire) as f32;
+    //for j in 0 .. self.num_trials.len() {
+    for j in 0 .. self.horizon() {
+      // XXX(20160210): Using the "raw" count of successes.
+      let s_j = self.num_raw_succs[j].load(Ordering::Acquire) as f32;
       let n_j = self.num_trials[j].load(Ordering::Acquire) as f32;
-      if n_j < 1.0 {
+      if n_j < 32.0 {
         xs.push(0.0);
       } else {
         xs.push(s_j / n_j);
@@ -388,7 +473,8 @@ impl NodeValues for AtomicNodeValues {
 
   fn num_trials_float(&self) -> Vec<f32> {
     let mut ns = vec![];
-    for j in 0 .. self.num_trials.len() {
+    //for j in 0 .. self.num_trials.len() {
+    for j in 0 .. self.horizon() {
       ns.push(self.num_trials[j].load(Ordering::Acquire) as f32);
     }
     ns
@@ -513,27 +599,48 @@ pub struct UniqueTree<N> where N: NodeBox {
 
 struct InnerTree {
   root_node:        Option<Arc<RwLock<Node<ArcNodeBox, AtomicNodeValues>>>>,
+
   mean_raw_score:   f32,
+  term_counts:      Vec<Arc<Vec<AtomicUsize>>>,
+
+  explore_elapsed_ms:   AtomicUsize,
+  rollout_elapsed_ms:   AtomicUsize,
 }
 
 #[derive(Clone)]
 pub struct SharedTree {
-  inner:    Arc<Mutex<InnerTree>>,
-  horizon_cfg:   HorizonConfig,
+  inner:        Arc<Mutex<InnerTree>>,
+  horizon_cfg:  HorizonConfig,
 }
 
 impl SharedTree {
   pub fn new() -> SharedTree {
+    let mut b_term_counts = Vec::with_capacity(Board::SIZE);
+    let mut w_term_counts = Vec::with_capacity(Board::SIZE);
+    for p in 0 .. Board::SIZE {
+      b_term_counts.push(AtomicUsize::new(0));
+      w_term_counts.push(AtomicUsize::new(0));
+    }
     SharedTree{
       inner:    Arc::new(Mutex::new(InnerTree{
         root_node:      None,
         mean_raw_score: 0.0,
+        term_counts:    vec![
+          //Arc::new(repeat(AtomicUsize::new(0)).take(Board::SIZE).collect()),
+          //Arc::new(repeat(AtomicUsize::new(0)).take(Board::SIZE).collect()),
+          Arc::new(b_term_counts),
+          Arc::new(w_term_counts),
+        ],
+
+        explore_elapsed_ms: AtomicUsize::new(0),
+        rollout_elapsed_ms: AtomicUsize::new(0),
       })),
 
       // XXX(20160208): HACK: This is where the horizon policy is specified.
       // It should really belong to the hyperparam file, but whatever.
-      //horizon_cfg: HorizonConfig::Fixed{max_horizon: 5},
-      horizon_cfg: HorizonConfig::Pwide{mu: 1.8},
+      //horizon_cfg: HorizonConfig::All,
+      //horizon_cfg: HorizonConfig::Pwide{mu: 1.8},
+      horizon_cfg: HorizonConfig::Fixed{max_horizon: 20},
     }
   }
 
@@ -544,9 +651,46 @@ impl SharedTree {
       inner.mean_raw_score = 0.0;
     }
   }
+
+  pub fn try_advance(&self, turn: Stone, action: Action) -> bool {
+    match action {
+      Action::Resign |
+      Action::Pass => {
+        false
+      }
+      Action::Place{point} => {
+        let mut inner = self.inner.lock().unwrap();
+        let maybe_next_node = {
+          let p = point.idx();
+          let maybe_root_node = inner.root_node.as_ref().map(|n| n.read().unwrap());
+          if maybe_root_node.is_none() {
+            return false;
+          }
+          let root_node = maybe_root_node.unwrap();
+          let root_turn = root_node.state.current_turn();
+          if root_turn != turn {
+            println!("WARNING: try_advance: root node turn is {:?} but attempted turn is {:?}",
+                root_turn, turn);
+            return false;
+          }
+          let maybe_j = root_node.action_idxs.get(&p).map(|j| *j);
+          if maybe_j.is_none() {
+            return false;
+          }
+          let j = maybe_j.unwrap();
+          root_node.child_nodes[j].clone()
+        };
+        if maybe_next_node.is_none() {
+          return false;
+        }
+        inner.root_node = maybe_next_node;
+        true
+      }
+    }
+  }
 }
 
-pub trait TreeOpsTrait {
+/*pub trait TreeOpsTrait {
   type N: NodeBox;
 
   fn traverse(
@@ -561,7 +705,7 @@ pub trait TreeOpsTrait {
       tree_traj: &TreeTraj,
       rollout_traj: &mut RolloutTraj,
       rng: &mut Xorshiftplus128Rng);
-}
+}*/
 
 pub struct TreeOps;
 
@@ -572,7 +716,7 @@ impl TreeOps {
       tree_traj:        &mut TreeTraj,
       prior_policy:     &mut PriorPolicy,
       tree_policy:      &mut TreePolicy<R=Xorshiftplus128Rng>,
-      stats:            &mut SearchStats,
+      //stats:            &mut SearchStats,
       rng:              &mut Xorshiftplus128Rng)
       -> TreeResult
   {
@@ -587,7 +731,7 @@ impl TreeOps {
       let cursor_trials = cursor_node.read().unwrap().values.total_trials.load(Ordering::Acquire);
       if cursor_trials >= 1 {
         // Try to walk through the current node using the exploration policy.
-        stats.edge_count += 1;
+        //stats.edge_count += 1;
         let res = tree_policy.execute_search(&*cursor_node.read().unwrap(), rng);
         match res {
           Some((place_point, j)) => {
@@ -597,7 +741,7 @@ impl TreeOps {
               // Existing inner node, simply update the cursor.
               let child_node = cursor_node.read().unwrap().child_nodes[j].as_ref().unwrap().clone();
               cursor_node = child_node;
-              stats.inner_edge_count += 1;
+              //stats.inner_edge_count += 1;
             } else {
               let leaf_node = {
                 // XXX(20160111): Try to insert a new leaf node, but check for a
@@ -619,7 +763,7 @@ impl TreeOps {
                   let mut leaf_node = Arc::new(RwLock::new(Node::new(leaf_state, prior_policy, horizon_cfg)));
                   cursor_node.child_nodes[j] = Some(leaf_node.clone());
                   //cursor_node = leaf_node;
-                  stats.new_leaf_count += 1;
+                  //stats.new_leaf_count += 1;
                   leaf_node
                 } else {
                   cursor_node.child_nodes[j].as_ref().unwrap().clone()
@@ -631,20 +775,20 @@ impl TreeOps {
           }
           None => {
             // Terminal node, stop the walk.
-            stats.term_edge_count += 1;
+            //stats.term_edge_count += 1;
             break;
           }
         }
       } else {
         // Not enough trials, stop the walk and do a rollout.
-        stats.old_leaf_count += 1;
+        //stats.old_leaf_count += 1;
         break;
       }
     }
 
     // TODO(20151111): if the cursor node is terminal, score it now and backup;
     // otherwise do a rollout and then backup.
-    stats.max_ply = max(stats.max_ply, ply);
+    //stats.max_ply = max(stats.max_ply, ply);
     tree_traj.leaf_node = Some(cursor_node.clone());
     let terminal = cursor_node.read().unwrap().is_terminal();
     if terminal {
@@ -655,13 +799,12 @@ impl TreeOps {
   }
 
   pub fn backup(
+      use_rave: bool,
       horizon_cfg: HorizonConfig,
       tree_traj: &TreeTraj,
       rollout_traj: &mut RolloutTraj,
       rng: &mut Xorshiftplus128Rng)
   {
-    rollout_traj.rave_mask[0].clear();
-    rollout_traj.rave_mask[1].clear();
     let raw_score = match rollout_traj.raw_score {
       Some(raw_score) => raw_score,
       None => panic!("missing raw score for backup!"),
@@ -670,6 +813,11 @@ impl TreeOps {
       Some(adj_score) => adj_score,
       None => panic!("missing adj score for backup!"),
     };
+
+    if use_rave {
+      rollout_traj.rave_mask[0].clear();
+      rollout_traj.rave_mask[1].clear();
+    }
 
     if rollout_traj.sim_pairs.len() >= 1 {
       assert!(rollout_traj.rollout);
@@ -688,14 +836,16 @@ impl TreeOps {
         }
       }
 
-      for &(sim_turn, sim_point) in rollout_traj.sim_pairs.iter() {
-        rollout_traj.rave_mask[sim_turn.offset()].insert(sim_point.idx());
-      }
-      for sim_p in rollout_traj.rave_mask[update_turn.offset()].iter() {
-        let sim_point = Point::from_idx(sim_p);
-        if let Some(&sim_j) = leaf_node.action_idxs.get(&sim_point.idx()) {
-          assert_eq!(sim_point, leaf_node.valid_moves[sim_j]);
-          leaf_node.rave_update_arm(sim_j, adj_score[update_turn.offset()]);
+      if use_rave {
+        for &(sim_turn, sim_point) in rollout_traj.sim_pairs.iter() {
+          rollout_traj.rave_mask[sim_turn.offset()].insert(sim_point.idx());
+        }
+        for sim_p in rollout_traj.rave_mask[update_turn.offset()].iter() {
+          let sim_point = Point::from_idx(sim_p);
+          if let Some(&sim_j) = leaf_node.action_idxs.get(&sim_point.idx()) {
+            assert_eq!(sim_point, leaf_node.valid_moves[sim_j]);
+            leaf_node.rave_update_arm(sim_j, adj_score[update_turn.offset()]);
+          }
         }
       }
     }
@@ -712,12 +862,14 @@ impl TreeOps {
       let update_turn = node.state.current_turn();
       node.update_arm(update_j, adj_score[update_turn.offset()], raw_score);
 
-      rollout_traj.rave_mask[update_turn.offset()].insert(update_point.idx());
-      for sim_p in rollout_traj.rave_mask[update_turn.offset()].iter() {
-        let sim_point = Point::from_idx(sim_p);
-        if let Some(&sim_j) = node.action_idxs.get(&sim_point.idx()) {
-          assert_eq!(sim_point, node.valid_moves[sim_j]);
-          node.rave_update_arm(sim_j, adj_score[update_turn.offset()]);
+      if use_rave {
+        rollout_traj.rave_mask[update_turn.offset()].insert(update_point.idx());
+        for sim_p in rollout_traj.rave_mask[update_turn.offset()].iter() {
+          let sim_point = Point::from_idx(sim_p);
+          if let Some(&sim_j) = node.action_idxs.get(&sim_point.idx()) {
+            assert_eq!(sim_point, node.valid_moves[sim_j]);
+            node.rave_update_arm(sim_j, adj_score[update_turn.offset()]);
+          }
         }
       }
 
@@ -880,6 +1032,12 @@ impl<W> ParallelMonteCarloEvalServer<W> where W: RolloutPolicy<R=Xorshiftplus128
   }
 }*/
 
+#[derive(Clone, Default)]
+pub struct RolloutStats {
+  pub rewards:  Arc<AtomicUsize>,
+  pub count:    Arc<AtomicUsize>,
+}
+
 #[derive(Clone)]
 pub enum SearchWorkerCommand {
   ResetSerialSearch{
@@ -909,21 +1067,30 @@ pub enum SearchWorkerCommand {
     save_dir:   PathBuf,
     num_iters:  usize,
   },
-  /*ResetRollout{
+  ResetRollout{
     cfg:            SearchWorkerConfig,
-    shared_data:    EvalSharedData,
+    //shared_data:    EvalSharedData,
+    green_stone:    Stone,
     init_state:     TxnState<TxnStateNodeData>,
-    record_trace:   bool,
+    stats:          RolloutStats,
   },
-  TraceGradientsAndBackup{
+  TraceDescend{
     step_size:      f32,
     baseline:       f32,
-  },*/
-  SaveOpponentRolloutParamsToMem,
+    batch_size:     usize,
+    green_stone:    Stone,
+  },
+  SaveFriendlyRolloutParamsToMem,
   LoadOpponentRolloutParamsFromMem{
     params_blob:    Arc<Vec<u8>>,
   },
   Quit,
+}
+
+pub enum SearchWorkerOutput {
+  OpponentRolloutParams{
+    params_blob:    Vec<u8>,
+  },
 }
 
 #[derive(Clone, Copy)]
@@ -940,6 +1107,7 @@ pub struct ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
   worker_batch_capacity:    usize,
   pool:         ThreadPool,
   in_txs:       Vec<Sender<SearchWorkerCommand>>,
+  out_rx:       Receiver<SearchWorkerOutput>,
   out_barrier:  Arc<Barrier>,
   _marker:      PhantomData<W>,
 }
@@ -961,8 +1129,13 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
   where B: 'static + SearchPolicyWorkerBuilder<Worker=W> {
     let barrier = Arc::new(Barrier::new(num_workers));
     let pool = ThreadPool::new(num_workers);
-    let mut in_txs = vec![];
     let out_barrier = Arc::new(Barrier::new(num_workers + 1));
+    let mut in_txs = vec![];
+    let (out_tx, out_rx) = channel();
+
+    let shared_rollout_rewards = Arc::new(AtomicUsize::new(0));
+    let shared_rollout_count = Arc::new(AtomicUsize::new(0));
+    let shared_traces_count = Arc::new(AtomicUsize::new(0));
 
     for tid in 0 .. num_workers {
       let worker_builder = worker_builder.clone();
@@ -971,6 +1144,11 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
 
       let (in_tx, in_rx) = channel();
       in_txs.push(in_tx);
+      let out_tx = out_tx.clone();
+
+      let shared_rollout_rewards = shared_rollout_rewards.clone();
+      let shared_rollout_count = shared_rollout_count.clone();
+      let shared_traces_count = shared_traces_count.clone();
 
       pool.execute(move || {
         let mut rng = Xorshiftplus128Rng::new(&mut thread_rng());
@@ -979,6 +1157,11 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
         let barrier = barrier;
         let in_rx = in_rx;
         let out_barrier = out_barrier;
+
+        let use_rave = {
+          let (_, tree_policy) = worker.exploration_policies();
+          tree_policy.use_rave()
+        };
 
         let mut tree_trajs: Vec<_> = repeat(TreeTraj::new()).take(worker_batch_capacity).collect();
         let mut leaf_states: Vec<_> = repeat(TxnState::new(
@@ -990,6 +1173,14 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
         )).take(worker_batch_capacity).collect();
         let mut rollout_trajs: Vec<_> = repeat(RolloutTraj::new()).take(worker_batch_capacity).collect();
         let mut traces: Vec<_> = repeat(QuickTrace::new()).take(worker_batch_capacity * 40).collect();
+
+        let mut term_counts: Vec<Vec<usize>> = vec![
+          repeat(0).take(Board::SIZE).collect(),
+          repeat(0).take(Board::SIZE).collect(),
+        ];
+
+        let mut search_trace = SearchTrace::new();
+        let mut record_search_trace = false;
 
         loop {
           // FIXME(20151222): for real time search, num batches is just an
@@ -1009,6 +1200,15 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
 
               let root_node = {
                 let inner = tree.inner.lock().unwrap();
+
+                if tid == 0 {
+                  let shared_term_counts = inner.term_counts.clone();
+                  for p in 0 .. Board::SIZE {
+                    shared_term_counts[0][p].store(0, Ordering::Release);
+                    shared_term_counts[1][p].store(0, Ordering::Release);
+                  }
+                }
+
                 inner.root_node.as_ref().unwrap().clone()
               };
 
@@ -1016,11 +1216,20 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
               let num_batches = cfg.num_batches;
               assert!(batch_size <= worker_batch_capacity);
 
+              if record_search_trace {
+                let root_node = root_node.read().unwrap();
+                search_trace.reset(batch_size, root_node.state.clone());
+              }
+
               let mut worker_mean_score: f32 = 0.0;
               let mut worker_backup_count: f32 = 0.0;
+              for p in 0 .. Board::SIZE {
+                term_counts[0][p] = 0;
+                term_counts[1][p] = 0;
+              }
 
               // FIXME(20151222): should share stats between workers.
-              let mut stats: SearchStats = Default::default();
+              //let mut stats: SearchStats = Default::default();
 
               /*for trace in traces.iter_mut() {
                 trace.reset();
@@ -1031,16 +1240,24 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
                 }
               }
 
+              barrier.wait();
+              fence(Ordering::AcqRel);
+
+              let mut explore_elapsed_ms = 0;
+              let mut rollout_elapsed_ms = 0;
+
               for batch in 0 .. num_batches {
                 /*println!("DEBUG: worker {} batch {}/{}",
                     tid, batch, num_batches);*/
+
+                let start_time = get_time();
 
                 {
                   let (prior_policy, tree_policy) = worker.exploration_policies();
                   for batch_idx in 0 .. batch_size {
                     let tree_traj = &mut tree_trajs[batch_idx];
                     let rollout_traj = &mut rollout_trajs[batch_idx];
-                    match TreeOps::traverse(tree.horizon_cfg, root_node.clone(), tree_traj, prior_policy, tree_policy, &mut stats, &mut rng) {
+                    match TreeOps::traverse(tree.horizon_cfg, root_node.clone(), tree_traj, prior_policy, tree_policy, /*&mut stats,*/ &mut rng) {
                       TreeResult::Terminal => {
                         let leaf_state = &tree_traj.leaf_node.as_ref().unwrap().read().unwrap().state;
                         rollout_traj.reset_terminal(leaf_state);
@@ -1054,6 +1271,8 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
                 }
                 barrier.wait();
                 fence(Ordering::AcqRel);
+
+                let mid_time = get_time();
 
                 worker.rollout_policy().rollout_batch(
                     batch_size,
@@ -1069,21 +1288,38 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
                   let tree_traj = &tree_trajs[batch_idx];
                   let rollout_traj = &mut rollout_trajs[batch_idx];
                   rollout_traj.score(cfg.komi, cfg.prev_expected_score);
-                  TreeOps::backup(tree.horizon_cfg, tree_traj, rollout_traj, &mut rng);
+                  rollout_traj.count_term(&mut term_counts);
+                  TreeOps::backup(use_rave, tree.horizon_cfg, tree_traj, rollout_traj, &mut rng);
                   let raw_score = rollout_traj.raw_score.unwrap();
                   worker_backup_count += 1.0;
                   worker_mean_score += (raw_score - worker_mean_score) / worker_backup_count;
                 }
                 barrier.wait();
                 fence(Ordering::AcqRel);
+
+                let end_time = get_time();
+
+                explore_elapsed_ms += (mid_time - start_time).num_milliseconds() as usize;
+                rollout_elapsed_ms += (end_time - mid_time).num_milliseconds() as usize;
               }
 
-              {
+              let shared_term_counts = {
                 let mut inner = tree.inner.lock().unwrap();
+
                 inner.mean_raw_score += worker_mean_score / (num_workers as f32);
+                inner.explore_elapsed_ms.fetch_add(explore_elapsed_ms, Ordering::AcqRel);
+                inner.rollout_elapsed_ms.fetch_add(rollout_elapsed_ms, Ordering::AcqRel);
+
+                let shared_term_counts = inner.term_counts.clone();
+                shared_term_counts
+              };
+              for p in 0 .. Board::SIZE {
+                shared_term_counts[0][p].fetch_add(term_counts[0][p], Ordering::AcqRel);
+                shared_term_counts[1][p].fetch_add(term_counts[1][p], Ordering::AcqRel);
               }
 
               out_barrier.wait();
+              fence(Ordering::AcqRel);
             }
 
             SearchWorkerCommand::ResetEval{cfg, shared_data, record_trace, green_stone, init_state} => {
@@ -1107,9 +1343,9 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
 
               for batch in 0 .. num_batches {
                 for batch_idx in 0 .. batch_size {
+                  leaf_states[batch_idx] = init_state.clone();
                   let rollout_traj = &mut rollout_trajs[batch_idx];
-                  let leaf_state = &leaf_states[batch_idx];
-                  rollout_traj.reset_rollout(leaf_state);
+                  rollout_traj.reset_rollout(&init_state);
                 }
                 barrier.wait();
                 fence(Ordering::AcqRel);
@@ -1184,14 +1420,105 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
               out_barrier.wait();
             }
 
-            SearchWorkerCommand::SaveOpponentRolloutParamsToMem => {
-              // FIXME(20160207)
-              unimplemented!();
+            SearchWorkerCommand::ResetRollout{cfg, green_stone, init_state, stats} => {
+              let batch_size = cfg.batch_size;
+              let num_batches = cfg.num_batches;
+              assert!(batch_size <= worker_batch_capacity);
+              assert_eq!(num_batches, 1);
+
+              // FIXME(20151222): should share stats between workers.
+              //let mut stats: SearchStats = Default::default();
+
+              if traces.len() < batch_size {
+                for _ in traces.len() .. batch_size {
+                  traces.push(QuickTrace::new());
+                }
+              }
+              for batch_idx in 0 .. batch_size {
+                leaf_states[batch_idx] = init_state.clone();
+                let rollout_traj = &mut rollout_trajs[batch_idx];
+                rollout_traj.reset_rollout(&init_state);
+              }
+              if tid == 0 {
+                shared_rollout_rewards.store(0, Ordering::Release);
+                shared_rollout_count.store(0, Ordering::Release);
+              }
+              barrier.wait();
+              fence(Ordering::AcqRel);
+
+              worker.rollout_policy().rollout_batch(
+                  batch_size,
+                  green_stone,
+                  RolloutLeafs::LeafStates(&leaf_states),
+                  &mut rollout_trajs,
+                  true, &mut traces[0 .. batch_size],
+                  &mut rng);
+              barrier.wait();
+              fence(Ordering::AcqRel);
+
+              for batch_idx in 0 .. batch_size {
+                let rollout_traj = &mut rollout_trajs[batch_idx];
+                // FIXME(20160208): compute the score using Tromp Taylor.
+                rollout_traj.score(cfg.komi, cfg.prev_expected_score);
+                let raw_score = rollout_traj.raw_score.unwrap();
+                // XXX(20160208): Compute terminal value.
+                let reward = translate_score_to_reward(green_stone, raw_score);
+                traces[batch_idx].value = Some(reward as f32);
+                shared_rollout_rewards.fetch_add(reward, Ordering::AcqRel);
+                shared_rollout_count.fetch_add(1, Ordering::AcqRel);
+              }
+              barrier.wait();
+              fence(Ordering::AcqRel);
+
+              if tid == 0 {
+                stats.rewards.store(shared_rollout_rewards.load(Ordering::Acquire), Ordering::Release);
+                stats.count.store(shared_rollout_count.load(Ordering::Acquire), Ordering::Release);
+              }
+
+              out_barrier.wait();
+              fence(Ordering::AcqRel);
+            }
+
+            SearchWorkerCommand::TraceDescend{step_size, baseline, batch_size, green_stone} => {
+              if tid == 0 {
+                shared_traces_count.store(0, Ordering::Release);
+              }
+              barrier.wait();
+              fence(Ordering::AcqRel);
+
+              let mut worker_traces_count = 0;
+              worker.rollout_policy().init_traces();
+              for trace in &traces[ .. batch_size] {
+                if worker.rollout_policy().rollout_green_trace(baseline, green_stone, trace) {
+                  worker_traces_count += 1;
+                }
+              }
+              shared_traces_count.fetch_add(worker_traces_count, Ordering::AcqRel);
+              barrier.wait();
+              fence(Ordering::AcqRel);
+
+              let traces_count = shared_traces_count.load(Ordering::Acquire);
+              if worker_traces_count > 0 {
+                worker.rollout_policy().backup_green_traces(step_size, traces_count, green_stone);
+              }
+
+              out_barrier.wait();
+              fence(Ordering::AcqRel);
+            }
+
+            SearchWorkerCommand::SaveFriendlyRolloutParamsToMem => {
+              if tid == 0 {
+                let params_blob = worker.rollout_policy().save_green_params();
+                out_tx.send(SearchWorkerOutput::OpponentRolloutParams{
+                  params_blob:  params_blob,
+                }).unwrap();
+              }
+              out_barrier.wait();
             }
 
             SearchWorkerCommand::LoadOpponentRolloutParamsFromMem{params_blob} => {
-              // FIXME(20160207)
-              unimplemented!();
+              worker.rollout_policy().load_red_params(&params_blob);
+              out_barrier.wait();
             }
 
             SearchWorkerCommand::Quit => {
@@ -1210,6 +1537,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
       worker_batch_capacity:    worker_batch_capacity,
       pool:         pool,
       in_txs:       in_txs,
+      out_rx:       out_rx,
       out_barrier:  out_barrier,
       _marker:      PhantomData,
     }
@@ -1230,6 +1558,10 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
   pub fn join(&self) {
     self.out_barrier.wait();
   }
+
+  pub fn recv_output(&self) -> SearchWorkerOutput {
+    self.out_rx.recv().unwrap()
+  }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1239,6 +1571,12 @@ pub struct MonteCarloSearchResult {
   pub expected_score:   f32,
   pub expected_adj_val: f32,
   pub expected_value:   f32,
+  pub b_mc_alive:       usize,
+  pub w_mc_alive:       usize,
+  /*pub b_alive_ch:       usize,
+  pub b_alive_ter:      usize,
+  pub w_alive_ch:       usize,
+  pub w_alive_ter:      usize,*/
 }
 
 #[derive(Clone, Copy, Default, Debug)]
@@ -1246,6 +1584,8 @@ pub struct MonteCarloSearchStats {
   pub argmax_rank:      Option<usize>,
   pub argmax_ntrials:   usize,
   pub elapsed_ms:       usize,
+  pub avg_explore_elapsed_ms:   usize,
+  pub avg_rollout_elapsed_ms:   usize,
 }
 
 /*#[derive(Default)]
@@ -1288,6 +1628,7 @@ impl ParallelMonteCarloSearch {
       server:       &ParallelMonteCarloSearchServer<W>,
       green_stone:  Stone,
       init_state:   &TxnState<TxnStateNodeData>,
+      shared_tree:  SharedTree,
       prev_result:  Option<&MonteCarloSearchResult>,
       rng:          &mut Xorshiftplus128Rng)
       -> (MonteCarloSearchResult, MonteCarloSearchStats)
@@ -1310,7 +1651,7 @@ impl ParallelMonteCarloSearch {
 
     // TODO(20160106): reset stats.
 
-    let tree = SharedTree::new();
+    //let tree = SharedTree::new();
     let cfg = SearchWorkerConfig{
       batch_size:   worker_batch_size,
       num_batches:  worker_num_batches,
@@ -1322,7 +1663,7 @@ impl ParallelMonteCarloSearch {
     for tid in 0 .. num_workers {
       server.enqueue(tid, SearchWorkerCommand::ResetSearch{
         cfg:            cfg,
-        shared_tree:    tree.clone(),
+        shared_tree:    shared_tree.clone(),
         green_stone:    Stone::White, // FIXME FIXME FIXME(20160208): use correct color.
         init_state:     init_state.clone(),
       });
@@ -1336,21 +1677,45 @@ impl ParallelMonteCarloSearch {
 
     /*let root_node_opt = tree.root_node.read().unwrap();
     let root_node = root_node_opt.as_ref().unwrap().read().unwrap();*/
-    let (root_node, mean_raw_score) = {
-      let inner_tree = tree.inner.lock().unwrap();
-      (inner_tree.root_node.as_ref().unwrap().clone(), inner_tree.mean_raw_score)
+    let (root_node, mean_raw_score, shared_term_counts) = {
+      let inner_tree = shared_tree.inner.lock().unwrap();
+
+      stats.avg_explore_elapsed_ms = inner_tree.explore_elapsed_ms.load(Ordering::Acquire) / num_workers;
+      stats.avg_rollout_elapsed_ms = inner_tree.rollout_elapsed_ms.load(Ordering::Acquire) / num_workers;
+
+      ( inner_tree.root_node.as_ref().unwrap().clone(),
+        inner_tree.mean_raw_score,
+        inner_tree.term_counts.clone(),
+      )
     };
+
+    let mut b_mc_alive = 0;
+    let mut w_mc_alive = 0;
+    let live_thresh = (0.9 * (worker_batch_size * worker_num_batches * num_workers) as f32).ceil() as usize;
+    for p in 0 .. Board::SIZE {
+      if shared_term_counts[0][p].load(Ordering::Acquire) >= live_thresh {
+        b_mc_alive += 1;
+      }
+      if shared_term_counts[1][p].load(Ordering::Acquire) >= live_thresh {
+        w_mc_alive += 1;
+      }
+    }
     let root_node = root_node.read().unwrap();
-    let root_trials = root_node.values.num_trials_float();
-    //let root_ratios = root_node.values.succ_ratios_float();
+
+    /*let mut scratch = BensonScratch::new();
+    let (b_alive_ch, b_alive_ter) = root_node.state.count_unconditionally_alive(Stone::Black, &mut scratch);
+    let (w_alive_ch, w_alive_ter) = root_node.state.count_unconditionally_alive(Stone::White, &mut scratch);*/
+
     // XXX(20160209): Maximize the winning rate rather than the number of plays.
     // The argument is that it should be highly unlikely for an arm with high
     // value to be played only a small number of times.
     // FIXME(20160209): the above, except in the case of progressive widening
     // horizon, where there _may_ be such arms; a hacky remedy may be to stop
     // widening at some fixed fraction of the total rollout number.
-    let (action, adj_value, raw_value) = if let Some(argmax_j) = array_argmax(&root_trials) {
+    //let root_ratios = root_node.values.succ_ratios_float();
     //let (action, adj_value, raw_value) = if let Some(argmax_j) = array_argmax(&root_ratios) {
+    let root_trials = root_node.values.num_trials_float();
+    let (action, adj_value, raw_value) = if let Some(argmax_j) = array_argmax(&root_trials) {
       stats.argmax_rank = Some(argmax_j);
       stats.argmax_ntrials = root_trials[argmax_j] as usize;
       let argmax_point = root_node.valid_moves[argmax_j];
@@ -1359,7 +1724,14 @@ impl ParallelMonteCarloSearch {
       let j_trials = root_trials[argmax_j];
       let adj_value = j_adj_succs as f32 / j_trials;
       let raw_value = j_raw_succs as f32 / j_trials;
-      (Action::Place{point: argmax_point}, adj_value, raw_value)
+      //if raw_value <= 0.001 {
+      if raw_value < 0.1 {
+        (Action::Resign, adj_value, raw_value)
+      /*} else if raw_value >= 0.999 {
+        (Action::Pass, adj_value, raw_value)*/
+      } else {
+        (Action::Place{point: argmax_point}, adj_value, raw_value)
+      }
     } else {
       stats.argmax_rank = None;
       (Action::Pass, 0.5, 0.5)
@@ -1374,6 +1746,16 @@ impl ParallelMonteCarloSearch {
       expected_score:   mean_raw_score,
       expected_adj_val: adj_value,
       expected_value:   raw_value,
+      b_mc_alive:       b_mc_alive,
+      w_mc_alive:       w_mc_alive,
+      /*b_alive_ch:       0,
+      b_alive_ter:      0,
+      w_alive_ch:       0,
+      w_alive_ter:      0,*/
+      /*b_alive_ch:       b_alive_ch,
+      b_alive_ter:      b_alive_ter,
+      w_alive_ch:       w_alive_ch,
+      w_alive_ter:      w_alive_ter,*/
     }, stats)
   }
 }
@@ -1572,12 +1954,33 @@ impl ParallelMonteCarloRollout {
   pub fn join<W>(&self,
       server:       &ParallelMonteCarloSearchServer<W>,
       batch_size:   usize,
+      green_stone:  Stone,
       init_state:   TxnState<TxnStateNodeData>,
       rng:          &mut Xorshiftplus128Rng)
+      -> (usize, usize)
       where W: SearchPolicyWorker
   {
-    // FIXME(20160207)
-    unimplemented!();
+    let num_workers = server.num_workers();
+    let worker_batch_size = (batch_size + num_workers - 1) / num_workers;
+
+    let stats: RolloutStats = Default::default();
+    let cfg = SearchWorkerConfig{
+      batch_size:   worker_batch_size,
+      num_batches:  1,
+      komi:                 7.5, // FIXME(20160112): use correct komi value.
+      prev_expected_score:  0.0, // FIXME(20160116): use previous score?
+    };
+
+    for tid in 0 .. num_workers {
+      server.enqueue(tid, SearchWorkerCommand::ResetRollout{
+        cfg:            cfg,
+        green_stone:    green_stone,
+        init_state:     init_state.clone(),
+        stats:          stats.clone(),
+      });
+    }
+    server.join();
+    (stats.rewards.load(Ordering::Acquire), stats.count.load(Ordering::Acquire))
   }
 }
 
@@ -1586,14 +1989,40 @@ pub struct ParallelMonteCarloRolloutBackup;
 impl ParallelMonteCarloRolloutBackup {
   pub fn join<W>(&self,
       server:       &ParallelMonteCarloSearchServer<W>,
-      batch_size:   usize,
       step_size:    f32,
       baseline:     f32,
+      batch_size:   usize,
+      green_stone:  Stone,
       rng:          &mut Xorshiftplus128Rng)
       where W: SearchPolicyWorker
   {
-    // FIXME(20160207)
-    unimplemented!();
+    let num_workers = server.num_workers();
+    let worker_batch_size = (batch_size + num_workers - 1) / num_workers;
+
+    for tid in 0 .. num_workers {
+      server.enqueue(tid, SearchWorkerCommand::TraceDescend{
+        step_size:      step_size,
+        baseline:       baseline,
+        batch_size:     worker_batch_size,
+        green_stone:    green_stone,
+      });
+    }
+    server.join();
+  }
+}
+
+pub struct ParallelMonteCarloSaveFriendlyParams;
+
+impl ParallelMonteCarloSaveFriendlyParams {
+  pub fn join<W>(&self,
+      server:       &ParallelMonteCarloSearchServer<W>)
+      where W: SearchPolicyWorker
+  {
+    let num_workers = server.num_workers();
+    for tid in 0 .. num_workers {
+      server.enqueue(tid, SearchWorkerCommand::SaveFriendlyRolloutParamsToMem);
+    }
+    server.join();
   }
 }
 
@@ -1605,7 +2034,12 @@ impl ParallelMonteCarloLoadOpponentParams {
       params_blob:  Arc<Vec<u8>>)
       where W: SearchPolicyWorker
   {
-    // FIXME(20160207)
-    unimplemented!();
+    let num_workers = server.num_workers();
+    for tid in 0 .. num_workers {
+      server.enqueue(tid, SearchWorkerCommand::LoadOpponentRolloutParamsFromMem{
+        params_blob:    params_blob.clone(),
+      });
+    }
+    server.join();
   }
 }
