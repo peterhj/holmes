@@ -1,4 +1,4 @@
-.PHONY: all debug clean test
+.PHONY: all debug clean test test-txn
 
 all:
 	cargo build --release
@@ -9,7 +9,7 @@ debug:
 clean:
 	cargo clean
 
-test: test-sgf
+test: test-txn
 
-test-sgf:
-	cargo test --release --test sgf
+test-txn:
+	cargo test --release --test txnstate

@@ -1,5 +1,3 @@
-//#![allow(non_snake_case)]
-
 extern crate holmes;
 extern crate rand;
 extern crate rusqlite;
@@ -12,7 +10,6 @@ use holmes::sgf::{Sgf};
 use holmes::txnstate::{
   TOMBSTONE, TxnStateData, TxnPosition, TxnChainsList, TxnStateConfig, TxnState,
 };
-//use holmes::txnstate::extras::{TxnStateAllData};
 use holmes::txnstate::extras::{TxnStateLegalityData};
 use holmes::txnstate::features::{
   //TxnStateLibFeaturesData,
@@ -79,12 +76,12 @@ impl TxnStateData for TxnStateTestFeatsData {
 
 #[test]
 #[should_panic]
-fn test_sgf_dummy() {
+fn test_txnstate_dummy() {
   panic!();
 }
 
 #[test]
-fn test_sgf_check_db_consistency() {
+fn test_txnstate_check_db_consistency() {
   let db_path = PathBuf::from(DB_PATH);
   let db = SqliteConnection::open_with_flags(
       &db_path, SqliteOpenFlags::from_bits(0x01).unwrap()).unwrap();
@@ -124,7 +121,7 @@ fn test_sgf_check_db_consistency() {
 }
 
 #[test]
-fn test_sgf_correctness() {
+fn test_txnstate_correctness() {
   let db_path = PathBuf::from(DB_PATH);
   let db = SqliteConnection::open_with_flags(
       &db_path, SqliteOpenFlags::from_bits(0x01).unwrap()).unwrap();
@@ -252,6 +249,8 @@ fn test_sgf_correctness() {
 
         // Check that undo also works as expected for all possible actions.
         // Also check that the given action is valid. 
+        let res0 = state.try_action(turn, action);
+        state.undo();
         thread_rng().shuffle(&mut action_space);
         for &a in action_space.iter() {
           let _ = state.try_action(turn, a);
@@ -260,6 +259,7 @@ fn test_sgf_correctness() {
         let res1 = state.try_action(turn, action);
         state.undo();
         let res2 = state.try_action(turn, action);
+        assert_eq!(res0, res2);
         assert_eq!(res1, res2);
         match res2 {
           Ok(_)   => state.commit(),
