@@ -2387,7 +2387,7 @@ impl TxnStateData for TxnStateAlphaFeatsV2Data {
 
 #[derive(Clone)]
 pub struct TxnStateAlphaV3FeatsData {
-  features:     Vec<u8>,
+  pub features: Vec<u8>,
   prev_moves:   Vec<Option<(Stone, Point)>>,
   black_rank:   Option<PlayerRank>,
   white_rank:   Option<PlayerRank>,
@@ -2397,7 +2397,7 @@ pub struct TxnStateAlphaV3FeatsData {
 impl TxnStateAlphaV3FeatsData {
   pub const SET: u8 = 255;
 
-  pub const NUM_PLANES:         usize = 50;
+  pub const NUM_PLANES:         usize = 34;
   pub const NUM_EXTRACT_PLANES: usize = 32;
   pub const NUM_SPARSE_PLANES:  usize = 31;
   pub const NUM_DENSE_PLANES:   usize = 1;
@@ -2929,7 +2929,7 @@ impl TxnStateData for TxnStateAlphaV3FeatsData {
 
 #[derive(Clone)]
 pub struct TxnStateAlphaMiniV3FeatsData {
-  features:     Vec<u8>,
+  pub features: Vec<u8>,
   prev_moves:   Vec<Option<(Stone, Point)>>,
   tmp_mark:     BitSet,
 }
