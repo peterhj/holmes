@@ -7,6 +7,8 @@ use txnstate::features::{
   TxnStateFeaturesData,
   TxnStateLibFeaturesData,
   TxnStateAlphaFeatsV2Data,
+  TxnStateAlphaV3FeatsData,
+  TxnStateAlphaMiniV3FeatsData,
 };
 
 use bit_set::{BitSet};
@@ -191,7 +193,8 @@ impl TxnStateData for TxnStateLegalityData {
 pub struct TxnStateNodeData {
   //pub features: TxnStateFeaturesData,
   //pub features: TxnStateLibFeaturesData,
-  pub features: TxnStateAlphaFeatsV2Data,
+  //pub features: TxnStateAlphaFeatsV2Data,
+  pub features: TxnStateAlphaV3FeatsData,
   pub legality: TxnStateLegalityData,
 }
 
@@ -200,7 +203,8 @@ impl TxnStateNodeData {
     TxnStateNodeData{
       //features: TxnStateFeaturesData::new(),
       //features: TxnStateLibFeaturesData::new(),
-      features: TxnStateAlphaFeatsV2Data::new(),
+      //features: TxnStateAlphaFeatsV2Data::new(),
+      features: TxnStateAlphaV3FeatsData::new(),
       legality: TxnStateLegalityData::new(),
     }
   }
@@ -222,20 +226,28 @@ impl TxnStateData for TxnStateNodeData {
 #[derive(Clone)]
 pub struct TxnStateRolloutData {
   //pub features: TxnStateLibFeaturesData,
-  pub features: TxnStateAlphaFeatsV2Data,
+  //pub features: TxnStateAlphaFeatsV2Data,
+  pub features: TxnStateAlphaMiniV3FeatsData,
 }
 
 impl TxnStateRolloutData {
   pub fn new() -> TxnStateRolloutData {
     TxnStateRolloutData{
       //features: TxnStateLibFeaturesData::new(),
-      features: TxnStateAlphaFeatsV2Data::new(),
+      //features: TxnStateAlphaFeatsV2Data::new(),
+      features: TxnStateAlphaMiniV3FeatsData::new(),
     }
   }
 
-  pub fn with_features(features: TxnStateAlphaFeatsV2Data) -> TxnStateRolloutData {
+  /*pub fn with_features(features: TxnStateAlphaFeatsV2Data) -> TxnStateRolloutData {
     TxnStateRolloutData{
       features: features,
+    }
+  }*/
+
+  pub fn from_node_data(node_data: &TxnStateNodeData) -> TxnStateRolloutData {
+    TxnStateRolloutData{
+      features: TxnStateAlphaMiniV3FeatsData::from_src_feats(&node_data.features),
     }
   }
 }

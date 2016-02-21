@@ -1,6 +1,6 @@
 use agents::{PreGame, Agent};
-use agents::convnet::{ConvnetAgent};
-use agents::search::{SearchAgent};
+//use agents::convnet::{ConvnetAgent};
+//use agents::search::{SearchAgent};
 use board::{RuleSet, Stone, Point, Action};
 use gtp::{GtpClient, Entity};
 use gtp::Entity::*;

@@ -1,5 +1,6 @@
 pub use gtp_board::{Coord};
 
+use std::fmt;
 use std::str::{from_utf8};
 
 pub struct Board;
@@ -165,11 +166,27 @@ impl Point {
   }
 }
 
-#[derive(Clone, Copy, Eq, PartialEq, Debug)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub enum Action {
   Place{point: Point},
   Pass,
   Resign,
+}
+
+impl fmt::Debug for Action {
+  fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+    match self {
+      &Action::Place{point} => {
+        formatter.write_str(&format!("Place({})", point.to_coord().to_string()))
+      }
+      &Action::Pass => {
+        formatter.write_str("Pass")
+      }
+      &Action::Resign => {
+        formatter.write_str("Resign")
+      }
+    }
+  }
 }
 
 impl Action {

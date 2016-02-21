@@ -14,6 +14,8 @@ use holmes::txnstate::features::{
   TxnStateExtLibFeatsData,
   TxnStateAlphaFeatsV1Data,
   TxnStateAlphaFeatsV2Data,
+  TxnStateAlphaV3FeatsData,
+  TxnStateAlphaMiniV3FeatsData,
 };
 
 //use array::{NdArrayFormat, ArrayDeserialize, ArraySerialize, Array3d};
@@ -30,10 +32,12 @@ use std::path::{PathBuf};
 
 fn main() {
   let args: Vec<_> = env::args().collect();
-  let index_path = PathBuf::from(&args[1]);
-  let frames_db_path = PathBuf::from(&args[2]);
-  let action_labels_db_path = PathBuf::from(&args[3]);
-  let value_labels_db_path = PathBuf::from(&args[4]);
+  let prefix = args[1].clone();
+  let suffix = args[2].clone();
+  let index_path = PathBuf::from(&format!("{}_index", prefix));
+  let frames_db_path = PathBuf::from(&format!("{}_frames_{}.episodb", prefix, suffix));
+  let action_labels_db_path = PathBuf::from(&format!("{}_labels_action_{}.episodb", prefix, suffix));
+  let value_labels_db_path = PathBuf::from(&format!("{}_labels_value_{}.episodb", prefix, suffix));
 
   let index_file = BufReader::new(File::open(&index_path).unwrap());
   let mut index_lines = Vec::new();
@@ -53,12 +57,16 @@ fn main() {
   //let expected_dims = (19, 19, 16);
   //let expected_dims = (19, 19, 28);
   //let expected_dims = (19, 19, 37);
-  let expected_dims = (19, 19, 44);
+  //let expected_dims = (19, 19, 44);
+  //let expected_dims = (19, 19, 32);
+  let expected_dims = (19, 19, 16);
 
   //let expected_frame_sz = <Array3d<u8> as ArrayDeserialize<u8, NdArrayFormat>>::serial_size(expected_dims);
   //let expected_frame_sz = Array3d::<u8>::serial_size(expected_dims);
   //let expected_frame_sz = BitArray3d::serial_size(expected_dims);
-  let expected_frame_sz = BitArray3d::serial_size((19, 19, 43)) + Array3d::<u8>::serial_size((19, 19, 1));
+  //let expected_frame_sz = BitArray3d::serial_size((19, 19, 43)) + Array3d::<u8>::serial_size((19, 19, 1));
+  //let expected_frame_sz = BitArray3d::serial_size((19, 19, 31)) + Array3d::<u8>::serial_size((19, 19, 1));
+  let expected_frame_sz = BitArray3d::serial_size(expected_dims);
 
   let n = sgf_paths.len();
   let est_ep_len = 216;
@@ -74,9 +82,6 @@ fn main() {
   let mut num_skipped = 0;
   let mut num_positions = 0;
   for (i, sgf_path) in sgf_paths.iter().enumerate() {
-    if i < 0 {
-      continue;
-    }
     if (i+1) % 1000 == 0 {
       println!("DEBUG: {} / {}: {:?} num skipped positions: {} num positions: {}",
           i+1, sgf_paths.len(), sgf_path, num_skipped, num_positions);
@@ -84,7 +89,7 @@ fn main() {
     let mut sgf_file = match File::open(sgf_path) {
       Ok(file) => file,
       Err(_) => {
-        println!("WARNING: failed to open sgf file: '{:?}'", sgf_path);
+        println!("WARNING: extract: failed to open sgf file: '{:?}'", sgf_path);
         continue;
       }
     };
@@ -339,7 +344,9 @@ fn main() {
         //TxnStateLibFeaturesData::new(),
         //TxnStateExtLibFeatsData::new(),
         //TxnStateAlphaFeatsV1Data::new(),
-        TxnStateAlphaFeatsV2Data::new(),
+        //TxnStateAlphaFeatsV2Data::new(),
+        //TxnStateAlphaV3FeatsData::new(),
+        TxnStateAlphaMiniV3FeatsData::new(),
     );
     state.reset();
     for (t, &(ref player, ref mov)) in sgf.moves.iter().enumerate() {
@@ -435,11 +442,18 @@ fn main() {
       raw_frame.serialize(&mut serial_frame);
       assert_eq!(expected_frame_sz, serial_frame.len());*/
 
-      // FIXME(20160202): use custom encoding to get 2 arrays for AlphaV2 feats.
+      // XXX(20160220): Option 1: Single serialized bit array.
       let mut serial_frame: Vec<u8> = Vec::with_capacity(expected_frame_sz);
+      let bit_arr = state.get_data().extract_relative_serial_array(turn);
+      bit_arr.serialize(&mut serial_frame).unwrap();
+
+      // XXX(20160220): Option 2: Serialized into two: bit array and byte array.
+      // XXX(20160202): use custom encoding to get 2 arrays for AlphaV2 feats.
+      /*let mut serial_frame: Vec<u8> = Vec::with_capacity(expected_frame_sz);
       let (bit_arr, bytes_arr) = state.get_data().extract_relative_serial_arrays(turn);
-      bit_arr.serialize(&mut serial_frame);
-      bytes_arr.serialize(&mut serial_frame);
+      bit_arr.serialize(&mut serial_frame).unwrap();
+      bytes_arr.serialize(&mut serial_frame).unwrap();*/
+
       assert_eq!(serial_frame.len(), expected_frame_sz);
       frames_db.append_frame(&serial_frame);
 

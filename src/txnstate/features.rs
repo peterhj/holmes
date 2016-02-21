@@ -2482,6 +2482,90 @@ impl TxnStateAlphaV3FeatsData {
     feats
   }
 
+  pub fn extract_relative_serial_arrays(&self, turn: Stone) -> (BitArray3d, Array3d<u8>) {
+    let mut buf: Vec<u8> = Vec::with_capacity(Self::NUM_EXTRACT_PLANES * Board::SIZE);
+    unsafe { buf.set_len(Self::NUM_EXTRACT_PLANES * Board::SIZE) };
+    self.extract_relative_features(turn, &mut buf);
+
+    let mut bit_buf: Vec<u8> = Vec::with_capacity(Self::NUM_SPARSE_PLANES * Board::SIZE);
+    unsafe { bit_buf.set_len(Self::NUM_SPARSE_PLANES * Board::SIZE) };
+    copy_memory(
+        &buf[ .. Self::NUM_SPARSE_PLANES * Board::SIZE],
+        &mut bit_buf,
+    );
+
+    let mut bytes_buf: Vec<u8> = Vec::with_capacity(Self::NUM_DENSE_PLANES * Board::SIZE);
+    unsafe { bytes_buf.set_len(Self::NUM_DENSE_PLANES * Board::SIZE) };
+    copy_memory(
+        &buf[Self::NUM_SPARSE_PLANES * Board::SIZE .. ],
+        &mut bytes_buf,
+    );
+
+    let bit_arr = BitArray3d::from_byte_array(&Array3d::with_data(bit_buf, (Board::DIM, Board::DIM, Self::NUM_SPARSE_PLANES)));
+    let bytes_arr = Array3d::with_data(bytes_buf, (Board::DIM, Board::DIM, Self::NUM_DENSE_PLANES));
+
+    (bit_arr, bytes_arr)
+  }
+
+  pub fn extract_relative_features(&self, turn: Stone, dst_buf: &mut [u8]) {
+    assert_eq!(dst_buf.len(), Self::NUM_EXTRACT_PLANES * Board::SIZE);
+    match turn {
+      Stone::Black => {
+        /*copy_memory(
+            &self.features[ .. Self::BLACK_PLANE],
+            &mut dst_buf[ .. Self::FRIEND_EXT_PLANE],
+        );
+        copy_memory(
+            &self.features[Self::BLACK_PLANE .. Self::B_RANK_AMA_PLANE],
+            &mut dst_buf[Self::FRIEND_EXT_PLANE .. Self::ENEMY_EXT_PLANE],
+        );*/
+        copy_memory(
+            &self.features[ .. Self::B_RANK_AMA_PLANE],
+            &mut dst_buf[ .. Self::ENEMY_EXT_PLANE],
+        );
+        /*copy_memory(
+            &self.features[Self::WHITE_PLANE .. Self::W_RANK_AMA_PLANE],
+            &mut dst_buf[Self::ENEMY_EXT_PLANE .. Self::E_RANK_AMA_EXT_PLANE],
+        );
+        copy_memory(
+            &self.features[Self::W_RANK_AMA_PLANE .. Self::TURNS_1_PLANE],
+            &mut dst_buf[Self::E_RANK_AMA_EXT_PLANE .. Self::TURNS_1_EXT_PLANE],
+        );
+        copy_memory(
+            &self.features[Self::TURNS_1_PLANE .. ],
+            &mut dst_buf[Self::TURNS_1_EXT_PLANE .. ],
+        );*/
+        copy_memory(
+            &self.features[Self::WHITE_PLANE .. ],
+            &mut dst_buf[Self::ENEMY_EXT_PLANE .. ],
+        );
+      }
+      Stone::White => {
+        copy_memory(
+            &self.features[ .. Self::BLACK_PLANE],
+            &mut dst_buf[ .. Self::FRIEND_EXT_PLANE],
+        );
+        copy_memory(
+            &self.features[Self::WHITE_PLANE .. Self::W_RANK_AMA_PLANE],
+            &mut dst_buf[Self::FRIEND_EXT_PLANE .. Self::ENEMY_EXT_PLANE],
+        );
+        copy_memory(
+            &self.features[Self::BLACK_PLANE .. Self::B_RANK_AMA_PLANE],
+            &mut dst_buf[Self::ENEMY_EXT_PLANE .. Self::E_RANK_AMA_EXT_PLANE],
+        );
+        copy_memory(
+            &self.features[Self::B_RANK_AMA_PLANE .. Self::WHITE_PLANE],
+            &mut dst_buf[Self::E_RANK_AMA_EXT_PLANE .. Self::TURNS_1_EXT_PLANE],
+        );
+        copy_memory(
+            &self.features[Self::TURNS_1_PLANE .. ],
+            &mut dst_buf[Self::TURNS_1_EXT_PLANE .. ],
+        );
+      }
+      _ => unreachable!(),
+    }
+  }
+
   fn update_point_turns(features: &mut [u8], point: Point, turns: usize) {
     let p = point.idx();
     match turns {
@@ -2708,6 +2792,7 @@ impl TxnStateAlphaV3FeatsData {
       features[Self::LIBS_6_PLANE + p] = 0;
       features[Self::LIBS_7_PLANE + p] = 0;
       features[Self::LIBS_8_PLANE + p] = 0;
+
       features[Self::CAPS_1_PLANE + p] = 0;
       features[Self::CAPS_2_PLANE + p] = 0;
       features[Self::CAPS_3_PLANE + p] = 0;
@@ -2984,6 +3069,97 @@ impl TxnStateAlphaMiniV3FeatsData {
     feats
   }
 
+  pub fn from_src_feats(src: &TxnStateAlphaV3FeatsData) -> TxnStateAlphaMiniV3FeatsData {
+    type SrcFeats = TxnStateAlphaV3FeatsData;
+    let plane = Board::SIZE;
+    let pairs = [
+        (SrcFeats::BASELINE_PLANE,  Self::BASELINE_PLANE),
+        (SrcFeats::EMPTY_PLANE,     Self::EMPTY_PLANE),
+        (SrcFeats::BLACK_PLANE,     Self::BLACK_PLANE),
+        (SrcFeats::WHITE_PLANE,     Self::WHITE_PLANE),
+        (SrcFeats::TURNS_1_PLANE,   Self::TURNS_1_PLANE),
+        (SrcFeats::TURNS_2_PLANE,   Self::TURNS_2_PLANE),
+        (SrcFeats::TURNS_3_PLANE,   Self::TURNS_3_PLANE),
+        (SrcFeats::TURNS_4_PLANE,   Self::TURNS_4_PLANE),
+        (SrcFeats::LIBS_1_PLANE,    Self::LIBS_1_PLANE),
+        (SrcFeats::LIBS_2_PLANE,    Self::LIBS_2_PLANE),
+        (SrcFeats::LIBS_3_PLANE,    Self::LIBS_3_PLANE),
+        (SrcFeats::LIBS_4_PLANE,    Self::LIBS_4_PLANE),
+        (SrcFeats::CAPS_1_PLANE,    Self::CAPS_1_PLANE),
+        (SrcFeats::CAPS_2_PLANE,    Self::CAPS_2_PLANE),
+        (SrcFeats::CAPS_3_PLANE,    Self::CAPS_3_PLANE),
+        (SrcFeats::KO_PLANE,        Self::KO_PLANE),
+    ];
+    let mut dst = TxnStateAlphaMiniV3FeatsData::new();
+    for &(src_offset, dst_offset) in pairs.iter() {
+      copy_memory(
+          &src.features[src_offset .. dst_offset + plane],
+          &mut dst.features[dst_offset .. dst_offset + plane],
+      );
+    }
+    dst
+  }
+
+  pub fn extract_relative_serial_array(&self, turn: Stone) -> BitArray3d {
+    let mut buf: Vec<u8> = Vec::with_capacity(Self::NUM_EXTRACT_PLANES * Board::SIZE);
+    unsafe { buf.set_len(Self::NUM_EXTRACT_PLANES * Board::SIZE) };
+    self.extract_relative_features(turn, &mut buf);
+
+    let mut bit_buf: Vec<u8> = Vec::with_capacity(Self::NUM_EXTRACT_PLANES * Board::SIZE);
+    unsafe { bit_buf.set_len(Self::NUM_EXTRACT_PLANES * Board::SIZE) };
+    copy_memory(
+        &buf[ .. Self::NUM_EXTRACT_PLANES * Board::SIZE],
+        &mut bit_buf,
+    );
+
+    let bit_arr = BitArray3d::from_byte_array(&Array3d::with_data(bit_buf, (Board::DIM, Board::DIM, Self::NUM_EXTRACT_PLANES)));
+
+    bit_arr
+  }
+
+  pub fn extract_relative_features(&self, turn: Stone, dst_buf: &mut [u8]) {
+    assert_eq!(dst_buf.len(), Self::NUM_EXTRACT_PLANES * Board::SIZE);
+    match turn {
+      Stone::Black => {
+        /*copy_memory(
+            &self.features[ .. Self::BLACK_PLANE],
+            &mut dst_buf[ .. Self::FRIEND_EXT_PLANE],
+        );
+        copy_memory(
+            &self.features[Self::BLACK_PLANE .. Self::TURNS_1_PLANE],
+            &mut dst_buf[Self::FRIEND_EXT_PLANE .. Self::TURNS_1_EXT_PLANE],
+        );
+        copy_memory(
+            &self.features[Self::TURNS_1_PLANE .. ],
+            &mut dst_buf[Self::TURNS_1_EXT_PLANE .. ],
+        );*/
+        copy_memory(
+            &self.features,
+            dst_buf,
+        );
+      }
+      Stone::White => {
+        copy_memory(
+            &self.features[ .. Self::BLACK_PLANE],
+            &mut dst_buf[ .. Self::FRIEND_EXT_PLANE],
+        );
+        copy_memory(
+            &self.features[Self::WHITE_PLANE .. Self::TURNS_1_PLANE],
+            &mut dst_buf[Self::FRIEND_EXT_PLANE .. Self::ENEMY_EXT_PLANE],
+        );
+        copy_memory(
+            &self.features[Self::BLACK_PLANE .. Self::WHITE_PLANE],
+            &mut dst_buf[Self::ENEMY_EXT_PLANE .. Self::TURNS_1_EXT_PLANE],
+        );
+        copy_memory(
+            &self.features[Self::TURNS_1_PLANE .. ],
+            &mut dst_buf[Self::TURNS_1_EXT_PLANE .. ],
+        );
+      }
+      _ => unreachable!(),
+    }
+  }
+
   fn update_point_turns(features: &mut [u8], point: Point, turns: usize) {
     let p = point.idx();
     match turns {
@@ -3028,21 +3204,21 @@ impl TxnStateAlphaMiniV3FeatsData {
           features[Self::LIBS_4_PLANE + p] = 0;
         }
         2 => {
-          features[Self::LIBS_1_PLANE + p] = 0;
+          features[Self::LIBS_1_PLANE + p] = 0; //Self::SET;
           features[Self::LIBS_2_PLANE + p] = Self::SET;
           features[Self::LIBS_3_PLANE + p] = 0;
           features[Self::LIBS_4_PLANE + p] = 0;
         }
         3 => {
-          features[Self::LIBS_1_PLANE + p] = 0;
-          features[Self::LIBS_2_PLANE + p] = 0;
+          features[Self::LIBS_1_PLANE + p] = 0; //Self::SET;
+          features[Self::LIBS_2_PLANE + p] = 0; //Self::SET;
           features[Self::LIBS_3_PLANE + p] = Self::SET;
           features[Self::LIBS_4_PLANE + p] = 0;
         }
         4 => {
-          features[Self::LIBS_1_PLANE + p] = 0;
-          features[Self::LIBS_2_PLANE + p] = 0;
-          features[Self::LIBS_3_PLANE + p] = 0;
+          features[Self::LIBS_1_PLANE + p] = 0; //Self::SET;
+          features[Self::LIBS_2_PLANE + p] = 0; //Self::SET;
+          features[Self::LIBS_3_PLANE + p] = 0; //Self::SET;
           features[Self::LIBS_4_PLANE + p] = Self::SET;
         }
         _ => { unreachable!(); }
@@ -3057,13 +3233,13 @@ impl TxnStateAlphaMiniV3FeatsData {
           features[Self::CAPS_3_PLANE + p] = 0;
         }
         2 => {
-          features[Self::CAPS_1_PLANE + p] = 0;
+          features[Self::CAPS_1_PLANE + p] = 0; //Self::SET;
           features[Self::CAPS_2_PLANE + p] = Self::SET;
           features[Self::CAPS_3_PLANE + p] = 0;
         }
         n => {
-          features[Self::CAPS_1_PLANE + p] = 0;
-          features[Self::CAPS_2_PLANE + p] = 0;
+          features[Self::CAPS_1_PLANE + p] = 0; //Self::SET;
+          features[Self::CAPS_2_PLANE + p] = 0; //Self::SET;
           features[Self::CAPS_3_PLANE + p] = Self::SET;
         }
       }
@@ -3073,6 +3249,7 @@ impl TxnStateAlphaMiniV3FeatsData {
       features[Self::LIBS_2_PLANE + p] = 0;
       features[Self::LIBS_3_PLANE + p] = 0;
       features[Self::LIBS_4_PLANE + p] = 0;
+
       features[Self::CAPS_1_PLANE + p] = 0;
       features[Self::CAPS_2_PLANE + p] = 0;
       features[Self::CAPS_3_PLANE + p] = 0;

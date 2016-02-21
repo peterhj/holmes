@@ -81,6 +81,7 @@ impl Agent for ParallelMonteCarloSearchAgent {
     self.ply = 0;
     self.state.reset();
     self.result = None;
+    self.tree = None;
   }
 
   fn board_dim(&mut self, board_dim: usize) {
@@ -98,7 +99,7 @@ impl Agent for ParallelMonteCarloSearchAgent {
   fn apply_action(&mut self, turn: Stone, action: Action) {
     // FIXME(20160114): the search result may be stale here since we do not yet
     // support pondering.
-    self.history.push((self.state.clone(), action, self.result));
+    self.history.push((self.state.clone(), action, self.result.clone()));
     self.ply += 1;
     assert_eq!(self.history.len(), self.ply);
     match self.state.try_action(turn, action) {
@@ -107,13 +108,16 @@ impl Agent for ParallelMonteCarloSearchAgent {
     }
 
     // XXX(20160210): Step forward the tree, if possible.
-    let mut advance_failed = false;
+    let mut advance_success = false;
+    if self.tree.is_none() {
+      println!("DEBUG: ParallelSearchAgent: no tree to advance");
+    }
     if let Some(ref tree) = self.tree {
-      if !tree.try_advance(turn, action) {
-        advance_failed = true;
+      if tree.try_advance(turn, action) {
+        advance_success = true;
       }
     }
-    if advance_failed {
+    if !advance_success {
       self.tree = None;
     }
   }
@@ -153,9 +157,12 @@ impl Agent for ParallelMonteCarloSearchAgent {
     let num_rollouts = self.config.num_rollouts;
     let batch_size = self.config.batch_size;
 
-    let shared_tree = match self.tree {
-      None => SharedTree::new(),
-      Some(ref tree) => tree.clone(),
+    let shared_tree = if self.tree.is_none() {
+      let shared_tree = SharedTree::new();
+      self.tree = Some(shared_tree.clone());
+      shared_tree
+    } else {
+      self.tree.as_ref().unwrap().clone()
     };
     let mut search = ParallelMonteCarloSearch::new();
     let (search_res, search_stats) = search.join(
@@ -167,9 +174,10 @@ impl Agent for ParallelMonteCarloSearchAgent {
         shared_tree,
         self.result.as_ref(),
         &mut self.rng);
+    let action = search_res.action;
     println!("DEBUG: search result: {:?}", search_res);
     println!("DEBUG: search stats:  {:?}", search_stats);
     self.result = Some(search_res);
-    search_res.action
+    action
   }
 }

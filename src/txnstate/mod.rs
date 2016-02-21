@@ -106,10 +106,11 @@ pub fn is_eyelike(position: &TxnPosition, chains: &TxnChainsList, stone: Stone, 
   }
 
   // XXX: a.k.a. the "2/4 rule".
-  let opp_stone = stone.opponent();
+  //let opp_stone = stone.opponent();
   let mut false_count = if point.is_edge() { 1 } else { 0 };
   for_each_diagonal(point, |diag_point| {
-    if position.stones[diag_point.idx()] == opp_stone {
+    //if position.stones[diag_point.idx()] == opp_stone {
+    if position.stones[diag_point.idx()] != stone {
       false_count += 1;
     }
   });

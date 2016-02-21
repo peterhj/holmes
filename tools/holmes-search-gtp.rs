@@ -25,10 +25,14 @@ fn main() {
   let mc_cfg = MonteCarloConfig{
     /*num_rollouts:   1024,
     batch_size:     32,*/
+
     num_rollouts:   1024,
+    //batch_size:     16,
     batch_size:     128,
+
     /*num_rollouts:   2048,
-    batch_size:     64,*/
+    batch_size:     256,*/
+
     /*num_rollouts:   5120,
     batch_size:     256,*/
   };

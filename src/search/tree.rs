@@ -108,7 +108,8 @@ impl Trajectory {
       //let &mut Trajectory{ref leaf_node, ref mut sim_state, .. } = self;
       //sim_state.shrink_clone_from(&self.leaf_node.as_ref().unwrap().borrow().state);
       let state = &walk.leaf_node.as_ref().unwrap().borrow().state;
-      self.sim_state.replace_clone_from(state, TxnStateRolloutData::with_features(state.get_data().features.clone()));
+      //self.sim_state.replace_clone_from(state, TxnStateRolloutData::with_features(state.get_data().features.clone()));
+      self.sim_state.replace_clone_from(state, TxnStateRolloutData::from_node_data(state.get_data()));
     }
     self.sim_pairs.clear();
     self.raw_score = None;

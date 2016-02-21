@@ -118,6 +118,9 @@ pub struct RolloutTraj {
 
   // XXX(20160217): For counting live stones at terminal states.
   //term_count:       Vec<Vec<usize>>,
+
+  // XXX(20160219): For counting Monte Carlo live stones.
+  mc_live_mask:     Vec<BitSet>,
 }
 
 impl RolloutTraj {
@@ -148,6 +151,10 @@ impl RolloutTraj {
         repeat(0).take(Board::SIZE).collect(),
         repeat(0).take(Board::SIZE).collect(),
       ],*/
+      mc_live_mask: vec![
+        BitSet::with_capacity(Board::SIZE),
+        BitSet::with_capacity(Board::SIZE),
+      ],
     }
   }
 
@@ -155,7 +162,8 @@ impl RolloutTraj {
     self.rollout = false;
     self.init_state = leaf_state.clone();
     //self.sim_state.reset();
-    self.sim_state.replace_clone_from(leaf_state, TxnStateRolloutData::with_features(leaf_state.get_data().features.clone()));
+    //self.sim_state.replace_clone_from(leaf_state, TxnStateRolloutData::with_features(leaf_state.get_data().features.clone()));
+    self.sim_state.replace_clone_from(leaf_state, TxnStateRolloutData::from_node_data(leaf_state.get_data()));
     self.sim_pairs.clear();
     self.raw_score = None;
     self.adj_score = None;
@@ -165,12 +173,15 @@ impl RolloutTraj {
       self.term_count[0][p] = 0;
       self.term_count[1][p] = 0;
     }*/
+    self.mc_live_mask[0].clear();
+    self.mc_live_mask[1].clear();
   }
 
   pub fn reset_rollout(&mut self, leaf_state: &TxnState<TxnStateNodeData>) {
     self.rollout = true;
     self.init_state = leaf_state.clone();
-    self.sim_state.replace_clone_from(leaf_state, TxnStateRolloutData::with_features(leaf_state.get_data().features.clone()));
+    //self.sim_state.replace_clone_from(leaf_state, TxnStateRolloutData::with_features(leaf_state.get_data().features.clone()));
+    self.sim_state.replace_clone_from(leaf_state, TxnStateRolloutData::from_node_data(leaf_state.get_data()));
     self.sim_pairs.clear();
     self.raw_score = None;
     self.adj_score = None;
@@ -180,6 +191,8 @@ impl RolloutTraj {
       self.term_count[0][p] = 0;
       self.term_count[1][p] = 0;
     }*/
+    self.mc_live_mask[0].clear();
+    self.mc_live_mask[1].clear();
   }
 
   pub fn score(&mut self, komi: f32, expected_score: f32) {
@@ -203,24 +216,59 @@ impl RolloutTraj {
     self.adj_score = Some([b_adj_score, w_adj_score]);
   }
 
-  pub fn count_term(&mut self, term_counts: &mut [Vec<usize>]) {
+  pub fn update_mc_live_counts(&mut self, mc_live_counts: &mut [Vec<usize>]) {
     for p in 0 .. Board::SIZE {
       let pt = Point::from_idx(p);
       let stone = self.sim_state.current_stone(pt);
       match stone {
         Stone::Black => {
-          term_counts[0][p] += 1;
+          mc_live_counts[0][p] += 1;
         }
         Stone::White => {
-          term_counts[1][p] += 1;
+          mc_live_counts[1][p] += 1;
         }
         Stone::Empty => {
           if is_eyelike(&self.sim_state.position, &self.sim_state.chains, Stone::Black, pt) {
-            term_counts[0][p] += 1;
+            mc_live_counts[0][p] += 1;
           } else if is_eyelike(&self.sim_state.position, &self.sim_state.chains, Stone::White, pt) {
-            term_counts[1][p] += 1;
+            mc_live_counts[1][p] += 1;
           }
         }
+      }
+    }
+  }
+
+  pub fn update_mc_live_mask(&mut self) {
+    for p in 0 .. Board::SIZE {
+      let pt = Point::from_idx(p);
+      let stone = self.sim_state.current_stone(pt);
+      match stone {
+        Stone::Black => {
+          //mc_live_counts[0][p] += 1;
+          self.mc_live_mask[0].insert(p);
+        }
+        Stone::White => {
+          //mc_live_counts[1][p] += 1;
+          self.mc_live_mask[1].insert(p);
+        }
+        Stone::Empty => {
+          if is_eyelike(&self.sim_state.position, &self.sim_state.chains, Stone::Black, pt) {
+            //mc_live_counts[0][p] += 1;
+            self.mc_live_mask[0].insert(p);
+          } else if is_eyelike(&self.sim_state.position, &self.sim_state.chains, Stone::White, pt) {
+            //mc_live_counts[1][p] += 1;
+            self.mc_live_mask[1].insert(p);
+          }
+        }
+      }
+    }
+  }
+
+  pub fn backup_mc_live_counts(&self, turn: Stone, live_counts: &[AtomicUsize]) {
+    let turn_off = turn.offset();
+    for p in 0 .. Board::SIZE {
+      if self.mc_live_mask[turn_off].contains(p) {
+        live_counts[p].fetch_add(1, Ordering::AcqRel);
       }
     }
   }
@@ -303,7 +351,7 @@ pub struct RolloutTrace {
   pub score:        f32,
 }
 
-pub trait NodeBox: Sized {
+/*pub trait NodeBox: Sized {
   type V: NodeValues;
 
   fn map<U>(&self, f: &mut FnMut(&Node<Self, Self::V>) -> U) -> U;
@@ -344,7 +392,7 @@ impl NodeBox for ArcNodeBox {
     let mut node = self.inner.write().unwrap();
     f(&mut *node)
   }
-}
+}*/
 
 pub trait NodeValues {
   fn new(num_arms: usize, horizon_cfg: HorizonConfig) -> Self where Self: Sized;
@@ -396,14 +444,36 @@ impl NodeValues for RefCell<FloatNodeValues> {
 }
 
 pub struct AtomicNodeValues {
-  pub prior_values:     Vec<f32>,
   pub horizon:          AtomicUsize,
   pub total_trials:     AtomicUsize,
+  pub total_score:      AtomicUsize,
+  pub prior_values:     Vec<f32>,
   pub num_trials:       Vec<AtomicUsize>,
+  pub scores:           Vec<AtomicUsize>,
   pub num_succs:        Vec<AtomicUsize>,
   pub num_raw_succs:    Vec<AtomicUsize>,
   pub num_trials_rave:  Vec<AtomicUsize>,
   pub num_succs_rave:   Vec<AtomicUsize>,
+}
+
+impl AtomicNodeValues {
+  pub fn mean_score(&self, min_trials_count: f32) -> f32 {
+    let total_trials = self.total_trials.load(Ordering::Acquire) as f32;
+    if total_trials >= min_trials_count {
+      let total_score = 0.5 * self.total_score.load(Ordering::Acquire) as isize as f32;
+      let mean_score = total_score / total_trials;
+      mean_score
+    } else {
+      0.0
+    }
+  }
+
+  pub fn arm_score(&self, j: usize) -> f32 {
+    let trials = self.num_trials[j].load(Ordering::Acquire) as f32;
+    let score = 0.5 * self.scores[j].load(Ordering::Acquire) as isize as f32;
+    let j_score = score / trials;
+    j_score
+  }
 }
 
 impl NodeValues for AtomicNodeValues {
@@ -411,6 +481,10 @@ impl NodeValues for AtomicNodeValues {
     let mut num_trials = Vec::with_capacity(num_arms);
     for _ in 0 .. num_arms {
       num_trials.push(AtomicUsize::new(0));
+    }
+    let mut scores = Vec::with_capacity(num_arms);
+    for _ in 0 .. num_arms {
+      scores.push(AtomicUsize::new(0));
     }
     let mut num_succs = Vec::with_capacity(num_arms);
     for _ in 0 .. num_arms {
@@ -429,7 +503,6 @@ impl NodeValues for AtomicNodeValues {
       num_succs_rave.push(AtomicUsize::new(0));
     }
     AtomicNodeValues{
-      prior_values:     repeat(0.5).take(num_arms).collect(),
       // FIXME(20160125): switch on progressive widening.
       horizon:          match horizon_cfg {
         HorizonConfig::All => {
@@ -443,7 +516,10 @@ impl NodeValues for AtomicNodeValues {
         }
       },
       total_trials:     AtomicUsize::new(0),
+      total_score:      AtomicUsize::new(0),
+      prior_values:     repeat(0.5).take(num_arms).collect(),
       num_trials:       num_trials,
+      scores:           scores,
       num_succs:        num_succs,
       num_raw_succs:    num_raw_succs,
       num_trials_rave:  num_trials_rave,
@@ -481,19 +557,20 @@ impl NodeValues for AtomicNodeValues {
   }
 }
 
-pub struct Node<N=ArcNodeBox, V=AtomicNodeValues> where N: NodeBox, V: NodeValues {
+//pub struct Node<N=ArcNodeBox, V=AtomicNodeValues> where N: NodeBox, V: NodeValues {
+pub struct Node {
   pub state:        TxnState<TxnStateNodeData>,
-  //pub horizon:      AtomicUsize,
   pub valid_moves:  Vec<Point>,
   pub action_idxs:  VecMap<usize>,
   pub child_nodes:  Vec<Option<Arc<RwLock<Node>>>>,
   //pub child_nodes:  Vec<Option<ArcNodeBox>>,
   pub values:       AtomicNodeValues,
-  _marker:  PhantomData<(N, V)>,
+  //_marker:  PhantomData<(N, V)>,
 }
 
-impl<N, V> Node<N, V> where N: NodeBox, V: NodeValues {
-  pub fn new(state: TxnState<TxnStateNodeData>, prior_policy: &mut PriorPolicy, horizon_cfg: HorizonConfig) -> Node<N, V> {
+//impl<N, V> Node<N, V> where N: NodeBox, V: NodeValues {
+impl Node {
+  pub fn new(state: TxnState<TxnStateNodeData>, prior_policy: &mut PriorPolicy, horizon_cfg: HorizonConfig) -> Node/*<N, V>*/ {
     let mut valid_moves = vec![];
     state.get_data().legality.fill_legal_points(state.current_turn(), &mut valid_moves);
     let num_arms = valid_moves.len();
@@ -528,7 +605,7 @@ impl<N, V> Node<N, V> where N: NodeBox, V: NodeValues {
       child_nodes:  child_nodes,
       action_idxs:  action_idxs,
       values:       values,
-      _marker:  PhantomData,
+      //_marker:  PhantomData,
     }
   }
 
@@ -536,15 +613,17 @@ impl<N, V> Node<N, V> where N: NodeBox, V: NodeValues {
     self.valid_moves.is_empty()
   }
 
-  pub fn update_visits(&self, horizon_cfg: HorizonConfig) {
+  pub fn update_visits(&self, horizon_cfg: HorizonConfig, raw_score: f32) {
     self.values.total_trials.fetch_add(1, Ordering::AcqRel);
+
+    let uint_score = (2.0 * raw_score).round() as isize as usize;
+    self.values.total_score.fetch_add(uint_score, Ordering::AcqRel);
+
     match horizon_cfg {
       HorizonConfig::All => {}
       HorizonConfig::Fixed{..} => {}
       HorizonConfig::Pwide{mu} => {
         let num_arms = self.valid_moves.len();
-        // FIXME(20160111): read progressive widening hyperparameter.
-        //let pwide_mu = 1.8f32;
         let pwide_mu = mu;
         loop {
           // XXX(20160111): Need to read from `total_trials` again because other
@@ -561,11 +640,15 @@ impl<N, V> Node<N, V> where N: NodeBox, V: NodeValues {
     }
   }
 
-  pub fn update_arm(&self, j: usize, score: f32, raw_score: f32) {
-    let turn = self.state.current_turn();
+  pub fn update_arm(&self, j: usize, adj_score: f32, raw_score: f32) {
     self.values.num_trials[j].fetch_add(1, Ordering::AcqRel);
-    if (Stone::White == turn && score >= 0.0) ||
-        (Stone::Black == turn && score < 0.0)
+
+    let uint_score = (2.0 * raw_score).round() as isize as usize;
+    self.values.scores[j].fetch_add(uint_score, Ordering::AcqRel);
+
+    let turn = self.state.current_turn();
+    if (Stone::White == turn && adj_score >= 0.0) ||
+        (Stone::Black == turn && adj_score < 0.0)
     {
       self.values.num_succs[j].fetch_add(1, Ordering::AcqRel);
     }
@@ -587,21 +670,108 @@ impl<N, V> Node<N, V> where N: NodeBox, V: NodeValues {
   }
 }
 
+pub fn search_principal_variation(init_node: Arc<RwLock<Node>>, depth: usize) -> Vec<(Stone, Action, usize, usize, f32, f32)> {
+  let mut pv = vec![];
+  let mut node = init_node;
+  for t in 0 .. depth {
+    let mut next_node = None;
+    {
+      let node = node.read().unwrap();
+      let turn = node.state.current_turn();
+      //let score = node.values.mean_score();
+      let total_trials = node.values.total_trials.load(Ordering::Acquire);
+      let num_trials = node.values.num_trials_float();
+      let (action, arm_trials, arm_score, raw_value) = if let Some(argmax_j) = array_argmax(&num_trials) {
+        next_node = node.child_nodes[argmax_j].clone();
+        let argmax_point = node.valid_moves[argmax_j];
+        let j_score = node.values.arm_score(argmax_j);
+        let j_trials = num_trials[argmax_j];
+        //let j_adj_succs = node.values.num_succs[argmax_j].load(Ordering::Acquire);
+        let j_raw_succs = node.values.num_raw_succs[argmax_j].load(Ordering::Acquire);
+        //let adj_value = j_adj_succs as f32 / j_trials;
+        let raw_value = j_raw_succs as f32 / j_trials;
+        if raw_value < 0.1 {
+          (Action::Resign, j_trials as usize, j_score, raw_value)
+        } else {
+          (Action::Place{point: argmax_point}, j_trials as usize, j_score, raw_value)
+        }
+      } else {
+        (Action::Pass, 0, 0.0, 0.5)
+      };
+      pv.push((turn, action, total_trials, arm_trials, arm_score, raw_value));
+      if action == Action::Resign || action == Action::Pass {
+        break;
+      }
+    };
+    if let Some(n) = next_node {
+      node = n;
+    } else {
+      break;
+    }
+  }
+  pv
+}
+
+pub fn search_principal_multi_variation(init_node: Arc<RwLock<Node>>, depth: usize) -> Vec<(Stone, Vec<(Action, usize, usize, f32, f32)>)> {
+  let mut pv = vec![];
+  let mut node = init_node;
+  for t in 0 .. depth {
+    let mut next_node = None;
+    {
+      let node = node.read().unwrap();
+      let turn = node.state.current_turn();
+      pv.push((turn, vec![]));
+      //let score = node.values.mean_score();
+      let total_trials = node.values.total_trials.load(Ordering::Acquire);
+      let num_trials = node.values.num_trials_float();
+      let (action, arm_trials, arm_score, raw_value) = if let Some(argmax_j) = array_argmax(&num_trials) {
+        next_node = node.child_nodes[argmax_j].clone();
+        let argmax_point = node.valid_moves[argmax_j];
+        let j_score = node.values.arm_score(argmax_j);
+        let j_trials = num_trials[argmax_j];
+        //let j_adj_succs = node.values.num_succs[argmax_j].load(Ordering::Acquire);
+        let j_raw_succs = node.values.num_raw_succs[argmax_j].load(Ordering::Acquire);
+        //let adj_value = j_adj_succs as f32 / j_trials;
+        let raw_value = j_raw_succs as f32 / j_trials;
+        if raw_value < 0.1 {
+          (Action::Resign, j_trials as usize, j_score, raw_value)
+        } else {
+          (Action::Place{point: argmax_point}, j_trials as usize, j_score, raw_value)
+        }
+      } else {
+        (Action::Pass, 0, 0.0, 0.5)
+      };
+      let pv_idx = pv.len()-1;
+      pv[pv_idx].1.push((action, total_trials, arm_trials, arm_score, raw_value));
+      if action == Action::Resign || action == Action::Pass {
+        break;
+      }
+    };
+    if let Some(n) = next_node {
+      node = n;
+    } else {
+      break;
+    }
+  }
+  pv
+}
+
 pub enum TreeResult {
   NonTerminal,
   Terminal,
 }
 
-pub struct UniqueTree<N> where N: NodeBox {
+/*pub struct UniqueTree<N> where N: NodeBox {
   root_node:        Option<N>,
   mean_raw_score:   f32,
-}
+}*/
 
 struct InnerTree {
-  root_node:        Option<Arc<RwLock<Node<ArcNodeBox, AtomicNodeValues>>>>,
+  //root_node:        Option<Arc<RwLock<Node<ArcNodeBox, AtomicNodeValues>>>>,
+  root_node:        Option<Arc<RwLock<Node>>>,
 
   mean_raw_score:   f32,
-  term_counts:      Vec<Arc<Vec<AtomicUsize>>>,
+  mc_live_counts:   Vec<Arc<Vec<AtomicUsize>>>,
 
   explore_elapsed_ms:   AtomicUsize,
   rollout_elapsed_ms:   AtomicUsize,
@@ -615,21 +785,21 @@ pub struct SharedTree {
 
 impl SharedTree {
   pub fn new() -> SharedTree {
-    let mut b_term_counts = Vec::with_capacity(Board::SIZE);
-    let mut w_term_counts = Vec::with_capacity(Board::SIZE);
+    let mut b_mc_live_counts = Vec::with_capacity(Board::SIZE);
+    let mut w_mc_live_counts = Vec::with_capacity(Board::SIZE);
     for p in 0 .. Board::SIZE {
-      b_term_counts.push(AtomicUsize::new(0));
-      w_term_counts.push(AtomicUsize::new(0));
+      b_mc_live_counts.push(AtomicUsize::new(0));
+      w_mc_live_counts.push(AtomicUsize::new(0));
     }
     SharedTree{
       inner:    Arc::new(Mutex::new(InnerTree{
         root_node:      None,
         mean_raw_score: 0.0,
-        term_counts:    vec![
+        mc_live_counts: vec![
           //Arc::new(repeat(AtomicUsize::new(0)).take(Board::SIZE).collect()),
           //Arc::new(repeat(AtomicUsize::new(0)).take(Board::SIZE).collect()),
-          Arc::new(b_term_counts),
-          Arc::new(w_term_counts),
+          Arc::new(b_mc_live_counts),
+          Arc::new(w_mc_live_counts),
         ],
 
         explore_elapsed_ms: AtomicUsize::new(0),
@@ -640,6 +810,7 @@ impl SharedTree {
       // It should really belong to the hyperparam file, but whatever.
       //horizon_cfg: HorizonConfig::All,
       //horizon_cfg: HorizonConfig::Pwide{mu: 1.8},
+      //horizon_cfg: HorizonConfig::Fixed{max_horizon: 3},
       horizon_cfg: HorizonConfig::Fixed{max_horizon: 20},
     }
   }
@@ -656,6 +827,7 @@ impl SharedTree {
     match action {
       Action::Resign |
       Action::Pass => {
+        //println!("DEBUG: try_advance: do not advance on null move");
         false
       }
       Action::Place{point} => {
@@ -664,6 +836,7 @@ impl SharedTree {
           let p = point.idx();
           let maybe_root_node = inner.root_node.as_ref().map(|n| n.read().unwrap());
           if maybe_root_node.is_none() {
+            println!("WARNING: try_advance: root node is None");
             return false;
           }
           let root_node = maybe_root_node.unwrap();
@@ -675,12 +848,14 @@ impl SharedTree {
           }
           let maybe_j = root_node.action_idxs.get(&p).map(|j| *j);
           if maybe_j.is_none() {
+            println!("WARNING: try_advance: j-th action idx does not exist");
             return false;
           }
           let j = maybe_j.unwrap();
           root_node.child_nodes[j].clone()
         };
         if maybe_next_node.is_none() {
+          //println!("DEBUG: try_advance: j-th child node does not exist yet");
           return false;
         }
         inner.root_node = maybe_next_node;
@@ -711,7 +886,7 @@ pub struct TreeOps;
 
 impl TreeOps {
   pub fn traverse(
-      horizon_cfg:   HorizonConfig,
+      horizon_cfg:      HorizonConfig,
       root_node:        Arc<RwLock<Node>>,
       tree_traj:        &mut TreeTraj,
       prior_policy:     &mut PriorPolicy,
@@ -852,7 +1027,7 @@ impl TreeOps {
 
     {
       let leaf_node = tree_traj.leaf_node.as_ref().unwrap().read().unwrap();
-      leaf_node.update_visits(horizon_cfg);
+      leaf_node.update_visits(horizon_cfg, raw_score);
     }
 
     for &(ref node, update_point, update_j) in tree_traj.backup_triples.iter().rev() {
@@ -873,7 +1048,7 @@ impl TreeOps {
         }
       }
 
-      node.update_visits(horizon_cfg);
+      node.update_visits(horizon_cfg, raw_score);
     }
   }
 }
@@ -890,7 +1065,7 @@ pub struct EvalWorkerConfig {
   pub batch_size:   usize,
   pub num_batches:  usize,
   pub komi:                 f32,
-  pub prev_expected_score:  f32,
+  pub prev_mean_score:  f32,
 }
 
 pub struct ParallelMonteCarloEvalServer<W> where W: RolloutPolicy<R=Xorshiftplus128Rng> {
@@ -984,7 +1159,7 @@ impl<W> ParallelMonteCarloEvalServer<W> where W: RolloutPolicy<R=Xorshiftplus128
             for batch_idx in 0 .. batch_size {
               let rollout_traj = &mut rollout_trajs[batch_idx];
               // FIXME(20160109): use correct values of komi and previous score.
-              rollout_traj.score(cfg.komi, cfg.prev_expected_score);
+              rollout_traj.score(cfg.komi, cfg.prev_mean_score);
               let raw_score = rollout_traj.raw_score.unwrap();
               worker_backup_count += 1.0;
               worker_mean_score += (raw_score - worker_mean_score) / worker_backup_count;
@@ -1093,13 +1268,12 @@ pub enum SearchWorkerOutput {
   },
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct SearchWorkerConfig {
-  pub batch_size:   usize,
-  pub num_batches:  usize,
-
-  pub komi:                 f32,
-  pub prev_expected_score:  f32,
+  pub batch_size:       usize,
+  pub num_batches:      usize,
+  pub komi:             f32,
+  pub prev_mean_score:  f32,
 }
 
 pub struct ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
@@ -1174,7 +1348,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
         let mut rollout_trajs: Vec<_> = repeat(RolloutTraj::new()).take(worker_batch_capacity).collect();
         let mut traces: Vec<_> = repeat(QuickTrace::new()).take(worker_batch_capacity * 40).collect();
 
-        let mut term_counts: Vec<Vec<usize>> = vec![
+        let mut mc_live_counts: Vec<Vec<usize>> = vec![
           repeat(0).take(Board::SIZE).collect(),
           repeat(0).take(Board::SIZE).collect(),
         ];
@@ -1202,10 +1376,10 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
                 let inner = tree.inner.lock().unwrap();
 
                 if tid == 0 {
-                  let shared_term_counts = inner.term_counts.clone();
+                  let shared_mc_live_counts = inner.mc_live_counts.clone();
                   for p in 0 .. Board::SIZE {
-                    shared_term_counts[0][p].store(0, Ordering::Release);
-                    shared_term_counts[1][p].store(0, Ordering::Release);
+                    shared_mc_live_counts[0][p].store(0, Ordering::Release);
+                    shared_mc_live_counts[1][p].store(0, Ordering::Release);
                   }
                 }
 
@@ -1224,8 +1398,8 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
               let mut worker_mean_score: f32 = 0.0;
               let mut worker_backup_count: f32 = 0.0;
               for p in 0 .. Board::SIZE {
-                term_counts[0][p] = 0;
-                term_counts[1][p] = 0;
+                mc_live_counts[0][p] = 0;
+                mc_live_counts[1][p] = 0;
               }
 
               // FIXME(20151222): should share stats between workers.
@@ -1287,8 +1461,8 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
                 for batch_idx in 0 .. batch_size {
                   let tree_traj = &tree_trajs[batch_idx];
                   let rollout_traj = &mut rollout_trajs[batch_idx];
-                  rollout_traj.score(cfg.komi, cfg.prev_expected_score);
-                  rollout_traj.count_term(&mut term_counts);
+                  rollout_traj.score(cfg.komi, cfg.prev_mean_score);
+                  rollout_traj.update_mc_live_counts(&mut mc_live_counts);
                   TreeOps::backup(use_rave, tree.horizon_cfg, tree_traj, rollout_traj, &mut rng);
                   let raw_score = rollout_traj.raw_score.unwrap();
                   worker_backup_count += 1.0;
@@ -1303,19 +1477,19 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
                 rollout_elapsed_ms += (end_time - mid_time).num_milliseconds() as usize;
               }
 
-              let shared_term_counts = {
+              let shared_mc_live_counts = {
                 let mut inner = tree.inner.lock().unwrap();
 
                 inner.mean_raw_score += worker_mean_score / (num_workers as f32);
                 inner.explore_elapsed_ms.fetch_add(explore_elapsed_ms, Ordering::AcqRel);
                 inner.rollout_elapsed_ms.fetch_add(rollout_elapsed_ms, Ordering::AcqRel);
 
-                let shared_term_counts = inner.term_counts.clone();
-                shared_term_counts
+                let shared_mc_live_counts = inner.mc_live_counts.clone();
+                shared_mc_live_counts
               };
               for p in 0 .. Board::SIZE {
-                shared_term_counts[0][p].fetch_add(term_counts[0][p], Ordering::AcqRel);
-                shared_term_counts[1][p].fetch_add(term_counts[1][p], Ordering::AcqRel);
+                shared_mc_live_counts[0][p].fetch_add(mc_live_counts[0][p], Ordering::AcqRel);
+                shared_mc_live_counts[1][p].fetch_add(mc_live_counts[1][p], Ordering::AcqRel);
               }
 
               out_barrier.wait();
@@ -1362,7 +1536,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
 
                 for batch_idx in 0 .. batch_size {
                   let rollout_traj = &mut rollout_trajs[batch_idx];
-                  rollout_traj.score(cfg.komi, cfg.prev_expected_score);
+                  rollout_traj.score(cfg.komi, cfg.prev_mean_score);
                   let raw_score = rollout_traj.raw_score.unwrap();
                   let value = match init_turn {
                     Stone::Black => {
@@ -1459,7 +1633,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
               for batch_idx in 0 .. batch_size {
                 let rollout_traj = &mut rollout_trajs[batch_idx];
                 // FIXME(20160208): compute the score using Tromp Taylor.
-                rollout_traj.score(cfg.komi, cfg.prev_expected_score);
+                rollout_traj.score(cfg.komi, cfg.prev_mean_score);
                 let raw_score = rollout_traj.raw_score.unwrap();
                 // XXX(20160208): Compute terminal value.
                 let reward = translate_score_to_reward(green_stone, raw_score);
@@ -1564,7 +1738,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
   }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct MonteCarloSearchResult {
   pub turn:             Stone,
   pub action:           Action,
@@ -1577,6 +1751,7 @@ pub struct MonteCarloSearchResult {
   pub b_alive_ter:      usize,
   pub w_alive_ch:       usize,
   pub w_alive_ter:      usize,*/
+  pub pv:               Vec<(Stone, Action, usize, usize, f32, f32)>,
 }
 
 #[derive(Clone, Copy, Default, Debug)]
@@ -1651,13 +1826,27 @@ impl ParallelMonteCarloSearch {
 
     // TODO(20160106): reset stats.
 
-    //let tree = SharedTree::new();
+    /*let prev_mean_score = {
+      let inner_tree = shared_tree.inner.lock().unwrap();
+      if let Some(ref root_node) = inner_tree.root_node {
+        let root_node = root_node.read().unwrap();
+        root_node.values.mean_score(32.0)
+      } else {
+        0.0
+      }
+    };*/
     let cfg = SearchWorkerConfig{
-      batch_size:   worker_batch_size,
-      num_batches:  worker_num_batches,
-      komi:                 7.5, // FIXME(20160112): use correct komi value.
-      prev_expected_score:  prev_result.map_or(0.0, |r| r.expected_score),
+      batch_size:       worker_batch_size,
+      num_batches:      worker_num_batches,
+      // FIXME(20160112): use correct komi value.
+      komi:             7.5,
+      // FIXME(20160219): use correct root node score if it has sufficient
+      // sample size, otherwise...?
+      //prev_mean_score:  prev_result.map_or(0.0, |r| r.expected_score),
+      //prev_mean_score:  prev_mean_score,
+      prev_mean_score:  0.0,
     };
+    //println!("DEBUG: ParallelMonteCarloSearch: worker config: {:?}", cfg);
 
     let start_time = get_time();
     for tid in 0 .. num_workers {
@@ -1677,15 +1866,19 @@ impl ParallelMonteCarloSearch {
 
     /*let root_node_opt = tree.root_node.read().unwrap();
     let root_node = root_node_opt.as_ref().unwrap().read().unwrap();*/
-    let (root_node, mean_raw_score, shared_term_counts) = {
+    let (root_node, mean_raw_score, shared_mc_live_counts) = {
       let inner_tree = shared_tree.inner.lock().unwrap();
 
       stats.avg_explore_elapsed_ms = inner_tree.explore_elapsed_ms.load(Ordering::Acquire) / num_workers;
       stats.avg_rollout_elapsed_ms = inner_tree.rollout_elapsed_ms.load(Ordering::Acquire) / num_workers;
 
+      // FIXME(20160219): should reset these above.
+      inner_tree.explore_elapsed_ms.store(0, Ordering::Release);
+      inner_tree.rollout_elapsed_ms.store(0, Ordering::Release);
+
       ( inner_tree.root_node.as_ref().unwrap().clone(),
         inner_tree.mean_raw_score,
-        inner_tree.term_counts.clone(),
+        inner_tree.mc_live_counts.clone(),
       )
     };
 
@@ -1693,13 +1886,18 @@ impl ParallelMonteCarloSearch {
     let mut w_mc_alive = 0;
     let live_thresh = (0.9 * (worker_batch_size * worker_num_batches * num_workers) as f32).ceil() as usize;
     for p in 0 .. Board::SIZE {
-      if shared_term_counts[0][p].load(Ordering::Acquire) >= live_thresh {
+      if shared_mc_live_counts[0][p].load(Ordering::Acquire) >= live_thresh {
         b_mc_alive += 1;
       }
-      if shared_term_counts[1][p].load(Ordering::Acquire) >= live_thresh {
+      if shared_mc_live_counts[1][p].load(Ordering::Acquire) >= live_thresh {
         w_mc_alive += 1;
       }
     }
+
+    let root_pv = search_principal_variation(root_node.clone(), 3);
+    /*for mov in root_pv {
+    }*/
+
     let root_node = root_node.read().unwrap();
 
     /*let mut scratch = BensonScratch::new();
@@ -1715,47 +1913,39 @@ impl ParallelMonteCarloSearch {
     //let root_ratios = root_node.values.succ_ratios_float();
     //let (action, adj_value, raw_value) = if let Some(argmax_j) = array_argmax(&root_ratios) {
     let root_trials = root_node.values.num_trials_float();
-    let (action, adj_value, raw_value) = if let Some(argmax_j) = array_argmax(&root_trials) {
+    let (action, expected_score, adj_value, raw_value) = if let Some(argmax_j) = array_argmax(&root_trials) {
       stats.argmax_rank = Some(argmax_j);
       stats.argmax_ntrials = root_trials[argmax_j] as usize;
       let argmax_point = root_node.valid_moves[argmax_j];
+      let j_score = root_node.values.arm_score(argmax_j);
       let j_adj_succs = root_node.values.num_succs[argmax_j].load(Ordering::Acquire);
       let j_raw_succs = root_node.values.num_raw_succs[argmax_j].load(Ordering::Acquire);
       let j_trials = root_trials[argmax_j];
       let adj_value = j_adj_succs as f32 / j_trials;
       let raw_value = j_raw_succs as f32 / j_trials;
-      //if raw_value <= 0.001 {
       if raw_value < 0.1 {
-        (Action::Resign, adj_value, raw_value)
-      /*} else if raw_value >= 0.999 {
-        (Action::Pass, adj_value, raw_value)*/
+        (Action::Resign, j_score, adj_value, raw_value)
       } else {
-        (Action::Place{point: argmax_point}, adj_value, raw_value)
+        (Action::Place{point: argmax_point}, j_score, adj_value, raw_value)
       }
     } else {
       stats.argmax_rank = None;
-      (Action::Pass, 0.5, 0.5)
+      (Action::Pass, 0.0, 0.5, 0.5)
     };
     (MonteCarloSearchResult{
       turn:   root_node.state.current_turn(),
       action: action,
-      /*expected_score: {
-        let mean_score = tree.mean_raw_score.lock().unwrap();
-        *mean_score
-      },*/
-      expected_score:   mean_raw_score,
+      //expected_score:   mean_raw_score,
+      expected_score:   expected_score,
       expected_adj_val: adj_value,
       expected_value:   raw_value,
       b_mc_alive:       b_mc_alive,
       w_mc_alive:       w_mc_alive,
-      /*b_alive_ch:       0,
-      b_alive_ter:      0,
-      w_alive_ch:       0,
-      w_alive_ter:      0,*/
       /*b_alive_ch:       b_alive_ch,
       b_alive_ter:      b_alive_ter,
       w_alive_ch:       w_alive_ch,
       w_alive_ter:      w_alive_ter,*/
+      pv:               root_pv,
     }, stats)
   }
 }
@@ -1819,8 +2009,8 @@ impl ParallelMonteCarloEval {
     let cfg = SearchWorkerConfig{
       batch_size:   worker_batch_size,
       num_batches:  worker_num_batches,
-      komi:                 7.5, // FIXME(20160112): use correct komi value.
-      prev_expected_score:  0.0, // FIXME(20160116): use previous score?
+      komi:             7.5, // FIXME(20160112): use correct komi value.
+      prev_mean_score:  0.0, // FIXME(20160116): use previous score?
     };
     let shared_data = EvalSharedData::new();
 
@@ -1888,8 +2078,8 @@ impl ParallelMonteCarloBackup {
     let cfg = SearchWorkerConfig{
       batch_size:   worker_batch_size,
       num_batches:  worker_num_batches,
-      komi:                 7.5, // FIXME(20160112): use correct komi value.
-      prev_expected_score:  0.0, // FIXME(20160116): use previous score?
+      komi:             7.5, // FIXME(20160112): use correct komi value.
+      prev_mean_score:  0.0, // FIXME(20160116): use previous score?
     };
     let shared_data = EvalSharedData::new();
 
@@ -1967,8 +2157,8 @@ impl ParallelMonteCarloRollout {
     let cfg = SearchWorkerConfig{
       batch_size:   worker_batch_size,
       num_batches:  1,
-      komi:                 7.5, // FIXME(20160112): use correct komi value.
-      prev_expected_score:  0.0, // FIXME(20160116): use previous score?
+      komi:             7.5, // FIXME(20160112): use correct komi value.
+      prev_mean_score:  0.0, // FIXME(20160116): use previous score?
     };
 
     for tid in 0 .. num_workers {
