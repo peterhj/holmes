@@ -2,6 +2,7 @@ use board::{Stone, Action};
 
 pub mod minimax;
 pub mod parallel_policies;
+pub mod parallel_trace;
 pub mod parallel_tree;
 pub mod policies;
 pub mod tree;

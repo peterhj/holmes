@@ -1,6 +1,7 @@
-use board::{Stone, Point};
+use board::{Stone, Action, Point};
 //use random::{XorShift128PlusRng};
 use search::parallel_tree::{TreeTraj, RolloutTraj, QuickTrace, Node};
+use search::parallel_trace::{SearchTraceBatch};
 use txnstate::{TxnState};
 use txnstate::extras::{TxnStateNodeData};
 
@@ -30,11 +31,35 @@ pub trait PriorPolicy {
   fn fill_prior_values(&mut self, state: &TxnState<TxnStateNodeData>, valid_moves: &[Point], prior_values: &mut Vec<(Point, f32)>);
 }
 
+pub enum GradAccumMode {
+  //Gradient,
+  ScoreRatio,
+}
+
+pub enum GradSyncMode {
+  Sum,
+  //Average,
+}
+
+pub trait DiffPriorPolicy: PriorPolicy {
+  fn expose_input_buffer(&mut self, batch_idx: usize) -> &mut [u8];
+  fn preload_action_label(&mut self, batch_idx: usize, action: Action);
+  fn preload_loss_weight(&mut self, batch_idx: usize, weight: f32);
+  fn load_inputs(&mut self, batch_size: usize);
+  fn forward(&mut self, batch_size: usize);
+  fn backward(&mut self, batch_size: usize);
+  fn read_values(&mut self, batch_size: usize);
+  fn accumulate_gradients(&mut self, accum_mode: GradAccumMode);
+  fn synchronize_gradients(&mut self, sync_mode: GradSyncMode);
+  fn reset_gradients(&mut self);
+  fn descend_params(&mut self, step_size: f32);
+}
+
 pub trait TreePolicy {
   type R: Rng = Xorshiftplus128Rng;
 
   fn use_rave(&self) -> bool;
-  fn execute_search(&mut self, node: &Node, rng: &mut Self::R) -> Option<(Point, usize)>;
+  fn execute_search(&mut self, node: &Node, rng: &mut Self::R) -> (Option<(Point, usize)>, usize);
 }
 
 pub trait RolloutPolicyBuilder: Send + Clone {
@@ -73,7 +98,15 @@ pub trait RolloutPolicy {
 
   fn batch_size(&self) -> usize;
   fn max_rollout_len(&self) -> usize;
-  fn rollout_batch(&mut self, batch_size: usize, green_stone: Stone, leafs: RolloutLeafs, rollout_trajs: &mut [RolloutTraj], record_trace: bool, traces: &mut [QuickTrace], rng: &mut Self::R);
+  fn rollout_batch(&mut self,
+      batch_size:       usize,
+      //green_stone:      Stone,
+      leafs:            RolloutLeafs,
+      rollout_trajs:    &mut [RolloutTraj],
+      mut trace_batch:  Option<&mut SearchTraceBatch>,
+      record_trace: bool, traces: &mut [QuickTrace],
+      rng:              &mut Self::R,
+  );
 
   fn init_traces(&mut self);
   //fn rollout_trace(&mut self, trace: &Trace, baseline: f32) -> bool;

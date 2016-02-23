@@ -172,7 +172,7 @@ impl Agent for ParallelMonteCarloSearchAgent {
         self.player.unwrap(),
         &self.state,
         shared_tree,
-        self.result.as_ref(),
+        //self.result.as_ref(),
         &mut self.rng);
     let action = search_res.action;
     println!("DEBUG: search result: {:?}", search_res);

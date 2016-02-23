@@ -126,7 +126,7 @@ impl PolicyGradBalanceMachine {
         init_state.current_turn(),
         init_state,
         shared_tree,
-        None,
+        //None,
         &mut self.rng);
     let target_value = search_res.expected_value;
 

@@ -1,7 +1,10 @@
 use board::{Board, Rules, RuleSet, Coord, PlayerRank, Stone, Point, Action};
 use txnstate::{
   TxnStateData, TxnStateConfig, TxnState, TxnPosition, TxnChainsList,
-  for_each_adjacent, check_illegal_move_simple, check_legal_move_simple,
+  for_each_adjacent,
+  check_illegal_move_simple,
+  check_legal_move_simple,
+  check_good_move_fast,
 };
 use txnstate::features::{
   TxnStateFeaturesData,
@@ -112,21 +115,31 @@ impl TxnStateLegalityData {
     }
     for &turn in [Stone::Black, Stone::White].iter() {
       let turn_off = turn.offset();
-      //if check_illegal_move_simple(position, chains, turn, point).is_some() {
+      // XXX(20160222): Previously, this was a "strict" test; i.e., only truly
+      // illegal moves were filtered out. Now, we also filter out "bad" moves,
+      // i.e., ones that fill in the current player's eye.
       match check_legal_move_simple(position, chains, turn, point) {
         Some(Ok(())) => {
-          self.cached_legal_moves[turn_off].insert(p);
+          if check_good_move_fast(position, chains, turn, point) {
+            self.cached_legal_moves[turn_off].insert(p);
+          } else {
+            self.cached_legal_moves[turn_off].remove(p);
+          }
         }
         Some(Err(_)) => {
           self.cached_legal_moves[turn_off].remove(p);
         }
         None => {
-          if self.test_state.try_place(turn, point).is_err() {
-            self.cached_legal_moves[turn_off].remove(p);
+          if check_good_move_fast(position, chains, turn, point) {
+            if self.test_state.try_place(turn, point).is_err() {
+              self.cached_legal_moves[turn_off].remove(p);
+            } else {
+              self.cached_legal_moves[turn_off].insert(p);
+            }
+            self.test_state.undo();
           } else {
-            self.cached_legal_moves[turn_off].insert(p);
+            self.cached_legal_moves[turn_off].remove(p);
           }
-          self.test_state.undo();
         }
       }
     }

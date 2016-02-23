@@ -7,6 +7,9 @@ use search::parallel_policies::{
   PriorPolicy, TreePolicy,
   RolloutPolicyBuilder, RolloutMode, RolloutLeafs, RolloutPolicy,
 };
+use search::parallel_trace::{
+  SearchTrace, SearchTrajTrace, ExploreDecisionTrace,
+};
 use txnstate::{
   TxnStateConfig, TxnState,
   //BensonScratch,
@@ -72,6 +75,14 @@ impl HyperparamConfig {
       rave_equiv:   load_hyperparam("rave_equiv"),
     }
   }
+}
+
+#[derive(Clone, Copy)]
+pub struct TreePolicyConfig {
+  pub horizon_cfg:  HorizonConfig,
+  pub visit_thresh: usize,
+  pub mc_scale:     f32,
+  pub prior_equiv:  f32,
 }
 
 #[derive(Clone, Copy)]
@@ -313,42 +324,6 @@ impl QuickTrace {
     self.actions.clear();
     self.value = None;
   }
-}
-
-pub struct SearchTrace {
-  pub batch_size:   usize,
-  pub root_state:   Option<TxnState<TxnStateNodeData>>,
-  pub batches:      Vec<SearchTraceBatch>,
-}
-
-impl SearchTrace {
-  pub fn new() -> SearchTrace {
-    SearchTrace{
-      batch_size:   0,
-      root_state:   None,
-      batches:      vec![],
-    }
-  }
-
-  pub fn reset(&mut self, batch_size: usize, root_state: TxnState<TxnStateNodeData>) {
-    self.batch_size = batch_size;
-    self.root_state = Some(root_state);
-  }
-}
-
-pub struct SearchTraceBatch {
-  pub explore_traces:   Vec<ExploreTrace>,
-  pub rollout_traces:   Vec<RolloutTrace>,
-}
-
-pub struct ExploreTrace {
-  pub actions:      Vec<Action>,
-  pub horizons:     Vec<usize>,
-}
-
-pub struct RolloutTrace {
-  pub actions:      Vec<Action>,
-  pub score:        f32,
 }
 
 /*pub trait NodeBox: Sized {
@@ -794,6 +769,7 @@ impl SharedTree {
     SharedTree{
       inner:    Arc::new(Mutex::new(InnerTree{
         root_node:      None,
+
         mean_raw_score: 0.0,
         mc_live_counts: vec![
           //Arc::new(repeat(AtomicUsize::new(0)).take(Board::SIZE).collect()),
@@ -889,6 +865,7 @@ impl TreeOps {
       horizon_cfg:      HorizonConfig,
       root_node:        Arc<RwLock<Node>>,
       tree_traj:        &mut TreeTraj,
+      mut traj_trace:   Option<&mut SearchTrajTrace>,
       prior_policy:     &mut PriorPolicy,
       tree_policy:      &mut TreePolicy<R=Xorshiftplus128Rng>,
       //stats:            &mut SearchStats,
@@ -904,12 +881,26 @@ impl TreeOps {
       // number of trials.
       ply += 1;
       let cursor_trials = cursor_node.read().unwrap().values.total_trials.load(Ordering::Acquire);
-      if cursor_trials >= 1 {
+      if cursor_trials < 1 {
+        // Not enough trials, stop the walk and do a rollout.
+        //stats.old_leaf_count += 1;
+        break;
+      //if cursor_trials >= 1 {
+      } else {
         // Try to walk through the current node using the exploration policy.
         //stats.edge_count += 1;
-        let res = tree_policy.execute_search(&*cursor_node.read().unwrap(), rng);
+        let (res, horizon) = tree_policy.execute_search(&*cursor_node.read().unwrap(), rng);
         match res {
           Some((place_point, j)) => {
+            if let Some(ref mut traj_trace) = traj_trace {
+              traj_trace.explore_traj.decisions.push(
+                ExploreDecisionTrace{
+                  action:       Action::Place{point: place_point},
+                  action_rank:  j,
+                  horizon:      horizon,
+                }
+              );
+            }
             tree_traj.backup_triples.push((cursor_node.clone(), place_point, j));
             let has_child = cursor_node.read().unwrap().child_nodes[j].is_some();
             if has_child {
@@ -954,10 +945,6 @@ impl TreeOps {
             break;
           }
         }
-      } else {
-        // Not enough trials, stop the walk and do a rollout.
-        //stats.old_leaf_count += 1;
-        break;
       }
     }
 
@@ -969,16 +956,20 @@ impl TreeOps {
     if terminal {
       TreeResult::Terminal
     } else {
+      if let Some(traj_trace) = traj_trace {
+        traj_trace.explore_traj.rollout = true;
+      }
       TreeResult::NonTerminal
     }
   }
 
   pub fn backup(
-      use_rave: bool,
-      horizon_cfg: HorizonConfig,
-      tree_traj: &TreeTraj,
-      rollout_traj: &mut RolloutTraj,
-      rng: &mut Xorshiftplus128Rng)
+      use_rave:         bool,
+      horizon_cfg:      HorizonConfig,
+      tree_traj:        &TreeTraj,
+      rollout_traj:     &mut RolloutTraj,
+      mut traj_trace:   Option<&mut SearchTrajTrace>,
+      rng:              &mut Xorshiftplus128Rng)
   {
     let raw_score = match rollout_traj.raw_score {
       Some(raw_score) => raw_score,
@@ -988,6 +979,10 @@ impl TreeOps {
       Some(adj_score) => adj_score,
       None => panic!("missing adj score for backup!"),
     };
+
+    if let Some(ref mut traj_trace) = traj_trace {
+      traj_trace.rollout_traj.score = Some(raw_score);
+    }
 
     if use_rave {
       rollout_traj.rave_mask[0].clear();
@@ -1222,8 +1217,9 @@ pub enum SearchWorkerCommand {
   ResetSearch{
     cfg:            SearchWorkerConfig,
     shared_tree:    SharedTree,
-    green_stone:    Stone,
+    //green_stone:    Stone,
     init_state:     TxnState<TxnStateNodeData>,
+    record_search:  bool,
   },
   ResetEval{
     cfg:            SearchWorkerConfig,
@@ -1248,6 +1244,8 @@ pub enum SearchWorkerCommand {
     green_stone:    Stone,
     init_state:     TxnState<TxnStateNodeData>,
     stats:          RolloutStats,
+    // FIXME(20160222)
+    //record_search:  bool,
   },
   TraceDescend{
     step_size:      f32,
@@ -1348,13 +1346,18 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
         let mut rollout_trajs: Vec<_> = repeat(RolloutTraj::new()).take(worker_batch_capacity).collect();
         let mut traces: Vec<_> = repeat(QuickTrace::new()).take(worker_batch_capacity * 40).collect();
 
+        let tree_cfg = TreePolicyConfig{
+          horizon_cfg:  HorizonConfig::Fixed{max_horizon: 20},
+          visit_thresh: 1,
+          mc_scale:     1.0,
+          prior_equiv:  16.0,
+        };
+        let mut search_trace = SearchTrace::new(tree_cfg);
+
         let mut mc_live_counts: Vec<Vec<usize>> = vec![
           repeat(0).take(Board::SIZE).collect(),
           repeat(0).take(Board::SIZE).collect(),
         ];
-
-        let mut search_trace = SearchTrace::new();
-        let mut record_search_trace = false;
 
         loop {
           // FIXME(20151222): for real time search, num batches is just an
@@ -1366,7 +1369,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
               unimplemented!();
             }
 
-            SearchWorkerCommand::ResetSearch{cfg, shared_tree, green_stone, init_state} => {
+            SearchWorkerCommand::ResetSearch{cfg, shared_tree, /*green_stone,*/ init_state, record_search} => {
               // XXX(20160107): If the tree has no root node, this sets it;
               // otherwise use the existing root node.
               let tree = shared_tree;
@@ -1390,9 +1393,9 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
               let num_batches = cfg.num_batches;
               assert!(batch_size <= worker_batch_capacity);
 
-              if record_search_trace {
+              if record_search {
                 let root_node = root_node.read().unwrap();
-                search_trace.reset(batch_size, root_node.state.clone());
+                search_trace.reset(root_node.state.clone());
               }
 
               let mut worker_mean_score: f32 = 0.0;
@@ -1426,12 +1429,21 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
 
                 let start_time = get_time();
 
+                if record_search {
+                  search_trace.start_batch(batch_size);
+                }
+
                 {
                   let (prior_policy, tree_policy) = worker.exploration_policies();
                   for batch_idx in 0 .. batch_size {
                     let tree_traj = &mut tree_trajs[batch_idx];
                     let rollout_traj = &mut rollout_trajs[batch_idx];
-                    match TreeOps::traverse(tree.horizon_cfg, root_node.clone(), tree_traj, prior_policy, tree_policy, /*&mut stats,*/ &mut rng) {
+                    let traj_trace = if record_search {
+                      Some(&mut search_trace.batches[batch].traj_traces[batch_idx])
+                    } else {
+                      None
+                    };
+                    match TreeOps::traverse(tree.horizon_cfg, root_node.clone(), tree_traj, traj_trace, prior_policy, tree_policy, /*&mut stats,*/ &mut rng) {
                       TreeResult::Terminal => {
                         let leaf_state = &tree_traj.leaf_node.as_ref().unwrap().read().unwrap().state;
                         rollout_traj.reset_terminal(leaf_state);
@@ -1448,22 +1460,35 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
 
                 let mid_time = get_time();
 
-                worker.rollout_policy().rollout_batch(
-                    batch_size,
-                    green_stone,
-                    RolloutLeafs::TreeTrajs(&tree_trajs),
-                    &mut rollout_trajs,
-                    false, &mut traces[batch * batch_size .. (batch + 1) * batch_size],
-                    &mut rng);
+                {
+                  let traj_trace_batch = if record_search {
+                    Some(&mut search_trace.batches[batch])
+                  } else {
+                    None
+                  };
+                  worker.rollout_policy().rollout_batch(
+                      batch_size,
+                      //green_stone,
+                      RolloutLeafs::TreeTrajs(&tree_trajs),
+                      &mut rollout_trajs,
+                      traj_trace_batch,
+                      false, &mut traces[batch * batch_size .. (batch + 1) * batch_size],
+                      &mut rng);
+                }
                 barrier.wait();
                 fence(Ordering::AcqRel);
 
                 for batch_idx in 0 .. batch_size {
                   let tree_traj = &tree_trajs[batch_idx];
                   let rollout_traj = &mut rollout_trajs[batch_idx];
+                  let traj_trace = if record_search {
+                    Some(&mut search_trace.batches[batch].traj_traces[batch_idx])
+                  } else {
+                    None
+                  };
                   rollout_traj.score(cfg.komi, cfg.prev_mean_score);
                   rollout_traj.update_mc_live_counts(&mut mc_live_counts);
-                  TreeOps::backup(use_rave, tree.horizon_cfg, tree_traj, rollout_traj, &mut rng);
+                  TreeOps::backup(use_rave, tree.horizon_cfg, tree_traj, rollout_traj, traj_trace, &mut rng);
                   let raw_score = rollout_traj.raw_score.unwrap();
                   worker_backup_count += 1.0;
                   worker_mean_score += (raw_score - worker_mean_score) / worker_backup_count;
@@ -1526,9 +1551,11 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
 
                 worker.rollout_policy().rollout_batch(
                     batch_size,
-                    green_stone,
+                    // FIXME(20160222)
+                    //green_stone,
                     RolloutLeafs::LeafStates(&leaf_states),
                     &mut rollout_trajs,
+                    None,
                     record_trace, &mut traces[batch * batch_size .. (batch + 1) * batch_size],
                     &mut rng);
                 barrier.wait();
@@ -1622,9 +1649,11 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
 
               worker.rollout_policy().rollout_batch(
                   batch_size,
-                  green_stone,
+                  // FIXME(20160222)
+                  //green_stone,
                   RolloutLeafs::LeafStates(&leaf_states),
                   &mut rollout_trajs,
+                  None,
                   true, &mut traces[0 .. batch_size],
                   &mut rng);
               barrier.wait();
@@ -1804,7 +1833,7 @@ impl ParallelMonteCarloSearch {
       green_stone:  Stone,
       init_state:   &TxnState<TxnStateNodeData>,
       shared_tree:  SharedTree,
-      prev_result:  Option<&MonteCarloSearchResult>,
+      //prev_result:  Option<&MonteCarloSearchResult>,
       rng:          &mut Xorshiftplus128Rng)
       -> (MonteCarloSearchResult, MonteCarloSearchStats)
       where W: SearchPolicyWorker
@@ -1853,8 +1882,9 @@ impl ParallelMonteCarloSearch {
       server.enqueue(tid, SearchWorkerCommand::ResetSearch{
         cfg:            cfg,
         shared_tree:    shared_tree.clone(),
-        green_stone:    Stone::White, // FIXME FIXME FIXME(20160208): use correct color.
+        //green_stone:    Stone::White, // FIXME FIXME FIXME(20160208): use correct color.
         init_state:     init_state.clone(),
+        record_search:  false,
       });
     }
     server.join();

@@ -132,7 +132,7 @@ pub fn check_illegal_move_simple(position: &TxnPosition, chains: &TxnChainsList,
     }
   }
 
-  // Illegal to suicide (place in opponent's eye).
+  // Illegal to suicide (place in opponent's false eye).
   if is_eyeish(position, chains, turn.opponent(), point) {
     return Some(IllegalReason::Suicide);
   }
@@ -155,7 +155,7 @@ pub fn check_legal_move_simple(position: &TxnPosition, chains: &TxnChainsList, t
     }
   }
 
-  // Illegal to suicide (place in opponent's eye).
+  // Illegal to suicide (place in opponent's false eye).
   if is_eyeish(position, chains, turn.opponent(), point) {
     return Some(Err(TxnStatus::Illegal(IllegalReason::Suicide)));
   }

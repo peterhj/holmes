@@ -133,17 +133,17 @@ path = "tools/new-train-2layer16-19x19x16.rs"
 name = "new-train-13layer384-19x19x32"
 path = "tools/new-train-13layer384-19x19x32.rs"
 
-[[bin]]
-name = "policygrad-balance"
-path = "tools/policygrad-balance.rs"
+#[[bin]]
+#name = "policygrad-balance"
+#path = "tools/policygrad-balance.rs"
 
-[[bin]]
-name = "policygrad-evalout"
-path = "tools/policygrad-evalout.rs"
+#[[bin]]
+#name = "policygrad-evalout"
+#path = "tools/policygrad-evalout.rs"
 
-[[bin]]
-name = "policygrad-autoplay"
-path = "tools/policygrad-autoplay.rs"
+#[[bin]]
+#name = "policygrad-autoplay"
+#path = "tools/policygrad-autoplay.rs"
 
 [[bin]]
 name = "holmes-vs-pachi10k_f1-f16"

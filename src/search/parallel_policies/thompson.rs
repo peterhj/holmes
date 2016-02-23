@@ -2,7 +2,7 @@ use array_util::{array_argmax};
 use board::{Board, Point};
 //use random::{XorShift128PlusRng};
 use search::parallel_policies::{TreePolicy};
-use search::parallel_tree::{NodeValues, Node};
+use search::parallel_tree::{TreePolicyConfig, NodeValues, Node};
 
 use rng::xorshift::{Xorshiftplus128Rng};
 
@@ -12,6 +12,7 @@ use std::iter::{repeat};
 use std::sync::atomic::{Ordering};
 
 pub struct ThompsonTreePolicy {
+  mc_scale:     f32,
   prior:        bool,
   prior_equiv:  f32,
   rave:         bool,
@@ -20,8 +21,12 @@ pub struct ThompsonTreePolicy {
 }
 
 impl ThompsonTreePolicy {
-  pub fn new() -> ThompsonTreePolicy {
+  // FIXME(20160222): use the tree policy cfg.
+  pub fn new(/*tree_cfg: TreePolicyConfig*/) -> ThompsonTreePolicy {
     ThompsonTreePolicy{
+      mc_scale:     1.0,
+      //mc_scale:     0.5,
+
       /*prior:        true,
       prior_equiv:  100.0,*/
       prior:        true,
@@ -45,11 +50,11 @@ impl TreePolicy for ThompsonTreePolicy {
     self.rave
   }
 
-  fn execute_search(&mut self, node: &Node, rng: &mut Xorshiftplus128Rng) -> Option<(Point, usize)> {
+  fn execute_search(&mut self, node: &Node, rng: &mut Xorshiftplus128Rng) -> (Option<(Point, usize)>, usize) {
     let horizon = node.values.horizon();
     for j in 0 .. horizon {
-      let n = node.values.num_trials[j].load(Ordering::Acquire) as f32;
-      let s = node.values.num_succs[j].load(Ordering::Acquire) as f32;
+      let n = self.mc_scale * node.values.num_trials[j].load(Ordering::Acquire) as f32;
+      let s = self.mc_scale * node.values.num_succs[j].load(Ordering::Acquire) as f32;
       let (pn, ps) = if !self.prior {
         (2.0, 1.0)
       } else {
@@ -79,7 +84,8 @@ impl TreePolicy for ThompsonTreePolicy {
       let u = xs / (xs + xf);
       self.tmp_values[j] = u;
     }
-    array_argmax(&self.tmp_values[ .. horizon])
-      .map(|j| (node.valid_moves[j], j))
+    let res = array_argmax(&self.tmp_values[ .. horizon])
+      .map(|j| (node.valid_moves[j], j));
+    (res, horizon)
   }
 }

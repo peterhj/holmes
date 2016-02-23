@@ -14,11 +14,13 @@ use discrete::bfilter::{BFilter};
 use random::{choose_without_replace};
 use search::parallel_policies::{
   SearchPolicyWorkerBuilder, SearchPolicyWorker,
-  PriorPolicy, TreePolicy,
+  PriorPolicy, DiffPriorPolicy, TreePolicy,
+  GradAccumMode, GradSyncMode,
   RolloutPolicyBuilder, RolloutMode, RolloutLeafs, RolloutPolicy,
 };
 use search::parallel_policies::thompson::{ThompsonTreePolicy};
 use search::parallel_tree::{TreeTraj, RolloutTraj, QuickTrace};
+use search::parallel_trace::{SearchTraceBatch};
 use txnstate::{TxnState, check_good_move_fast};
 use txnstate::extras::{TxnStateNodeData, for_each_touched_empty};
 
@@ -179,6 +181,64 @@ impl PriorPolicy for ConvnetPriorPolicy {
   }
 }
 
+impl DiffPriorPolicy for ConvnetPriorPolicy {
+  fn expose_input_buffer(&mut self, batch_idx: usize) -> &mut [u8] {
+    self.arch.input_layer().expose_host_frame_buf(batch_idx)
+  }
+
+  fn preload_action_label(&mut self, batch_idx: usize, action: Action) {
+    if let Action::Place{point} = action {
+      let p = point.idx();
+      self.arch.loss_layer().preload_label(batch_idx, &SampleLabel::Category{category: p as i32}, Phase::Training);
+    } else {
+      panic!();
+    }
+  }
+
+  fn preload_loss_weight(&mut self, batch_idx: usize, weight: f32) {
+    // FIXME(20160222)
+    unimplemented!();
+  }
+
+  fn load_inputs(&mut self, batch_size: usize) {
+    let ctx = (*self.context).as_ref();
+    self.arch.input_layer().load_frames(batch_size, &ctx);
+    self.arch.loss_layer().load_labels(batch_size, &ctx);
+    // FIXME(20160222): load loss weights.
+    unimplemented!();
+  }
+
+  fn forward(&mut self, batch_size: usize) {
+    let ctx = (*self.context).as_ref();
+    self.arch.forward(batch_size, Phase::Training, &ctx);
+  }
+
+  fn backward(&mut self, batch_size: usize) {
+    let ctx = (*self.context).as_ref();
+    self.arch.backward(batch_size, 1.0, &ctx);
+  }
+
+  fn read_values(&mut self, batch_size: usize) {
+    unimplemented!();
+  }
+
+  fn accumulate_gradients(&mut self, accum_mode: GradAccumMode) {
+    unimplemented!();
+  }
+
+  fn synchronize_gradients(&mut self, sync_mode: GradSyncMode) {
+    unimplemented!();
+  }
+
+  fn reset_gradients(&mut self) {
+    unimplemented!();
+  }
+
+  fn descend_params(&mut self, step_size: f32) {
+    unimplemented!();
+  }
+}
+
 #[derive(Clone)]
 pub struct ConvnetRolloutPolicyBuilder {
   num_workers:          usize,
@@ -246,7 +306,16 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
     max_iters
   }
 
-  fn rollout_batch(&mut self, batch_size: usize, green_stone: Stone, leafs: RolloutLeafs, rollout_trajs: &mut [RolloutTraj], record_trace: bool, traces: &mut [QuickTrace], rng: &mut Xorshiftplus128Rng) {
+  //fn rollout_batch(&mut self, batch_size: usize, green_stone: Stone, leafs: RolloutLeafs, rollout_trajs: &mut [RolloutTraj], record_trace: bool, traces: &mut [QuickTrace], rng: &mut Xorshiftplus128Rng) {
+  fn rollout_batch(&mut self,
+      batch_size:       usize,
+      //green_stone:      Stone,
+      leafs:            RolloutLeafs,
+      rollout_trajs:    &mut [RolloutTraj],
+      mut trace_batch:  Option<&mut SearchTraceBatch>,
+      record_trace: bool, traces: &mut [QuickTrace],
+      rng:              &mut Xorshiftplus128Rng)
+  {
     let ctx = (*self.context).as_ref();
 
     // FIXME(20160120): this allows us to be a little sloppy with how many
@@ -361,6 +430,10 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
                 spin_count += 1;
                 continue;
               } else {
+                if let Some(ref mut trace_batch) = trace_batch {
+                  trace_batch.traj_traces[batch_idx]
+                    .rollout_traj.actions.push(Action::Place{point: sim_point});
+                }
                 if record_trace {
                   let trace_len = traces[batch_idx].actions.len();
                   traces[batch_idx].actions[trace_len - 1].1 = Action::Place{point: sim_point};
@@ -410,6 +483,10 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
                     spin_count += 1;
                     continue;
                   } else {
+                    if let Some(ref mut trace_batch) = trace_batch {
+                      trace_batch.traj_traces[batch_idx]
+                        .rollout_traj.actions.push(Action::Place{point: sim_point});
+                    }
                     if record_trace {
                       let trace_len = traces[batch_idx].actions.len();
                       traces[batch_idx].actions[trace_len - 1].1 = Action::Place{point: sim_point};
@@ -444,6 +521,10 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
 
         turn_pass[sim_turn_off][batch_idx] = false;
         if !made_move {
+          if let Some(ref mut trace_batch) = trace_batch {
+            trace_batch.traj_traces[batch_idx]
+              .rollout_traj.actions.push(Action::Pass);
+          }
           rollout_trajs[batch_idx].sim_state.try_action(sim_turn, Action::Pass);
           rollout_trajs[batch_idx].sim_state.commit();
           for_each_touched_empty(&rollout_trajs[batch_idx].sim_state.position, &rollout_trajs[batch_idx].sim_state.chains, |position, chains, pt| {
@@ -681,8 +762,11 @@ impl RolloutPolicy for BiConvnetRolloutPolicy {
     max_iters
   }
 
-  fn rollout_batch(&mut self, batch_size: usize, green_stone: Stone, leafs: RolloutLeafs, rollout_trajs: &mut [RolloutTraj], record_trace: bool, traces: &mut [QuickTrace], rng: &mut Xorshiftplus128Rng) {
+  fn rollout_batch(&mut self, batch_size: usize, /*green_stone: Stone,*/ leafs: RolloutLeafs, rollout_trajs: &mut [RolloutTraj], mut trace_batch: Option<&mut SearchTraceBatch>, record_trace: bool, traces: &mut [QuickTrace], rng: &mut Xorshiftplus128Rng) {
     let ctx = (*self.context).as_ref();
+
+    // FIXME(20160222)
+    let green_stone = Stone::White;
 
     // FIXME(20160120): this allows us to be a little sloppy with how many
     // trajectories we allocate.

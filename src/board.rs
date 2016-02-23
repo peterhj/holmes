@@ -211,4 +211,33 @@ impl Action {
       Action::Place{point: Point::from_coord(Coord{x: x, y: y})}
     }
   }
+
+  #[inline]
+  pub fn from_idx(idx: usize) -> Action {
+    if idx < Board::SIZE {
+      Action::Place{point: Point::from_idx(idx)}
+    } else {
+      const SIZE_P1: usize = Board::SIZE + 1;
+      match idx {
+        Board::SIZE => Action::Resign,
+        SIZE_P1     => Action::Pass,
+        _ => unreachable!(),
+      }
+    }
+  }
+
+  #[inline]
+  pub fn idx(self) -> usize {
+    match self {
+      Action::Place{point} => {
+        point.idx()
+      }
+      Action::Resign => {
+        Board::SIZE
+      }
+      Action::Pass => {
+        Board::SIZE + 1
+      }
+    }
+  }
 }
