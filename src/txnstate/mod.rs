@@ -1095,7 +1095,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
     unimplemented!();
   }
 
-  pub fn current_score_tromp_taylor(&self, komi: f32) -> f32 {
+  pub fn current_score_tromp_taylor_undead(&self, komi: f32, territory: &mut [u8]) -> f32 {
     let mut score: [f32; 2] = [0.0, 0.0];
 
     // Add own stones (area counting).
@@ -1105,8 +1105,10 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
     // TODO(20151126): Remove dead stones (mark dead w/ uniform rollouts).
 
     // Add territory using a 3-pass flood fill algorithm.
-    let mut territory: Vec<u8> = repeat(0).take(Board::SIZE).collect();
     let mut territory_count: [i32; 2] = [0, 0];
+    for p in 0 .. Board::SIZE {
+      territory[p] = 0;
+    }
     fn flood_fill(p: usize, mask: u8, position: &TxnPosition, territory: &mut [u8]) {
       match position.stones[p] {
         Stone::Empty => {
@@ -1127,10 +1129,10 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
           for_each_adjacent(Point::from_idx(p), |adj_pt| {
             match self.position.stones[adj_pt.idx()] {
               Stone::Black => {
-                flood_fill(p, 1, &self.position, &mut territory);
+                flood_fill(p, 1, &self.position, territory);
               }
               Stone::White => {
-                flood_fill(p, 2, &self.position, &mut territory);
+                flood_fill(p, 2, &self.position, territory);
               }
               _ => {}
             }

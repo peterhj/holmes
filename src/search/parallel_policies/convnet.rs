@@ -8,6 +8,9 @@ use convnet_new::{
   build_2layer16_19x19x44_arch_nodir,
   build_3layer32_19x19x44_arch_nodir,
   build_12layer384_19x19x44_arch_nodir,
+  build_2layer16_5x5_19x19x16_arch_nodir,
+  //build_2layer16_9x9_19x19x16_arch_nodir,
+  build_13layer384multi3_19x19x32_arch_nodir,
 };
 use discrete::{DiscreteFilter};
 use discrete::bfilter::{BFilter};
@@ -19,7 +22,7 @@ use search::parallel_policies::{
   RolloutPolicyBuilder, RolloutMode, RolloutLeafs, RolloutPolicy,
 };
 use search::parallel_policies::thompson::{ThompsonTreePolicy};
-use search::parallel_tree::{TreeTraj, RolloutTraj, QuickTrace};
+use search::parallel_tree::{TreePolicyConfig, TreeTraj, RolloutTraj, QuickTrace};
 use search::parallel_trace::{SearchTraceBatch};
 use txnstate::{TxnState, check_good_move_fast};
 use txnstate::extras::{TxnStateNodeData, for_each_touched_empty};
@@ -41,6 +44,7 @@ use std::sync::{Arc};
 
 #[derive(Clone)]
 pub struct ConvnetPolicyWorkerBuilder {
+  tree_cfg:             TreePolicyConfig,
   prior_arch_cfg:       PipelineArchConfig,
   prior_save_path:      PathBuf,
   prior_shared:         Arc<PipelineArchSharedData>,
@@ -52,10 +56,14 @@ pub struct ConvnetPolicyWorkerBuilder {
 }
 
 impl ConvnetPolicyWorkerBuilder {
-  pub fn new(num_workers: usize, worker_batch_size: usize) -> ConvnetPolicyWorkerBuilder {
+  pub fn new(tree_cfg: TreePolicyConfig, num_workers: usize, worker_batch_size: usize) -> ConvnetPolicyWorkerBuilder {
     //let (prior_arch_cfg, prior_save_path) = build_12layer128_19x19x16_arch(1);
-    let prior_arch_cfg = build_12layer384_19x19x44_arch_nodir(1);
-    let prior_save_path = PathBuf::from("models/gogodb_w2015_alphav2_new_action_12layer384_19x19x44.saved");
+
+    //let prior_arch_cfg = build_12layer384_19x19x44_arch_nodir(1);
+    //let prior_save_path = PathBuf::from("models/gogodb_w2015_alphav2_new_action_12layer384_19x19x44.saved");
+
+    let prior_arch_cfg = build_13layer384multi3_19x19x32_arch_nodir(1);
+    let prior_save_path = PathBuf::from("models/gogodb_w2015-preproc-alphav3m_19x19x32_13layer384multi3.saved");
 
     // FIXME(20160121): temporarily using existing balance run.
     /*let rollout_arch_cfg = build_2layer16_19x19x16_arch_nodir(worker_batch_size);
@@ -63,12 +71,15 @@ impl ConvnetPolicyWorkerBuilder {
 
     //let (rollout_arch_cfg, rollout_save_path) = build_2layer16_19x19x16_arch(worker_batch_size);
 
-    let rollout_arch_cfg = build_2layer16_19x19x44_arch_nodir(worker_batch_size);
-    let rollout_save_path = PathBuf::from("models/gogodb_w2015_alphav2_new_action_2layer16_19x19x44_run2.saved");
+    //let rollout_arch_cfg = build_2layer16_19x19x44_arch_nodir(worker_batch_size);
+    //let rollout_save_path = PathBuf::from("models/gogodb_w2015_alphav2_new_action_2layer16_19x19x44_run2.saved");
     //let rollout_save_path = PathBuf::from("models/balance_2layer16_19x19x44_run1.saved");
 
     //let rollout_arch_cfg = build_3layer32_19x19x44_arch_nodir(worker_batch_size);
     //let rollout_save_path = PathBuf::from("models/gogodb_w2015_alphav2_new_action_3layer32_19x19x44_run2.saved");
+
+    let rollout_arch_cfg = build_2layer16_5x5_19x19x16_arch_nodir(worker_batch_size);
+    let rollout_save_path = PathBuf::from("models/gogodb_w2015-preproc-alphaminiv3m_19x19x16_2layer16-5x5.saved");
 
     let prior_shared = for_all_devices(num_workers, |contexts| {
       Arc::new(PipelineArchSharedData::new(num_workers, &prior_arch_cfg, contexts))
@@ -78,6 +89,7 @@ impl ConvnetPolicyWorkerBuilder {
     });
 
     ConvnetPolicyWorkerBuilder{
+      tree_cfg:             tree_cfg,
       prior_arch_cfg:       prior_arch_cfg,
       prior_save_path:      prior_save_path,
       prior_shared:         prior_shared,
@@ -122,7 +134,7 @@ impl SearchPolicyWorkerBuilder for ConvnetPolicyWorkerBuilder {
       context:  context.clone(),
       arch:     prior_arch,
     };
-    let tree_policy = ThompsonTreePolicy::new();
+    let tree_policy = ThompsonTreePolicy::new(self.tree_cfg);
     let rollout_policy = ConvnetRolloutPolicy{
       context:      context.clone(),
       batch_size:   worker_batch_size,
@@ -142,8 +154,15 @@ pub struct ConvnetPolicyWorker {
   rollout_policy:   ConvnetRolloutPolicy,
 }
 
+impl ConvnetPolicyWorker {
+}
+
 impl SearchPolicyWorker for ConvnetPolicyWorker {
   fn prior_policy(&mut self) -> &mut PriorPolicy {
+    &mut self.prior_policy
+  }
+
+  fn diff_prior_policy(&mut self) -> &mut DiffPriorPolicy {
     &mut self.prior_policy
   }
 
@@ -222,11 +241,11 @@ impl DiffPriorPolicy for ConvnetPriorPolicy {
     unimplemented!();
   }
 
-  fn accumulate_gradients(&mut self, accum_mode: GradAccumMode) {
+  /*fn accumulate_gradients(&mut self, accum_mode: GradAccumMode) {
     unimplemented!();
-  }
+  }*/
 
-  fn synchronize_gradients(&mut self, sync_mode: GradSyncMode) {
+  fn sync_gradients(&mut self, sync_mode: GradSyncMode) {
     unimplemented!();
   }
 
@@ -312,6 +331,7 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
       //green_stone:      Stone,
       leafs:            RolloutLeafs,
       rollout_trajs:    &mut [RolloutTraj],
+      pass_only:        Option<Stone>,
       mut trace_batch:  Option<&mut SearchTraceBatch>,
       record_trace: bool, traces: &mut [QuickTrace],
       rng:              &mut Xorshiftplus128Rng)
@@ -323,6 +343,7 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
     //assert_eq!(batch_size, rollout_trajs.len());
     assert!(batch_size <= rollout_trajs.len());
 
+    //let mut leaf_turn = None;
     let mut valid_move_set = vec![vec![], vec![]];
     // XXX(20160124): Valid move iterator is an "upper bound" on the valid moves,
     // since it is easy to add elements but hard to remove them.
@@ -336,6 +357,12 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
       valid_move_set[0].push(leaf_node.state.get_data().legality.legal_points(Stone::Black));
       valid_move_set[1].push(leaf_node.state.get_data().legality.legal_points(Stone::White));*/
       leafs.with_leaf_state(batch_idx, |leaf_state| {
+        /*let turn = leaf_state.current_turn();
+        if leaf_turn.is_none() {
+          leaf_turn = Some(turn);
+        } else {
+          assert_eq!(turn, leaf_turn.unwrap());
+        }*/
         valid_move_set[0].push(leaf_state.get_data().legality.legal_points(Stone::Black));
         valid_move_set[1].push(leaf_state.get_data().legality.legal_points(Stone::White));
         valid_move_iter[0].push(valid_move_set[0][batch_idx].iter().collect());
@@ -347,6 +374,7 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
       turn_pass[1].push(false);
       filters.push(BFilter::with_capacity(Board::SIZE));
     }
+    //let leaf_turn = leaf_turn.unwrap();
 
     if record_trace {
       for batch_idx in 0 .. batch_size {
@@ -357,11 +385,29 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
       }
     }
 
+    //let mut turn_t = leaf_turn;
     let max_iters = 361 + 361 / 2 + rng.gen_range(0, 2);
     for t in 0 .. max_iters {
       if num_both_passed == batch_size {
         break;
       }
+
+      /*if pass_only && turn_t == leaf_turn {
+        for batch_idx in 0 .. batch_size {
+          if let Some(ref mut trace_batch) = trace_batch {
+            trace_batch.traj_traces[batch_idx]
+              .rollout_traj.actions.push(Action::Pass);
+          }
+          let sim_turn = rollout_trajs[batch_idx].sim_state.current_turn();
+          assert_eq!(sim_turn, leaf_turn);
+          rollout_trajs[batch_idx].sim_state.try_action(sim_turn, Action::Pass);
+          rollout_trajs[batch_idx].sim_state.commit();
+          // FIXME(20160226): update legal points.
+        }
+
+        turn_t = turn_t.opponent();
+        continue;
+      }*/
 
       for batch_idx in 0 .. batch_size {
         if !rollout_trajs[batch_idx].rollout {
@@ -536,7 +582,10 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
             continue;
           }
         }
+
       }
+
+      //turn_t = turn_t.opponent();
     }
   }
 
@@ -732,6 +781,10 @@ impl SearchPolicyWorker for BiConvnetPolicyWorker {
     unimplemented!();
   }
 
+  fn diff_prior_policy(&mut self) -> &mut DiffPriorPolicy {
+    unimplemented!();
+  }
+
   fn tree_policy(&mut self) -> &mut TreePolicy<R=Xorshiftplus128Rng> {
     unimplemented!();
   }
@@ -762,7 +815,16 @@ impl RolloutPolicy for BiConvnetRolloutPolicy {
     max_iters
   }
 
-  fn rollout_batch(&mut self, batch_size: usize, /*green_stone: Stone,*/ leafs: RolloutLeafs, rollout_trajs: &mut [RolloutTraj], mut trace_batch: Option<&mut SearchTraceBatch>, record_trace: bool, traces: &mut [QuickTrace], rng: &mut Xorshiftplus128Rng) {
+  fn rollout_batch(&mut self,
+      batch_size: usize,
+      /*green_stone: Stone,*/
+      leafs: RolloutLeafs,
+      rollout_trajs: &mut [RolloutTraj],
+      pass_only: Option<Stone>,
+      mut trace_batch: Option<&mut SearchTraceBatch>,
+      record_trace: bool, traces: &mut [QuickTrace],
+      rng: &mut Xorshiftplus128Rng)
+  {
     let ctx = (*self.context).as_ref();
 
     // FIXME(20160222)

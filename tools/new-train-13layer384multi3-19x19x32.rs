@@ -17,7 +17,7 @@ use rembrandt::arch_new::{
 use rembrandt::data_new::{
   SampleDatumConfig, SampleLabelConfig,
   DatasetConfig,
-  SampleIterator, RandomEpisodeIterator, CyclicEpisodeIterator,
+  SampleIterator, RandomEpisodeIterator,
   AugmentDataSource, PartitionDataSource,
 };
 use rembrandt::layer_new::{
@@ -46,47 +46,47 @@ fn train() {
   env_logger::init().unwrap();
   //let mut rng = thread_rng();
 
-  let num_workers = 1;
-  let batch_size = 256;
+  /*let num_workers = 1;
+  let batch_size = 256;*/
 
   /*let num_workers = 2;
   let batch_size = 128;*/
 
-  /*let num_workers = 4;
-  let batch_size = 64;*/
+  let num_workers = 4;
+  let batch_size = 64;
 
-  let input_channels = 16;
-  let conv1_channels = 16;
-  let hidden_channels = 16;
+  /*let num_workers = 8;
+  let batch_size = 32;*/
+
+  let input_channels = 32;
+  let lookahead = 3;
+
+  let conv1_channels = 96;
+  let hidden_channels = 384;
 
   let sgd_opt_cfg = SgdOptConfig{
-    init_t:         0,
+    init_t:         1035000,
     minibatch_size: num_workers * batch_size,
     step_size:      StepSizeSchedule::Decay{
-      //init_step:    0.015625,
-      //init_step:    0.03125,
-      init_step:    0.0625,
+      init_step:    0.015625,
       decay_rate:   0.25,
-      decay_iters:  120000,
+      //decay_iters:  540000,
+      decay_iters:  780000,
     },
-    //momentum:       0.0625,
     momentum:       0.0,
     l2_reg_coef:    0.0,
     display_iters:  100,
-    /*valid_iters:    1500,
-    save_iters:     1500,*/
     valid_iters:    3000,
     save_iters:     3000,
   };
-  //let datum_cfg = SampleDatumConfig::BitsThenBytes3d{scale: 255};
-  let datum_cfg = SampleDatumConfig::Bits3d{scale: 255};
-  /*let train_label_cfg = SampleLabelConfig::LookaheadCategories{
+  let datum_cfg = SampleDatumConfig::BitsThenBytes3d{scale: 255};
+  let train_label_cfg = SampleLabelConfig::LookaheadCategories{
     num_categories: 361,
-    lookahead:      3,
-  };*/
-  let train_label_cfg = SampleLabelConfig::Category{
-    num_categories: 361,
+    lookahead:      lookahead,
   };
+  /*let train_label_cfg = SampleLabelConfig::Category{
+    num_categories: 361,
+  };*/
   let valid_label_cfg = SampleLabelConfig::Category{
     num_categories: 361,
   };
@@ -109,33 +109,61 @@ fn train() {
     act_func:       ActivationFunction::Rect,
     init_weights:   ParamsInitialization::Uniform{half_range: 0.05},
   };
-  let final_conv_layer_cfg = Conv2dLayerConfig{
-    //in_dims:        (19, 19, hidden_channels),
+  let conv2_layer_cfg = Conv2dLayerConfig{
     in_dims:        (19, 19, conv1_channels),
     conv_size:      3,
     conv_stride:    1,
     conv_pad:       1,
-    //out_channels:   3,
-    out_channels:   1,
+    out_channels:   hidden_channels,
+    act_func:       ActivationFunction::Rect,
+    init_weights:   ParamsInitialization::Uniform{half_range: 0.05},
+  };
+  let inner_conv_layer_cfg = Conv2dLayerConfig{
+    in_dims:        (19, 19, hidden_channels),
+    conv_size:      3,
+    conv_stride:    1,
+    conv_pad:       1,
+    out_channels:   hidden_channels,
+    act_func:       ActivationFunction::Rect,
+    init_weights:   ParamsInitialization::Uniform{half_range: 0.05},
+  };
+  let final_conv_layer_cfg = Conv2dLayerConfig{
+    in_dims:        (19, 19, hidden_channels),
+    conv_size:      3,
+    conv_stride:    1,
+    conv_pad:       1,
+    out_channels:   lookahead,
+    //out_channels:   1,
     act_func:       ActivationFunction::Identity,
     init_weights:   ParamsInitialization::Uniform{half_range: 0.05},
   };
-  /*let loss_layer_cfg = MultiCategoricalLossLayerConfig{
+  let loss_layer_cfg = MultiCategoricalLossLayerConfig{
     num_categories:     361,
-    train_lookahead:    3,
+    train_lookahead:    lookahead,
     infer_lookahead:    1,
-  };*/
-  let loss_layer_cfg = CategoricalLossLayerConfig{
-    num_categories:     361,
   };
+  /*let loss_layer_cfg = CategoricalLossLayerConfig{
+    num_categories:     361,
+  };*/
 
   let mut arch_cfg = PipelineArchConfig::new();
   arch_cfg
     .data3d(data_layer_cfg)
     .conv2d(conv1_layer_cfg)
+    .conv2d(conv2_layer_cfg)
+    .conv2d(inner_conv_layer_cfg)
+    .conv2d(inner_conv_layer_cfg)
+    .conv2d(inner_conv_layer_cfg)
+    .conv2d(inner_conv_layer_cfg)
+    .conv2d(inner_conv_layer_cfg)
+    .conv2d(inner_conv_layer_cfg)
+    .conv2d(inner_conv_layer_cfg)
+    .conv2d(inner_conv_layer_cfg)
+    .conv2d(inner_conv_layer_cfg)
+    .conv2d(inner_conv_layer_cfg)
     .conv2d(final_conv_layer_cfg)
-    //.multi_softmax_kl_loss(loss_layer_cfg);
-    .softmax_kl_loss(loss_layer_cfg);
+    .multi_softmax_kl_loss(loss_layer_cfg);
+    //.softmax_kl_loss(loss_layer_cfg);
 
   let shared_seed = [thread_rng().next_u64(), thread_rng().next_u64()];
   let arch_shared = for_all_devices(num_workers, |contexts| {
@@ -155,8 +183,7 @@ fn train() {
         let mut arch_worker = PipelineArchWorker::new(
             batch_size,
             arch_cfg,
-            PathBuf::from("models/tmp_gogodb_w2015_alphaminiv3_new_action_2layer16_5x5_19x19x16"),
-            //PathBuf::from("models/tmp_gogodb_w2015_alphaminiv3_new_action_2layer16_9x9_19x19x16"),
+            PathBuf::from("models/tmp_gogodb_w2015_alphav3m_new_action_13layer384multi3_19x19x32"),
             tid,
             shared_seed,
             &arch_shared,
@@ -164,12 +191,10 @@ fn train() {
             &ctx,
         );
 
-        //let dataset_cfg = DatasetConfig::open(&PathBuf::from("data/gogodb_w2015_alphaminiv3_19x19x16_episode.data"));
-        let dataset_cfg = DatasetConfig::open(&PathBuf::from("datasets/gogodb_w2015-preproc-alphaminiv3m_19x19x16.data"));
+        let dataset_cfg = DatasetConfig::open(&PathBuf::from("data/gogodb_w2015_alphav3m_19x19x32_episode.data"));
 
         let mut train_data =
-            CyclicEpisodeIterator::new(
-            //RandomEpisodeIterator::new(
+            RandomEpisodeIterator::new(
               Box::new(AugmentDataSource::new(SymmetryAugment::new(&mut thread_rng()), dataset_cfg.build_with_cfg(datum_cfg, train_label_cfg, "train"))),
             );
         let mut valid_data =

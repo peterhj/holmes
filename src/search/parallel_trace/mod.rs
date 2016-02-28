@@ -1,33 +1,37 @@
 use board::{Action};
 use search::{translate_score_to_reward};
-use search::parallel_policies::{DiffPriorPolicy};
+use search::parallel_policies::{
+  SearchPolicyWorker,
+  PriorPolicy, DiffPriorPolicy,
+};
 use search::parallel_tree::{TreePolicyConfig};
 use txnstate::{TxnState};
 use txnstate::extras::{TxnStateNodeData};
+use worker::{WorkerData};
 
 use std::sync::{Arc, Barrier, Mutex, RwLock};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering, fence};
 use vec_map::{VecMap};
 
-pub mod magic;
+pub mod omega;
 
 pub struct SearchTrace {
-  pub tree_cfg:     TreePolicyConfig,
+  pub tree_cfg:     Option<TreePolicyConfig>,
   pub root_state:   Option<TxnState<TxnStateNodeData>>,
   pub batches:      Vec<SearchTraceBatch>,
 }
 
 impl SearchTrace {
-  pub fn new(tree_cfg: TreePolicyConfig) -> SearchTrace {
+  pub fn new() -> SearchTrace {
     SearchTrace{
-      tree_cfg:     tree_cfg,
+      tree_cfg:     None, //tree_cfg,
       root_state:   None,
       batches:      vec![],
     }
   }
 
-  pub fn reset(&mut self, root_state: TxnState<TxnStateNodeData>) {
-    //self.tree_cfg = tree_cfg;
+  pub fn reset(&mut self, tree_cfg: TreePolicyConfig, root_state: TxnState<TxnStateNodeData>) {
+    self.tree_cfg = Some(tree_cfg);
     self.root_state = Some(root_state);
     self.batches.clear();
   }
@@ -114,7 +118,7 @@ pub struct ReconNode {
 }
 
 impl ReconNode {
-  pub fn new(state: TxnState<TxnStateNodeData>, prior_policy: &mut DiffPriorPolicy) -> ReconNode {
+  pub fn new(state: TxnState<TxnStateNodeData>, prior_policy: &mut PriorPolicy) -> ReconNode {
     // FIXME(20160222)
     unimplemented!();
   }
@@ -136,8 +140,13 @@ impl ReconNode {
 }
 
 pub trait ExploreBatchWorker {
-  fn prior_policy(&mut self) -> &mut DiffPriorPolicy;
+  //fn policy_worker(&mut self) -> &SearchPolicyWorker;
+  //fn prior_policy(&mut self) -> &mut DiffPriorPolicy;
+
+  //fn with_prior_policy<V>(&mut self, mut f: &mut FnMut(&mut PriorPolicy) -> V) -> V;
+  fn with_prior_policy<F, V>(&mut self, mut f: F) -> V where F: FnOnce(&mut PriorPolicy) -> V;
   fn update_batch(&mut self, root_node: Arc<RwLock<ReconNode>>, trace_batch: &SearchTraceBatch);
+  fn update_instance(&mut self, root_node: Arc<RwLock<ReconNode>>);
 }
 
 pub trait RolloutTrajWorker {
@@ -168,9 +177,7 @@ impl ParallelSearchReconWorkerBuilder {
 }
 
 pub struct ParallelSearchReconWorker {
-  tid:          usize,
-  num_workers:  usize,
-  barrier:      Arc<Barrier>,
+  worker_data:  WorkerData,
   shared_tree:  ReconSharedTree,
 }
 
@@ -186,7 +193,7 @@ impl ParallelSearchReconWorker {
   {
     assert!(search_trace.root_state.is_some());
     self.shared_tree.try_reset(search_trace.root_state.as_ref().unwrap());
-    self.barrier.wait();
+    self.worker_data.sync();
 
     let root_node = {
       let root_node = self.shared_tree.root_node.lock().unwrap();
@@ -214,7 +221,7 @@ impl ParallelSearchReconWorker {
               node.child_nodes.contains_key(&action_idx),
             )
           };
-          if visit_count < search_trace.tree_cfg.visit_thresh {
+          if visit_count < search_trace.tree_cfg.unwrap().visit_thresh {
             terminated = true;
           }
           let next_node = if has_child {
@@ -226,7 +233,9 @@ impl ParallelSearchReconWorker {
             } else {
               new_state.commit();
             }
-            let new_node = Arc::new(RwLock::new(ReconNode::new(new_state, explore_batch_worker.prior_policy())));
+            let new_node = explore_batch_worker.with_prior_policy(move |prior_policy| {
+              Arc::new(RwLock::new(ReconNode::new(new_state, prior_policy)))
+            });
             let mut node = node.write().unwrap();
             if node.child_nodes.contains_key(&action_idx) {
               node.child_nodes[action_idx].clone()
@@ -240,8 +249,12 @@ impl ParallelSearchReconWorker {
         explore_leaf_nodes.push(node);
       }
 
+      self.worker_data.sync();
+
       // Update the exploration batch worker.
       explore_batch_worker.update_batch(root_node.clone(), trace_batch);
+
+      self.worker_data.sync();
 
       // Update the rollout trajectory worker.
       for batch_idx in 0 .. trace_batch.batch_size {
@@ -274,6 +287,12 @@ impl ParallelSearchReconWorker {
           node = next_node;
         }
       }
+
+      self.worker_data.sync();
     }
+
+    explore_batch_worker.update_instance(root_node.clone());
+
+    self.worker_data.sync();
   }
 }

@@ -9,11 +9,11 @@ use holmes::board::{RuleSet, Coord, PlayerRank, Stone, Point, Action};
 use holmes::sgf::{Sgf, parse_raw_sgf};
 use holmes::txnstate::{TxnStateConfig, TxnState};
 use holmes::txnstate::features::{
-  TxnStateFeaturesData,
+  /*TxnStateFeaturesData,
   TxnStateLibFeaturesData,
   TxnStateExtLibFeatsData,
   TxnStateAlphaFeatsV1Data,
-  TxnStateAlphaFeatsV2Data,
+  TxnStateAlphaFeatsV2Data,*/
   TxnStateAlphaV3FeatsData,
   TxnStateAlphaMiniV3FeatsData,
 };
@@ -59,14 +59,19 @@ fn main() {
   //let expected_dims = (19, 19, 37);
   //let expected_dims = (19, 19, 44);
   //let expected_dims = (19, 19, 32);
-  let expected_dims = (19, 19, 16);
+  //let expected_dims = (19, 19, 16);
 
   //let expected_frame_sz = <Array3d<u8> as ArrayDeserialize<u8, NdArrayFormat>>::serial_size(expected_dims);
   //let expected_frame_sz = Array3d::<u8>::serial_size(expected_dims);
   //let expected_frame_sz = BitArray3d::serial_size(expected_dims);
   //let expected_frame_sz = BitArray3d::serial_size((19, 19, 43)) + Array3d::<u8>::serial_size((19, 19, 1));
   //let expected_frame_sz = BitArray3d::serial_size((19, 19, 31)) + Array3d::<u8>::serial_size((19, 19, 1));
-  let expected_frame_sz = BitArray3d::serial_size(expected_dims);
+  //let expected_frame_sz = BitArray3d::serial_size(expected_dims);
+
+  //type FeatsData = TxnStateAlphaV3FeatsData;
+  type FeatsData = TxnStateAlphaMiniV3FeatsData;
+
+  let expected_frame_sz = FeatsData::serial_size();
 
   let n = sgf_paths.len();
   let est_ep_len = 216;
@@ -341,12 +346,7 @@ fn main() {
           rules:  RuleSet::KgsJapanese.rules(),
           ranks:  [b_rank, w_rank],
         },
-        //TxnStateLibFeaturesData::new(),
-        //TxnStateExtLibFeatsData::new(),
-        //TxnStateAlphaFeatsV1Data::new(),
-        //TxnStateAlphaFeatsV2Data::new(),
-        //TxnStateAlphaV3FeatsData::new(),
-        TxnStateAlphaMiniV3FeatsData::new(),
+        FeatsData::new(),
     );
     state.reset();
     for (t, &(ref player, ref mov)) in sgf.moves.iter().enumerate() {
@@ -443,9 +443,9 @@ fn main() {
       assert_eq!(expected_frame_sz, serial_frame.len());*/
 
       // XXX(20160220): Option 1: Single serialized bit array.
-      let mut serial_frame: Vec<u8> = Vec::with_capacity(expected_frame_sz);
+      /*let mut serial_frame: Vec<u8> = Vec::with_capacity(expected_frame_sz);
       let bit_arr = state.get_data().extract_relative_serial_array(turn);
-      bit_arr.serialize(&mut serial_frame).unwrap();
+      bit_arr.serialize(&mut serial_frame).unwrap();*/
 
       // XXX(20160220): Option 2: Serialized into two: bit array and byte array.
       // XXX(20160202): use custom encoding to get 2 arrays for AlphaV2 feats.
@@ -453,6 +453,9 @@ fn main() {
       let (bit_arr, bytes_arr) = state.get_data().extract_relative_serial_arrays(turn);
       bit_arr.serialize(&mut serial_frame).unwrap();
       bytes_arr.serialize(&mut serial_frame).unwrap();*/
+
+      // XXX(20160223): Option 3: Let the feature data return a mystery blob.
+      let serial_frame = state.get_data().extract_relative_serial_blob(turn);
 
       assert_eq!(serial_frame.len(), expected_frame_sz);
       frames_db.append_frame(&serial_frame);

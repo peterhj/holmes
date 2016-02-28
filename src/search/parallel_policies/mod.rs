@@ -22,6 +22,7 @@ pub trait SearchPolicyWorkerBuilder: Send + Clone {
 
 pub trait SearchPolicyWorker {
   fn prior_policy(&mut self) -> &mut PriorPolicy;
+  fn diff_prior_policy(&mut self) -> &mut DiffPriorPolicy;
   fn tree_policy(&mut self) -> &mut TreePolicy<R=Xorshiftplus128Rng>;
   fn exploration_policies(&mut self) -> (&mut PriorPolicy, &mut TreePolicy<R=Xorshiftplus128Rng>);
   fn rollout_policy(&mut self) -> &mut RolloutPolicy<R=Xorshiftplus128Rng>;
@@ -32,8 +33,7 @@ pub trait PriorPolicy {
 }
 
 pub enum GradAccumMode {
-  //Gradient,
-  ScoreRatio,
+  Add{scale: f32},
 }
 
 pub enum GradSyncMode {
@@ -49,8 +49,8 @@ pub trait DiffPriorPolicy: PriorPolicy {
   fn forward(&mut self, batch_size: usize);
   fn backward(&mut self, batch_size: usize);
   fn read_values(&mut self, batch_size: usize);
-  fn accumulate_gradients(&mut self, accum_mode: GradAccumMode);
-  fn synchronize_gradients(&mut self, sync_mode: GradSyncMode);
+  //fn accumulate_gradients(&mut self, accum_mode: GradAccumMode);
+  fn sync_gradients(&mut self, sync_mode: GradSyncMode);
   fn reset_gradients(&mut self);
   fn descend_params(&mut self, step_size: f32);
 }
@@ -103,8 +103,9 @@ pub trait RolloutPolicy {
       //green_stone:      Stone,
       leafs:            RolloutLeafs,
       rollout_trajs:    &mut [RolloutTraj],
+      pass_only:        Option<Stone>,
       mut trace_batch:  Option<&mut SearchTraceBatch>,
-      record_trace: bool, traces: &mut [QuickTrace],
+      record_trace: bool, traces: &mut [QuickTrace], // FIXME(20160226): deprecated.
       rng:              &mut Self::R,
   );
 

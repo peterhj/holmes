@@ -77,15 +77,17 @@ impl HyperparamConfig {
   }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct TreePolicyConfig {
   pub horizon_cfg:  HorizonConfig,
   pub visit_thresh: usize,
   pub mc_scale:     f32,
   pub prior_equiv:  f32,
+  pub rave:         bool,
+  pub rave_equiv:   f32,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum HorizonConfig {
   All,
   Fixed{max_horizon: usize},
@@ -132,6 +134,9 @@ pub struct RolloutTraj {
 
   // XXX(20160219): For counting Monte Carlo live stones.
   mc_live_mask:     Vec<BitSet>,
+
+  // XXX(20160226): For Tromp-Taylor scoring.
+  tt_scratch:       Vec<u8>,
 }
 
 impl RolloutTraj {
@@ -166,10 +171,11 @@ impl RolloutTraj {
         BitSet::with_capacity(Board::SIZE),
         BitSet::with_capacity(Board::SIZE),
       ],
+      tt_scratch:   repeat(0).take(Board::SIZE).collect(),
     }
   }
 
-  pub fn reset_terminal(&mut self, leaf_state: &TxnState<TxnStateNodeData>) {
+  /*pub fn reset_terminal(&mut self, leaf_state: &TxnState<TxnStateNodeData>) {
     self.rollout = false;
     self.init_state = leaf_state.clone();
     //self.sim_state.reset();
@@ -186,7 +192,7 @@ impl RolloutTraj {
     }*/
     self.mc_live_mask[0].clear();
     self.mc_live_mask[1].clear();
-  }
+  }*/
 
   pub fn reset_rollout(&mut self, leaf_state: &TxnState<TxnStateNodeData>) {
     self.rollout = true;
@@ -221,10 +227,15 @@ impl RolloutTraj {
     // This implements the heuristic, "when ahead, stay ahead."
     // FIXME(20151125): one complication is how dynamic komi interacts with
     // prior values.
-    self.raw_score = Some(self.sim_state.current_score_rollout(komi));
+    /*self.raw_score = Some(self.sim_state.current_score_rollout(komi));
     let b_adj_score = self.sim_state.current_score_rollout(komi - 0.0f32.min(expected_score));
     let w_adj_score = self.sim_state.current_score_rollout(komi - 0.0f32.max(expected_score));
-    self.adj_score = Some([b_adj_score, w_adj_score]);
+    self.adj_score = Some([b_adj_score, w_adj_score]);*/
+
+    //let score = self.sim_state.current_score_rollout(komi);
+    let score = self.sim_state.current_score_tromp_taylor_undead(komi, &mut self.tt_scratch);
+    self.raw_score = Some(score);
+    self.adj_score = Some([score, score]);
   }
 
   pub fn update_mc_live_counts(&mut self, mc_live_counts: &mut [Vec<usize>]) {
@@ -755,11 +766,12 @@ struct InnerTree {
 #[derive(Clone)]
 pub struct SharedTree {
   inner:        Arc<Mutex<InnerTree>>,
-  horizon_cfg:  HorizonConfig,
+  //horizon_cfg:  HorizonConfig,
+  tree_cfg:     TreePolicyConfig,
 }
 
 impl SharedTree {
-  pub fn new() -> SharedTree {
+  pub fn new(tree_cfg: TreePolicyConfig) -> SharedTree {
     let mut b_mc_live_counts = Vec::with_capacity(Board::SIZE);
     let mut w_mc_live_counts = Vec::with_capacity(Board::SIZE);
     for p in 0 .. Board::SIZE {
@@ -787,15 +799,17 @@ impl SharedTree {
       //horizon_cfg: HorizonConfig::All,
       //horizon_cfg: HorizonConfig::Pwide{mu: 1.8},
       //horizon_cfg: HorizonConfig::Fixed{max_horizon: 3},
-      horizon_cfg: HorizonConfig::Fixed{max_horizon: 20},
+      //horizon_cfg: HorizonConfig::Fixed{max_horizon: 20},
+      tree_cfg: tree_cfg,
     }
   }
 
-  pub fn try_reset(&self, init_state: TxnState<TxnStateNodeData>, prior_policy: &mut PriorPolicy, horizon_cfg: HorizonConfig) {
+  pub fn try_reset(&self, init_state: TxnState<TxnStateNodeData>, prior_policy: &mut PriorPolicy) {
     let mut inner = self.inner.lock().unwrap();
     if inner.root_node.is_none() {
-      inner.root_node = Some(Arc::new(RwLock::new(Node::new(init_state, prior_policy, horizon_cfg))));
+      inner.root_node = Some(Arc::new(RwLock::new(Node::new(init_state, prior_policy, self.tree_cfg.horizon_cfg))));
       inner.mean_raw_score = 0.0;
+      // FIXME(20160223): should reset other stats here too.
     }
   }
 
@@ -1261,6 +1275,10 @@ pub enum SearchWorkerCommand {
 }
 
 pub enum SearchWorkerOutput {
+  SearchTrace{
+    tid:            usize,
+    search_trace:   SearchTrace,
+  },
   OpponentRolloutParams{
     params_blob:    Vec<u8>,
   },
@@ -1318,6 +1336,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
       in_txs.push(in_tx);
       let out_tx = out_tx.clone();
 
+      // FIXME(20160225): these `shared_*` variables are deprecated.
       let shared_rollout_rewards = shared_rollout_rewards.clone();
       let shared_rollout_count = shared_rollout_count.clone();
       let shared_traces_count = shared_traces_count.clone();
@@ -1344,15 +1363,19 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
             TxnStateNodeData::new(),
         )).take(worker_batch_capacity).collect();
         let mut rollout_trajs: Vec<_> = repeat(RolloutTraj::new()).take(worker_batch_capacity).collect();
+
+        // FIXME(20160225): QuickTrace is deprecated.
         let mut traces: Vec<_> = repeat(QuickTrace::new()).take(worker_batch_capacity * 40).collect();
 
-        let tree_cfg = TreePolicyConfig{
+        /*let tree_cfg = TreePolicyConfig{
           horizon_cfg:  HorizonConfig::Fixed{max_horizon: 20},
           visit_thresh: 1,
           mc_scale:     1.0,
           prior_equiv:  16.0,
-        };
-        let mut search_trace = SearchTrace::new(tree_cfg);
+          rave:         false,
+          rave_equiv:   0.0,
+        };*/
+        let mut search_trace = SearchTrace::new();
 
         let mut mc_live_counts: Vec<Vec<usize>> = vec![
           repeat(0).take(Board::SIZE).collect(),
@@ -1373,7 +1396,12 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
               // XXX(20160107): If the tree has no root node, this sets it;
               // otherwise use the existing root node.
               let tree = shared_tree;
-              tree.try_reset(init_state, worker.prior_policy(), tree.horizon_cfg);
+              tree.try_reset(init_state, worker.prior_policy());
+
+              let batch_size = cfg.batch_size;
+              let num_batches = cfg.num_batches;
+              assert!(batch_size <= worker_batch_capacity);
+              let tree_cfg = tree.tree_cfg;
 
               let root_node = {
                 let inner = tree.inner.lock().unwrap();
@@ -1389,13 +1417,9 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
                 inner.root_node.as_ref().unwrap().clone()
               };
 
-              let batch_size = cfg.batch_size;
-              let num_batches = cfg.num_batches;
-              assert!(batch_size <= worker_batch_capacity);
-
               if record_search {
                 let root_node = root_node.read().unwrap();
-                search_trace.reset(root_node.state.clone());
+                search_trace.reset(tree_cfg, root_node.state.clone());
               }
 
               let mut worker_mean_score: f32 = 0.0;
@@ -1443,12 +1467,20 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
                     } else {
                       None
                     };
-                    match TreeOps::traverse(tree.horizon_cfg, root_node.clone(), tree_traj, traj_trace, prior_policy, tree_policy, /*&mut stats,*/ &mut rng) {
-                      TreeResult::Terminal => {
+                    match TreeOps::traverse(tree_cfg.horizon_cfg, root_node.clone(), tree_traj, traj_trace, prior_policy, tree_policy, /*&mut stats,*/ &mut rng) {
+                      /*TreeResult::Terminal => {
                         let leaf_state = &tree_traj.leaf_node.as_ref().unwrap().read().unwrap().state;
                         rollout_traj.reset_terminal(leaf_state);
                       }
                       TreeResult::NonTerminal => {
+                        let leaf_state = &tree_traj.leaf_node.as_ref().unwrap().read().unwrap().state;
+                        rollout_traj.reset_rollout(leaf_state);
+                      }*/
+                      // XXX(20160223): Rolling out whether the leaf state is
+                      // terminal or not. This is because the tree traversal
+                      // does not account for passing at all, whereas rollouts
+                      // do and should be less biased.
+                      TreeResult::NonTerminal | TreeResult::Terminal => {
                         let leaf_state = &tree_traj.leaf_node.as_ref().unwrap().read().unwrap().state;
                         rollout_traj.reset_rollout(leaf_state);
                       }
@@ -1471,6 +1503,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
                       //green_stone,
                       RolloutLeafs::TreeTrajs(&tree_trajs),
                       &mut rollout_trajs,
+                      None,
                       traj_trace_batch,
                       false, &mut traces[batch * batch_size .. (batch + 1) * batch_size],
                       &mut rng);
@@ -1488,7 +1521,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
                   };
                   rollout_traj.score(cfg.komi, cfg.prev_mean_score);
                   rollout_traj.update_mc_live_counts(&mut mc_live_counts);
-                  TreeOps::backup(use_rave, tree.horizon_cfg, tree_traj, rollout_traj, traj_trace, &mut rng);
+                  TreeOps::backup(use_rave, tree_cfg.horizon_cfg, tree_traj, rollout_traj, traj_trace, &mut rng);
                   let raw_score = rollout_traj.raw_score.unwrap();
                   worker_backup_count += 1.0;
                   worker_mean_score += (raw_score - worker_mean_score) / worker_backup_count;
@@ -1555,6 +1588,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
                     //green_stone,
                     RolloutLeafs::LeafStates(&leaf_states),
                     &mut rollout_trajs,
+                    None,
                     None,
                     record_trace, &mut traces[batch * batch_size .. (batch + 1) * batch_size],
                     &mut rng);
@@ -1653,6 +1687,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
                   //green_stone,
                   RolloutLeafs::LeafStates(&leaf_states),
                   &mut rollout_trajs,
+                  None,
                   None,
                   true, &mut traces[0 .. batch_size],
                   &mut rng);
@@ -1929,6 +1964,7 @@ impl ParallelMonteCarloSearch {
     }*/
 
     let root_node = root_node.read().unwrap();
+    let root_turn = root_node.state.current_turn();
 
     /*let mut scratch = BensonScratch::new();
     let (b_alive_ch, b_alive_ter) = root_node.state.count_unconditionally_alive(Stone::Black, &mut scratch);
@@ -1946,6 +1982,7 @@ impl ParallelMonteCarloSearch {
     let (action, expected_score, adj_value, raw_value) = if let Some(argmax_j) = array_argmax(&root_trials) {
       stats.argmax_rank = Some(argmax_j);
       stats.argmax_ntrials = root_trials[argmax_j] as usize;
+
       let argmax_point = root_node.valid_moves[argmax_j];
       let j_score = root_node.values.arm_score(argmax_j);
       let j_adj_succs = root_node.values.num_succs[argmax_j].load(Ordering::Acquire);
@@ -1953,6 +1990,13 @@ impl ParallelMonteCarloSearch {
       let j_trials = root_trials[argmax_j];
       let adj_value = j_adj_succs as f32 / j_trials;
       let raw_value = j_raw_succs as f32 / j_trials;
+
+      /*if root_turn == Stone::Black && -(b_mc_alive as f32) + cfg.komi < 0.0 {
+        (Action::Pass, j_score, adj_value, raw_value)
+      } else if root_turn == Stone::White && w_mc_alive as f32 + cfg.komi >= 0.0 {
+        (Action::Pass, j_score, adj_value, raw_value)
+      } else */
+
       if raw_value < 0.1 {
         (Action::Resign, j_score, adj_value, raw_value)
       } else {
@@ -1962,6 +2006,7 @@ impl ParallelMonteCarloSearch {
       stats.argmax_rank = None;
       (Action::Pass, 0.0, 0.5, 0.5)
     };
+
     (MonteCarloSearchResult{
       turn:   root_node.state.current_turn(),
       action: action,
@@ -1977,6 +2022,89 @@ impl ParallelMonteCarloSearch {
       w_alive_ter:      w_alive_ter,*/
       pv:               root_pv,
     }, stats)
+  }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct MonteCarloSearchConfig {
+  pub num_rollouts: usize,
+  pub batch_size:   usize,
+}
+
+impl MonteCarloSearchConfig {
+  pub fn worker_dims(&self, num_workers: usize) -> (usize, usize) {
+    let num_rollouts = (self.num_rollouts + num_workers - 1) / num_workers * num_workers;
+    let worker_num_rollouts = num_rollouts / num_workers;
+    let worker_batch_size = (self.batch_size + num_workers - 1) / num_workers;
+    let worker_num_batches = (worker_num_rollouts + worker_batch_size - 1) / worker_batch_size;
+    (worker_batch_size, worker_num_batches)
+  }
+}
+
+pub struct ParallelMonteCarloSearchAndTrace {
+  pub search_traces:    VecMap<SearchTrace>,
+}
+
+impl ParallelMonteCarloSearchAndTrace {
+  pub fn new() -> ParallelMonteCarloSearchAndTrace {
+    ParallelMonteCarloSearchAndTrace{
+      search_traces:    VecMap::new(),
+    }
+  }
+
+  pub fn join<W>(&mut self,
+      search_cfg:   MonteCarloSearchConfig,
+      server:       &ParallelMonteCarloSearchServer<W>,
+      shared_tree:  SharedTree,
+      init_state:   &TxnState<TxnStateNodeData>,
+      rng:          &mut Xorshiftplus128Rng)
+      -> (MonteCarloSearchResult, MonteCarloSearchStats)
+      where W: SearchPolicyWorker
+  {
+    let num_workers = server.num_workers();
+    /*let num_rollouts = (search_cfg.num_rollouts + num_workers - 1) / num_workers * num_workers;
+    let worker_num_rollouts = num_rollouts / num_workers;
+    let worker_batch_size = (total_batch_size + num_workers - 1) / num_workers;
+    let worker_num_batches = (worker_num_rollouts + worker_batch_size - 1) / worker_batch_size;*/
+    let (worker_batch_size, worker_num_batches) = search_cfg.worker_dims(num_workers);
+    assert!(worker_batch_size >= 1);
+    assert!(worker_num_batches >= 1);
+
+    let cfg = SearchWorkerConfig{
+      batch_size:       worker_batch_size,
+      num_batches:      worker_num_batches,
+      // FIXME(20160112): use correct komi value.
+      komi:             7.5,
+      prev_mean_score:  0.0,
+    };
+
+    let start_time = get_time();
+    for tid in 0 .. num_workers {
+      server.enqueue(tid, SearchWorkerCommand::ResetSearch{
+        cfg:            cfg,
+        shared_tree:    shared_tree.clone(),
+        init_state:     init_state.clone(),
+        record_search:  true,
+      });
+    }
+    server.join();
+    let end_time = get_time();
+    let elapsed_ms = (end_time - start_time).num_milliseconds();
+
+    for _ in 0 .. num_workers {
+      match server.out_rx.recv().unwrap() {
+        SearchWorkerOutput::SearchTrace{tid, search_trace} => {
+          self.search_traces.insert(tid, search_trace);
+        }
+        _ => { unreachable!(); }
+      }
+    }
+
+    let mut stats: MonteCarloSearchStats = Default::default();
+    stats.elapsed_ms = elapsed_ms as usize;
+
+    // FIXME(20160225)
+    unimplemented!();
   }
 }
 

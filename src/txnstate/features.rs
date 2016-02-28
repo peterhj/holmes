@@ -6,7 +6,7 @@ use txnstate::{
 use txnstate::extras::{TxnStateLegalityData, TxnStateNodeData};
 use util::{slice_twice_mut};
 
-use array_new::{Array3d, BitArray3d};
+use array_new::{NdArraySerialize, Array3d, BitArray3d};
 
 use bit_set::{BitSet};
 use std::cell::{RefCell};
@@ -2482,6 +2482,18 @@ impl TxnStateAlphaV3FeatsData {
     feats
   }
 
+  pub fn serial_size() -> usize {
+    BitArray3d::serial_size((19, 19, 31)) + Array3d::<u8>::serial_size((19, 19, 1))
+  }
+
+  pub fn extract_relative_serial_blob(&self, turn: Stone) -> Vec<u8> {
+    let mut serial_frame: Vec<u8> = Vec::with_capacity(Self::serial_size());
+    let (bit_arr, bytes_arr) = self.extract_relative_serial_arrays(turn);
+    bit_arr.serialize(&mut serial_frame).unwrap();
+    bytes_arr.serialize(&mut serial_frame).unwrap();
+    serial_frame
+  }
+
   pub fn extract_relative_serial_arrays(&self, turn: Stone) -> (BitArray3d, Array3d<u8>) {
     let mut buf: Vec<u8> = Vec::with_capacity(Self::NUM_EXTRACT_PLANES * Board::SIZE);
     unsafe { buf.set_len(Self::NUM_EXTRACT_PLANES * Board::SIZE) };
@@ -2549,13 +2561,17 @@ impl TxnStateAlphaV3FeatsData {
             &self.features[Self::WHITE_PLANE .. Self::W_RANK_AMA_PLANE],
             &mut dst_buf[Self::FRIEND_EXT_PLANE .. Self::ENEMY_EXT_PLANE],
         );
-        copy_memory(
+        /*copy_memory(
             &self.features[Self::BLACK_PLANE .. Self::B_RANK_AMA_PLANE],
             &mut dst_buf[Self::ENEMY_EXT_PLANE .. Self::E_RANK_AMA_EXT_PLANE],
         );
         copy_memory(
             &self.features[Self::B_RANK_AMA_PLANE .. Self::WHITE_PLANE],
             &mut dst_buf[Self::E_RANK_AMA_EXT_PLANE .. Self::TURNS_1_EXT_PLANE],
+        );*/
+        copy_memory(
+            &self.features[Self::BLACK_PLANE .. Self::WHITE_PLANE],
+            &mut dst_buf[Self::ENEMY_EXT_PLANE .. Self::TURNS_1_EXT_PLANE],
         );
         copy_memory(
             &self.features[Self::TURNS_1_PLANE .. ],
@@ -2626,7 +2642,7 @@ impl TxnStateAlphaV3FeatsData {
           features[Self::LIBS_8_PLANE + p] = 0;
         }
         2 => {
-          features[Self::LIBS_1_PLANE + p] = 0;
+          features[Self::LIBS_1_PLANE + p] = Self::SET;
           features[Self::LIBS_2_PLANE + p] = Self::SET;
           features[Self::LIBS_3_PLANE + p] = 0;
           features[Self::LIBS_4_PLANE + p] = 0;
@@ -2636,8 +2652,8 @@ impl TxnStateAlphaV3FeatsData {
           features[Self::LIBS_8_PLANE + p] = 0;
         }
         3 => {
-          features[Self::LIBS_1_PLANE + p] = 0;
-          features[Self::LIBS_2_PLANE + p] = 0;
+          features[Self::LIBS_1_PLANE + p] = Self::SET;
+          features[Self::LIBS_2_PLANE + p] = Self::SET;
           features[Self::LIBS_3_PLANE + p] = Self::SET;
           features[Self::LIBS_4_PLANE + p] = 0;
           features[Self::LIBS_5_PLANE + p] = 0;
@@ -2646,9 +2662,9 @@ impl TxnStateAlphaV3FeatsData {
           features[Self::LIBS_8_PLANE + p] = 0;
         }
         4 => {
-          features[Self::LIBS_1_PLANE + p] = 0;
-          features[Self::LIBS_2_PLANE + p] = 0;
-          features[Self::LIBS_3_PLANE + p] = 0;
+          features[Self::LIBS_1_PLANE + p] = Self::SET;
+          features[Self::LIBS_2_PLANE + p] = Self::SET;
+          features[Self::LIBS_3_PLANE + p] = Self::SET;
           features[Self::LIBS_4_PLANE + p] = Self::SET;
           features[Self::LIBS_5_PLANE + p] = 0;
           features[Self::LIBS_6_PLANE + p] = 0;
@@ -2656,43 +2672,43 @@ impl TxnStateAlphaV3FeatsData {
           features[Self::LIBS_8_PLANE + p] = 0;
         }
         5 => {
-          features[Self::LIBS_1_PLANE + p] = 0;
-          features[Self::LIBS_2_PLANE + p] = 0;
-          features[Self::LIBS_3_PLANE + p] = 0;
-          features[Self::LIBS_4_PLANE + p] = 0;
+          features[Self::LIBS_1_PLANE + p] = Self::SET;
+          features[Self::LIBS_2_PLANE + p] = Self::SET;
+          features[Self::LIBS_3_PLANE + p] = Self::SET;
+          features[Self::LIBS_4_PLANE + p] = Self::SET;
           features[Self::LIBS_5_PLANE + p] = Self::SET;
           features[Self::LIBS_6_PLANE + p] = 0;
           features[Self::LIBS_7_PLANE + p] = 0;
           features[Self::LIBS_8_PLANE + p] = 0;
         }
         6 => {
-          features[Self::LIBS_1_PLANE + p] = 0;
-          features[Self::LIBS_2_PLANE + p] = 0;
-          features[Self::LIBS_3_PLANE + p] = 0;
-          features[Self::LIBS_4_PLANE + p] = 0;
-          features[Self::LIBS_5_PLANE + p] = 0;
+          features[Self::LIBS_1_PLANE + p] = Self::SET;
+          features[Self::LIBS_2_PLANE + p] = Self::SET;
+          features[Self::LIBS_3_PLANE + p] = Self::SET;
+          features[Self::LIBS_4_PLANE + p] = Self::SET;
+          features[Self::LIBS_5_PLANE + p] = Self::SET;
           features[Self::LIBS_6_PLANE + p] = Self::SET;
           features[Self::LIBS_7_PLANE + p] = 0;
           features[Self::LIBS_8_PLANE + p] = 0;
         }
         7 => {
-          features[Self::LIBS_1_PLANE + p] = 0;
-          features[Self::LIBS_2_PLANE + p] = 0;
-          features[Self::LIBS_3_PLANE + p] = 0;
-          features[Self::LIBS_4_PLANE + p] = 0;
-          features[Self::LIBS_5_PLANE + p] = 0;
-          features[Self::LIBS_6_PLANE + p] = 0;
+          features[Self::LIBS_1_PLANE + p] = Self::SET;
+          features[Self::LIBS_2_PLANE + p] = Self::SET;
+          features[Self::LIBS_3_PLANE + p] = Self::SET;
+          features[Self::LIBS_4_PLANE + p] = Self::SET;
+          features[Self::LIBS_5_PLANE + p] = Self::SET;
+          features[Self::LIBS_6_PLANE + p] = Self::SET;
           features[Self::LIBS_7_PLANE + p] = Self::SET;
           features[Self::LIBS_8_PLANE + p] = 0;
         }
         8 => {
-          features[Self::LIBS_1_PLANE + p] = 0;
-          features[Self::LIBS_2_PLANE + p] = 0;
-          features[Self::LIBS_3_PLANE + p] = 0;
-          features[Self::LIBS_4_PLANE + p] = 0;
-          features[Self::LIBS_5_PLANE + p] = 0;
-          features[Self::LIBS_6_PLANE + p] = 0;
-          features[Self::LIBS_7_PLANE + p] = 0;
+          features[Self::LIBS_1_PLANE + p] = Self::SET;
+          features[Self::LIBS_2_PLANE + p] = Self::SET;
+          features[Self::LIBS_3_PLANE + p] = Self::SET;
+          features[Self::LIBS_4_PLANE + p] = Self::SET;
+          features[Self::LIBS_5_PLANE + p] = Self::SET;
+          features[Self::LIBS_6_PLANE + p] = Self::SET;
+          features[Self::LIBS_7_PLANE + p] = Self::SET;
           features[Self::LIBS_8_PLANE + p] = Self::SET;
         }
         _ => { unreachable!(); }
@@ -2712,7 +2728,7 @@ impl TxnStateAlphaV3FeatsData {
           features[Self::CAPS_8_PLANE + p] = 0;
         }
         2 => {
-          features[Self::CAPS_1_PLANE + p] = 0;
+          features[Self::CAPS_1_PLANE + p] = Self::SET;
           features[Self::CAPS_2_PLANE + p] = Self::SET;
           features[Self::CAPS_3_PLANE + p] = 0;
           features[Self::CAPS_4_PLANE + p] = 0;
@@ -2722,8 +2738,8 @@ impl TxnStateAlphaV3FeatsData {
           features[Self::CAPS_8_PLANE + p] = 0;
         }
         3 => {
-          features[Self::CAPS_1_PLANE + p] = 0;
-          features[Self::CAPS_2_PLANE + p] = 0;
+          features[Self::CAPS_1_PLANE + p] = Self::SET;
+          features[Self::CAPS_2_PLANE + p] = Self::SET;
           features[Self::CAPS_3_PLANE + p] = Self::SET;
           features[Self::CAPS_4_PLANE + p] = 0;
           features[Self::CAPS_5_PLANE + p] = 0;
@@ -2732,9 +2748,9 @@ impl TxnStateAlphaV3FeatsData {
           features[Self::CAPS_8_PLANE + p] = 0;
         }
         4 => {
-          features[Self::CAPS_1_PLANE + p] = 0;
-          features[Self::CAPS_2_PLANE + p] = 0;
-          features[Self::CAPS_3_PLANE + p] = 0;
+          features[Self::CAPS_1_PLANE + p] = Self::SET;
+          features[Self::CAPS_2_PLANE + p] = Self::SET;
+          features[Self::CAPS_3_PLANE + p] = Self::SET;
           features[Self::CAPS_4_PLANE + p] = Self::SET;
           features[Self::CAPS_5_PLANE + p] = 0;
           features[Self::CAPS_6_PLANE + p] = 0;
@@ -2742,43 +2758,43 @@ impl TxnStateAlphaV3FeatsData {
           features[Self::CAPS_8_PLANE + p] = 0;
         }
         5 => {
-          features[Self::CAPS_1_PLANE + p] = 0;
-          features[Self::CAPS_2_PLANE + p] = 0;
-          features[Self::CAPS_3_PLANE + p] = 0;
-          features[Self::CAPS_4_PLANE + p] = 0;
+          features[Self::CAPS_1_PLANE + p] = Self::SET;
+          features[Self::CAPS_2_PLANE + p] = Self::SET;
+          features[Self::CAPS_3_PLANE + p] = Self::SET;
+          features[Self::CAPS_4_PLANE + p] = Self::SET;
           features[Self::CAPS_5_PLANE + p] = Self::SET;
           features[Self::CAPS_6_PLANE + p] = 0;
           features[Self::CAPS_7_PLANE + p] = 0;
           features[Self::CAPS_8_PLANE + p] = 0;
         }
         6 => {
-          features[Self::CAPS_1_PLANE + p] = 0;
-          features[Self::CAPS_2_PLANE + p] = 0;
-          features[Self::CAPS_3_PLANE + p] = 0;
-          features[Self::CAPS_4_PLANE + p] = 0;
-          features[Self::CAPS_5_PLANE + p] = 0;
+          features[Self::CAPS_1_PLANE + p] = Self::SET;
+          features[Self::CAPS_2_PLANE + p] = Self::SET;
+          features[Self::CAPS_3_PLANE + p] = Self::SET;
+          features[Self::CAPS_4_PLANE + p] = Self::SET;
+          features[Self::CAPS_5_PLANE + p] = Self::SET;
           features[Self::CAPS_6_PLANE + p] = Self::SET;
           features[Self::CAPS_7_PLANE + p] = 0;
           features[Self::CAPS_8_PLANE + p] = 0;
         }
         7 => {
-          features[Self::CAPS_1_PLANE + p] = 0;
-          features[Self::CAPS_2_PLANE + p] = 0;
-          features[Self::CAPS_3_PLANE + p] = 0;
-          features[Self::CAPS_4_PLANE + p] = 0;
-          features[Self::CAPS_5_PLANE + p] = 0;
-          features[Self::CAPS_6_PLANE + p] = 0;
+          features[Self::CAPS_1_PLANE + p] = Self::SET;
+          features[Self::CAPS_2_PLANE + p] = Self::SET;
+          features[Self::CAPS_3_PLANE + p] = Self::SET;
+          features[Self::CAPS_4_PLANE + p] = Self::SET;
+          features[Self::CAPS_5_PLANE + p] = Self::SET;
+          features[Self::CAPS_6_PLANE + p] = Self::SET;
           features[Self::CAPS_7_PLANE + p] = Self::SET;
           features[Self::CAPS_8_PLANE + p] = 0;
         }
         n => {
-          features[Self::CAPS_1_PLANE + p] = 0;
-          features[Self::CAPS_2_PLANE + p] = 0;
-          features[Self::CAPS_3_PLANE + p] = 0;
-          features[Self::CAPS_4_PLANE + p] = 0;
-          features[Self::CAPS_5_PLANE + p] = 0;
-          features[Self::CAPS_6_PLANE + p] = 0;
-          features[Self::CAPS_7_PLANE + p] = 0;
+          features[Self::CAPS_1_PLANE + p] = Self::SET;
+          features[Self::CAPS_2_PLANE + p] = Self::SET;
+          features[Self::CAPS_3_PLANE + p] = Self::SET;
+          features[Self::CAPS_4_PLANE + p] = Self::SET;
+          features[Self::CAPS_5_PLANE + p] = Self::SET;
+          features[Self::CAPS_6_PLANE + p] = Self::SET;
+          features[Self::CAPS_7_PLANE + p] = Self::SET;
           features[Self::CAPS_8_PLANE + p] = Self::SET;
         }
       }
@@ -3093,11 +3109,26 @@ impl TxnStateAlphaMiniV3FeatsData {
     let mut dst = TxnStateAlphaMiniV3FeatsData::new();
     for &(src_offset, dst_offset) in pairs.iter() {
       copy_memory(
-          &src.features[src_offset .. dst_offset + plane],
+              &src.features[src_offset .. src_offset + plane],
           &mut dst.features[dst_offset .. dst_offset + plane],
       );
     }
+    dst.prev_moves[0] = src.prev_moves[0];
+    dst.prev_moves[1] = src.prev_moves[1];
+    dst.prev_moves[2] = src.prev_moves[2];
+    dst.prev_moves[3] = src.prev_moves[3];
     dst
+  }
+
+  pub fn serial_size() -> usize {
+    BitArray3d::serial_size((19, 19, 16))
+  }
+
+  pub fn extract_relative_serial_blob(&self, turn: Stone) -> Vec<u8> {
+    let mut serial_frame: Vec<u8> = Vec::with_capacity(Self::serial_size());
+    let bit_arr = self.extract_relative_serial_array(turn);
+    bit_arr.serialize(&mut serial_frame).unwrap();
+    serial_frame
   }
 
   pub fn extract_relative_serial_array(&self, turn: Stone) -> BitArray3d {
@@ -3204,21 +3235,21 @@ impl TxnStateAlphaMiniV3FeatsData {
           features[Self::LIBS_4_PLANE + p] = 0;
         }
         2 => {
-          features[Self::LIBS_1_PLANE + p] = 0; //Self::SET;
+          features[Self::LIBS_1_PLANE + p] = Self::SET;
           features[Self::LIBS_2_PLANE + p] = Self::SET;
           features[Self::LIBS_3_PLANE + p] = 0;
           features[Self::LIBS_4_PLANE + p] = 0;
         }
         3 => {
-          features[Self::LIBS_1_PLANE + p] = 0; //Self::SET;
-          features[Self::LIBS_2_PLANE + p] = 0; //Self::SET;
+          features[Self::LIBS_1_PLANE + p] = Self::SET;
+          features[Self::LIBS_2_PLANE + p] = Self::SET;
           features[Self::LIBS_3_PLANE + p] = Self::SET;
           features[Self::LIBS_4_PLANE + p] = 0;
         }
         4 => {
-          features[Self::LIBS_1_PLANE + p] = 0; //Self::SET;
-          features[Self::LIBS_2_PLANE + p] = 0; //Self::SET;
-          features[Self::LIBS_3_PLANE + p] = 0; //Self::SET;
+          features[Self::LIBS_1_PLANE + p] = Self::SET;
+          features[Self::LIBS_2_PLANE + p] = Self::SET;
+          features[Self::LIBS_3_PLANE + p] = Self::SET;
           features[Self::LIBS_4_PLANE + p] = Self::SET;
         }
         _ => { unreachable!(); }
@@ -3233,13 +3264,13 @@ impl TxnStateAlphaMiniV3FeatsData {
           features[Self::CAPS_3_PLANE + p] = 0;
         }
         2 => {
-          features[Self::CAPS_1_PLANE + p] = 0; //Self::SET;
+          features[Self::CAPS_1_PLANE + p] = Self::SET;
           features[Self::CAPS_2_PLANE + p] = Self::SET;
           features[Self::CAPS_3_PLANE + p] = 0;
         }
         n => {
-          features[Self::CAPS_1_PLANE + p] = 0; //Self::SET;
-          features[Self::CAPS_2_PLANE + p] = 0; //Self::SET;
+          features[Self::CAPS_1_PLANE + p] = Self::SET;
+          features[Self::CAPS_2_PLANE + p] = Self::SET;
           features[Self::CAPS_3_PLANE + p] = Self::SET;
         }
       }

@@ -24,7 +24,7 @@ use rustc_serialize::json;
 use rand::{Rng, thread_rng};
 use std::cmp::{min};
 use std::collections::{BTreeSet};
-use std::iter::{FromIterator};
+use std::iter::{FromIterator, repeat};
 use std::path::{PathBuf};
 //use std::str::{from_utf8};
 
@@ -53,7 +53,7 @@ pub struct TxnStateTestFeatsData {
 impl TxnStateTestFeatsData {
   pub fn new() -> TxnStateTestFeatsData {
     TxnStateTestFeatsData{
-      legality:     TxnStateLegalityData::new(),
+      legality:     TxnStateLegalityData::new(true),
       alpha_v3:     TxnStateAlphaV3FeatsData::new(),
       alpha_m_v3:   TxnStateAlphaMiniV3FeatsData::new(),
     }
@@ -284,7 +284,21 @@ fn test_txnstate_correctness() {
         // Check AlphaV3 features.
         {
           type Feats = TxnStateAlphaV3FeatsData;
+          //const PRE: u8 = 0;
+          const PRE: u8 = Feats::SET;
           const SET: u8 = Feats::SET;
+
+          let (enc_bitarr, enc_arr2) = state.get_data().alpha_v3.extract_relative_serial_arrays(turn);
+          let enc_arr1 = enc_bitarr.into_bytes(SET);
+          let mut ext_bytes: Vec<u8> = repeat(0).take(Feats::NUM_EXTRACT_PLANES * Board::SIZE).collect();
+          state.get_data().alpha_v3.extract_relative_features(turn, &mut ext_bytes);
+          for p in 0 .. Feats::NUM_SPARSE_PLANES * Board::SIZE {
+            assert_eq!(ext_bytes[p], enc_arr1.as_slice()[p]);
+          }
+          for p in Feats::NUM_SPARSE_PLANES * Board::SIZE .. Feats::NUM_EXTRACT_PLANES * Board::SIZE {
+            assert_eq!(ext_bytes[p], enc_arr2.as_slice()[p - Feats::NUM_SPARSE_PLANES * Board::SIZE]);
+          }
+
           let raw_feats = &state.get_data().alpha_v3.features;
 
           for p in 0 .. Board::SIZE {
@@ -326,7 +340,7 @@ fn test_txnstate_correctness() {
                   assert_eq!(0,   raw_feats[Feats::LIBS_8_PLANE + p]);
                 }
                 2 => {
-                  assert_eq!(0,   raw_feats[Feats::LIBS_1_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::LIBS_1_PLANE + p]);
                   assert_eq!(SET, raw_feats[Feats::LIBS_2_PLANE + p]);
                   assert_eq!(0,   raw_feats[Feats::LIBS_3_PLANE + p]);
                   assert_eq!(0,   raw_feats[Feats::LIBS_4_PLANE + p]);
@@ -336,8 +350,8 @@ fn test_txnstate_correctness() {
                   assert_eq!(0,   raw_feats[Feats::LIBS_8_PLANE + p]);
                 }
                 3 => {
-                  assert_eq!(0,   raw_feats[Feats::LIBS_1_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::LIBS_2_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::LIBS_1_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::LIBS_2_PLANE + p]);
                   assert_eq!(SET, raw_feats[Feats::LIBS_3_PLANE + p]);
                   assert_eq!(0,   raw_feats[Feats::LIBS_4_PLANE + p]);
                   assert_eq!(0,   raw_feats[Feats::LIBS_5_PLANE + p]);
@@ -346,9 +360,9 @@ fn test_txnstate_correctness() {
                   assert_eq!(0,   raw_feats[Feats::LIBS_8_PLANE + p]);
                 }
                 4 => {
-                  assert_eq!(0,   raw_feats[Feats::LIBS_1_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::LIBS_2_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::LIBS_3_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::LIBS_1_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::LIBS_2_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::LIBS_3_PLANE + p]);
                   assert_eq!(SET, raw_feats[Feats::LIBS_4_PLANE + p]);
                   assert_eq!(0,   raw_feats[Feats::LIBS_5_PLANE + p]);
                   assert_eq!(0,   raw_feats[Feats::LIBS_6_PLANE + p]);
@@ -356,43 +370,43 @@ fn test_txnstate_correctness() {
                   assert_eq!(0,   raw_feats[Feats::LIBS_8_PLANE + p]);
                 }
                 5 => {
-                  assert_eq!(0,   raw_feats[Feats::LIBS_1_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::LIBS_2_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::LIBS_3_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::LIBS_4_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::LIBS_1_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::LIBS_2_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::LIBS_3_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::LIBS_4_PLANE + p]);
                   assert_eq!(SET, raw_feats[Feats::LIBS_5_PLANE + p]);
                   assert_eq!(0,   raw_feats[Feats::LIBS_6_PLANE + p]);
                   assert_eq!(0,   raw_feats[Feats::LIBS_7_PLANE + p]);
                   assert_eq!(0,   raw_feats[Feats::LIBS_8_PLANE + p]);
                 }
                 6 => {
-                  assert_eq!(0,   raw_feats[Feats::LIBS_1_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::LIBS_2_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::LIBS_3_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::LIBS_4_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::LIBS_5_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::LIBS_1_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::LIBS_2_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::LIBS_3_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::LIBS_4_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::LIBS_5_PLANE + p]);
                   assert_eq!(SET, raw_feats[Feats::LIBS_6_PLANE + p]);
                   assert_eq!(0,   raw_feats[Feats::LIBS_7_PLANE + p]);
                   assert_eq!(0,   raw_feats[Feats::LIBS_8_PLANE + p]);
                 }
                 7 => {
-                  assert_eq!(0,   raw_feats[Feats::LIBS_1_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::LIBS_2_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::LIBS_3_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::LIBS_4_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::LIBS_5_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::LIBS_6_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::LIBS_1_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::LIBS_2_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::LIBS_3_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::LIBS_4_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::LIBS_5_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::LIBS_6_PLANE + p]);
                   assert_eq!(SET, raw_feats[Feats::LIBS_7_PLANE + p]);
                   assert_eq!(0,   raw_feats[Feats::LIBS_8_PLANE + p]);
                 }
                 8 => {
-                  assert_eq!(0,   raw_feats[Feats::LIBS_1_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::LIBS_2_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::LIBS_3_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::LIBS_4_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::LIBS_5_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::LIBS_6_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::LIBS_7_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::LIBS_1_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::LIBS_2_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::LIBS_3_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::LIBS_4_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::LIBS_5_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::LIBS_6_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::LIBS_7_PLANE + p]);
                   assert_eq!(SET, raw_feats[Feats::LIBS_8_PLANE + p]);
                 }
                 _ => { unreachable!(); }
@@ -413,7 +427,7 @@ fn test_txnstate_correctness() {
                   assert_eq!(0,   raw_feats[Feats::CAPS_8_PLANE + p]);
                 }
                 2 => {
-                  assert_eq!(0,   raw_feats[Feats::CAPS_1_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::CAPS_1_PLANE + p]);
                   assert_eq!(SET, raw_feats[Feats::CAPS_2_PLANE + p]);
                   assert_eq!(0,   raw_feats[Feats::CAPS_3_PLANE + p]);
                   assert_eq!(0,   raw_feats[Feats::CAPS_4_PLANE + p]);
@@ -423,8 +437,8 @@ fn test_txnstate_correctness() {
                   assert_eq!(0,   raw_feats[Feats::CAPS_8_PLANE + p]);
                 }
                 3 => {
-                  assert_eq!(0,   raw_feats[Feats::CAPS_1_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::CAPS_2_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::CAPS_1_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::CAPS_2_PLANE + p]);
                   assert_eq!(SET, raw_feats[Feats::CAPS_3_PLANE + p]);
                   assert_eq!(0,   raw_feats[Feats::CAPS_4_PLANE + p]);
                   assert_eq!(0,   raw_feats[Feats::CAPS_5_PLANE + p]);
@@ -433,9 +447,9 @@ fn test_txnstate_correctness() {
                   assert_eq!(0,   raw_feats[Feats::CAPS_8_PLANE + p]);
                 }
                 4 => {
-                  assert_eq!(0,   raw_feats[Feats::CAPS_1_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::CAPS_2_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::CAPS_3_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::CAPS_1_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::CAPS_2_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::CAPS_3_PLANE + p]);
                   assert_eq!(SET, raw_feats[Feats::CAPS_4_PLANE + p]);
                   assert_eq!(0,   raw_feats[Feats::CAPS_5_PLANE + p]);
                   assert_eq!(0,   raw_feats[Feats::CAPS_6_PLANE + p]);
@@ -443,43 +457,43 @@ fn test_txnstate_correctness() {
                   assert_eq!(0,   raw_feats[Feats::CAPS_8_PLANE + p]);
                 }
                 5 => {
-                  assert_eq!(0,   raw_feats[Feats::CAPS_1_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::CAPS_2_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::CAPS_3_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::CAPS_4_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::CAPS_1_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::CAPS_2_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::CAPS_3_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::CAPS_4_PLANE + p]);
                   assert_eq!(SET, raw_feats[Feats::CAPS_5_PLANE + p]);
                   assert_eq!(0,   raw_feats[Feats::CAPS_6_PLANE + p]);
                   assert_eq!(0,   raw_feats[Feats::CAPS_7_PLANE + p]);
                   assert_eq!(0,   raw_feats[Feats::CAPS_8_PLANE + p]);
                 }
                 6 => {
-                  assert_eq!(0,   raw_feats[Feats::CAPS_1_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::CAPS_2_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::CAPS_3_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::CAPS_4_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::CAPS_5_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::CAPS_1_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::CAPS_2_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::CAPS_3_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::CAPS_4_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::CAPS_5_PLANE + p]);
                   assert_eq!(SET, raw_feats[Feats::CAPS_6_PLANE + p]);
                   assert_eq!(0,   raw_feats[Feats::CAPS_7_PLANE + p]);
                   assert_eq!(0,   raw_feats[Feats::CAPS_8_PLANE + p]);
                 }
                 7 => {
-                  assert_eq!(0,   raw_feats[Feats::CAPS_1_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::CAPS_2_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::CAPS_3_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::CAPS_4_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::CAPS_5_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::CAPS_6_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::CAPS_1_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::CAPS_2_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::CAPS_3_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::CAPS_4_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::CAPS_5_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::CAPS_6_PLANE + p]);
                   assert_eq!(SET, raw_feats[Feats::CAPS_7_PLANE + p]);
                   assert_eq!(0,   raw_feats[Feats::CAPS_8_PLANE + p]);
                 }
                 _ => {
-                  assert_eq!(0,   raw_feats[Feats::CAPS_1_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::CAPS_2_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::CAPS_3_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::CAPS_4_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::CAPS_5_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::CAPS_6_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::CAPS_7_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::CAPS_1_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::CAPS_2_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::CAPS_3_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::CAPS_4_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::CAPS_5_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::CAPS_6_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::CAPS_7_PLANE + p]);
                   assert_eq!(SET, raw_feats[Feats::CAPS_8_PLANE + p]);
                 }
               }
@@ -554,7 +568,18 @@ fn test_txnstate_correctness() {
         // Check for AlphaMiniV3 features.
         {
           type Feats = TxnStateAlphaMiniV3FeatsData;
+          //const PRE: u8 = 0;
+          const PRE: u8 = Feats::SET;
           const SET: u8 = Feats::SET;
+
+          let enc_bitarr = state.get_data().alpha_m_v3.extract_relative_serial_array(turn);
+          let enc_arr = enc_bitarr.into_bytes(SET);
+          let mut ext_bytes: Vec<u8> = repeat(0).take(Feats::NUM_EXTRACT_PLANES * Board::SIZE).collect();
+          state.get_data().alpha_m_v3.extract_relative_features(turn, &mut ext_bytes);
+          for p in 0 .. Feats::NUM_EXTRACT_PLANES * Board::SIZE {
+            assert_eq!(ext_bytes[p], enc_arr.as_slice()[p]);
+          }
+
           let raw_feats = &state.get_data().alpha_m_v3.features;
 
           for p in 0 .. Board::SIZE {
@@ -590,21 +615,21 @@ fn test_txnstate_correctness() {
                   assert_eq!(0,   raw_feats[Feats::LIBS_4_PLANE + p]);
                 }
                 2 => {
-                  assert_eq!(0,   raw_feats[Feats::LIBS_1_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::LIBS_1_PLANE + p]);
                   assert_eq!(SET, raw_feats[Feats::LIBS_2_PLANE + p]);
                   assert_eq!(0,   raw_feats[Feats::LIBS_3_PLANE + p]);
                   assert_eq!(0,   raw_feats[Feats::LIBS_4_PLANE + p]);
                 }
                 3 => {
-                  assert_eq!(0,   raw_feats[Feats::LIBS_1_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::LIBS_2_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::LIBS_1_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::LIBS_2_PLANE + p]);
                   assert_eq!(SET, raw_feats[Feats::LIBS_3_PLANE + p]);
                   assert_eq!(0,   raw_feats[Feats::LIBS_4_PLANE + p]);
                 }
                 4 => {
-                  assert_eq!(0,   raw_feats[Feats::LIBS_1_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::LIBS_2_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::LIBS_3_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::LIBS_1_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::LIBS_2_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::LIBS_3_PLANE + p]);
                   assert_eq!(SET, raw_feats[Feats::LIBS_4_PLANE + p]);
                 }
                 _ => { unreachable!(); }
@@ -620,13 +645,13 @@ fn test_txnstate_correctness() {
                   assert_eq!(0,   raw_feats[Feats::CAPS_3_PLANE + p]);
                 }
                 2 => {
-                  assert_eq!(0,   raw_feats[Feats::CAPS_1_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::CAPS_1_PLANE + p]);
                   assert_eq!(SET, raw_feats[Feats::CAPS_2_PLANE + p]);
                   assert_eq!(0,   raw_feats[Feats::CAPS_3_PLANE + p]);
                 }
                 _ => {
-                  assert_eq!(0,   raw_feats[Feats::CAPS_1_PLANE + p]);
-                  assert_eq!(0,   raw_feats[Feats::CAPS_2_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::CAPS_1_PLANE + p]);
+                  assert_eq!(PRE, raw_feats[Feats::CAPS_2_PLANE + p]);
                   assert_eq!(SET, raw_feats[Feats::CAPS_3_PLANE + p]);
                 }
               }

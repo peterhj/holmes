@@ -5,6 +5,8 @@ use search::parallel_policies::convnet::{
   ConvnetPolicyWorkerBuilder, ConvnetPolicyWorker,
 };
 use search::parallel_tree::{
+  MonteCarloSearchConfig,
+  TreePolicyConfig,
   SharedTree,
   MonteCarloSearchResult,
   ParallelMonteCarloSearchServer,
@@ -21,13 +23,14 @@ use rand::{Rng, thread_rng};
 use std::cmp::{min};
 use std::path::{PathBuf};
 
-pub struct MonteCarloConfig {
+/*pub struct MonteCarloConfig {
   pub num_rollouts: usize,
   pub batch_size:   usize,
-}
+}*/
 
 pub struct ParallelMonteCarloSearchAgent {
-  config:       MonteCarloConfig,
+  config:       MonteCarloSearchConfig,
+  tree_cfg:     TreePolicyConfig,
   komi:         f32,
   player:       Option<Stone>,
 
@@ -42,7 +45,9 @@ pub struct ParallelMonteCarloSearchAgent {
 }
 
 impl ParallelMonteCarloSearchAgent {
-  pub fn new(config: MonteCarloConfig, num_workers: Option<usize>) -> ParallelMonteCarloSearchAgent {
+  pub fn new(config: MonteCarloSearchConfig, tree_cfg: TreePolicyConfig, num_workers: Option<usize>) -> ParallelMonteCarloSearchAgent {
+    println!("DEBUG: parallel search agent: search config: {:?}", config);
+    println!("DEBUG: parallel search agent: tree policy config: {:?}", tree_cfg);
     let batch_capacity = 256;
     let num_devices = CudaDevice::count().unwrap();
     let num_workers = num_workers.unwrap_or(num_devices);
@@ -50,6 +55,7 @@ impl ParallelMonteCarloSearchAgent {
     let worker_batch_capacity = batch_capacity / num_workers;
     ParallelMonteCarloSearchAgent{
       config:   config,
+      tree_cfg: tree_cfg,
       komi:     0.0,
       player:   None,
       history:  vec![],
@@ -66,7 +72,7 @@ impl ParallelMonteCarloSearchAgent {
       rng:      Xorshiftplus128Rng::new(&mut thread_rng()),
       server:   ParallelMonteCarloSearchServer::new(
           num_workers, worker_batch_capacity,
-          ConvnetPolicyWorkerBuilder::new(num_workers, worker_batch_capacity),
+          ConvnetPolicyWorkerBuilder::new(tree_cfg, num_workers, worker_batch_capacity),
       ),
     }
   }
@@ -158,7 +164,7 @@ impl Agent for ParallelMonteCarloSearchAgent {
     let batch_size = self.config.batch_size;
 
     let shared_tree = if self.tree.is_none() {
-      let shared_tree = SharedTree::new();
+      let shared_tree = SharedTree::new(self.tree_cfg);
       self.tree = Some(shared_tree.clone());
       shared_tree
     } else {

@@ -1,9 +1,11 @@
-use board::{Board};
+use board::{Board, Action};
 use search::parallel_policies::{
-  DiffPriorPolicy,
+  SearchPolicyWorker,
+  PriorPolicy, DiffPriorPolicy,
   GradAccumMode, GradSyncMode,
 };
 use search::parallel_policies::convnet::{
+  ConvnetPolicyWorker,
   ConvnetPriorPolicy,
 };
 use search::parallel_trace::{
@@ -14,11 +16,12 @@ use search::parallel_tree::{
   TreePolicyConfig,
 };
 
-use gsl::functions::{exp_e10, beta, norm_inc_beta, psi, beta_pdf, beta_cdf};
+use gsl::functions::{exp_e10, beta, log_beta, norm_inc_beta, psi, beta_pdf, beta_cdf};
 use gsl::integration::{IntegrationWorkspace, Integrand};
 
 use libc::{c_void};
 use std::cell::{RefCell};
+use std::iter::{repeat};
 use std::mem::{transmute};
 use std::rc::{Rc};
 use std::sync::{Arc, RwLock};
@@ -26,32 +29,18 @@ use std::sync::atomic::{Ordering};
 
 const ABS_TOL:          f64 = 0.0;
 const REL_TOL:          f64 = 1.0e-6;
-const MAX_ITERS:        usize = 1024;
+const MAX_INTERVALS:    usize = 1024;
 const WORKSPACE_LEN:    usize = 1024;
 
 fn omega_likelihood_fun(u: f64, d: &OmegaNodeSharedData) -> f64 {
   // XXX(20160222): This computes the $ H(u;s_j,a_j) * p(u;s_j,a_j) $ term
   // in the integrand of the decision likelihood function.
   let diag_j = d.diag_rank;
-  /*let mut x = beta_pdf(
-      u,
-      1.0 + d.prior_equiv * d.prior_values[diag_j]
-          + d.mc_scale    * d.succs[diag_j],
-      1.0 + d.prior_equiv * (1.0 - d.prior_values[diag_j])
-          + d.mc_scale    * (d.trials[diag_j] - d.succs[diag_j]),
-  );*/
   let diag_e1 = d.net_succs[diag_j];
   let diag_e2 = d.net_fails[diag_j];
   let mut x = beta_pdf(u, diag_e1, diag_e2);
   for j in 0 .. d.horizon {
     if j != d.diag_rank {
-      /*x *= beta_cdf(
-          u,
-          1.0 + d.prior_equiv * d.prior_values[j]
-              + d.mc_scale    * d.succs[j],
-          1.0 + d.prior_equiv * (1.0 - d.prior_values[j])
-              + d.mc_scale    * (d.trials[j] - d.succs[j]),
-      );*/
       let e1 = d.net_succs[j];
       let e2 = d.net_fails[j];
       x *= beta_cdf(u, e1, e2);
@@ -75,14 +64,6 @@ extern "C" fn omega_diagonal_g_factor_extfun(u: f64, unsafe_data: *mut c_void) -
   //    $ g(u;s_j,a_j) := log(u / (1 - u)) - (psi(e1) - psi(e2)) $
   //
   let data: &OmegaDiagonalGFactorData = unsafe { transmute(unsafe_data) };
-  /*let d = &data.likelihood_data;
-  let diag_j = d.diag_rank;
-  let e1 =
-      1.0 + d.prior_equiv * d.prior_values[diag_j]
-          + d.mc_scale    * d.succs[diag_j];
-  let e2 =
-      1.0 + d.prior_equiv * (1.0 - d.prior_values[diag_j])
-          + d.mc_scale    * (d.trials[diag_j] - d.succs[diag_j]);*/
   let d = &*data.shared_data.borrow();
   let diag_j = d.diag_rank;
   let e1 = d.net_succs[diag_j];
@@ -100,19 +81,12 @@ extern "C" fn omega_cross_g_factor_inner_extfun(t: f64, unsafe_data: *mut c_void
   //    $ log(t / (1 - t)) * t ^ (e1-1) * (1 - t) ^ (e2-1) $
   //
   let data: &OmegaCrossGFactorInnerData = unsafe { transmute(unsafe_data) };
-  /*let d = &data.likelihood_data;
-  let j = data.action_rank;
-  let e1 =
-      1.0 + d.prior_equiv * d.prior_values[j]
-          + d.mc_scale    * d.succs[j];
-  let e2 =
-      1.0 + d.prior_equiv * (1.0 - d.prior_values[j])
-          + d.mc_scale    * (d.trials[j] - d.succs[j]);*/
   let d = &*data.shared_data.borrow();
   let j = data.action_rank;
+  let bias = data.bias;
   let e1 = d.net_succs[j];
   let e2 = d.net_fails[j];
-  let mut x = exp_e10((e1 - 1.0) * t.ln() + (e2 - 1.0) * (1.0 - t).ln()).value();
+  let mut x = exp_e10(bias + (e1 - 1.0) * t.ln() + (e2 - 1.0) * (1.0 - t).ln()).value();
   x *= (t / (1.0 - t)).ln();
   x
 }
@@ -128,28 +102,60 @@ extern "C" fn omega_cross_g_factor_outer_extfun(u: f64, unsafe_data: *mut c_void
     ref shared_data,
     ref mut inner_integrand,
     ref mut workspace} = data;
-  /*let d = likelihood_data;
-  let j = action_rank;
-  let e1 =
-      1.0 + d.prior_equiv * d.prior_values[j]
-          + d.mc_scale    * d.succs[j];
-  let e2 =
-      1.0 + d.prior_equiv * (1.0 - d.prior_values[j])
-          + d.mc_scale    * (d.trials[j] - d.succs[j]);*/
   let d = &*shared_data.borrow();
   let j = action_rank;
   let e1 = d.net_succs[j];
   let e2 = d.net_fails[j];
+  let z = log_beta(e1, e2);
+  inner_integrand.data.bias = -z;
   let (mut x, _) = inner_integrand.integrate_qags(
-      0.0, 1.0,
-      ABS_TOL, REL_TOL, MAX_ITERS,
+      0.0, u,
+      ABS_TOL, REL_TOL, MAX_INTERVALS,
       workspace,
   );
-  x /= norm_inc_beta(u, e1, e2) * beta(e1, e2);
+  x /= norm_inc_beta(u, e1, e2);
   x -= psi(e1) - psi(e2);
   x *= omega_likelihood_fun(u, d);
   x *= d.prior_equiv;
   x
+}
+
+pub struct OmegaNodeSharedData {
+  pub horizon:      usize,
+  pub prior_equiv:  f64,
+  pub diag_rank:    usize,
+  pub net_succs:    Vec<f64>,
+  pub net_fails:    Vec<f64>,
+}
+
+impl OmegaNodeSharedData {
+  pub fn new() -> OmegaNodeSharedData {
+    OmegaNodeSharedData{
+      horizon:      0,
+      prior_equiv:  0.0,
+      diag_rank:    0,
+      net_succs:    repeat(0.0).take(Board::SIZE).collect(),
+      net_fails:    repeat(0.0).take(Board::SIZE).collect(),
+    }
+  }
+
+  pub fn reset(&mut self, tree_cfg: TreePolicyConfig, chosen_action_rank: usize, horizon: usize, node: &ReconNode) {
+    self.horizon = horizon;
+    self.prior_equiv = tree_cfg.prior_equiv as f64;
+    self.diag_rank = chosen_action_rank;
+    for j in 0 .. horizon {
+      let succs_j = node.succ_counts[j].load(Ordering::Acquire) as f32;
+      let trials_j = node.trial_counts[j].load(Ordering::Acquire) as f32;
+      let e1 =
+          1.0 + tree_cfg.prior_equiv * node.prior_values[j]
+              + tree_cfg.mc_scale    * succs_j;
+      let e2 =
+          1.0 + tree_cfg.prior_equiv * (1.0 - node.prior_values[j])
+              + tree_cfg.mc_scale    * (trials_j - succs_j);
+      self.net_succs[j] = e1 as f64;
+      self.net_fails[j] = e2 as f64;
+    }
+  }
 }
 
 struct OmegaLikelihoodData {
@@ -180,9 +186,17 @@ impl OmegaLikelihoodIntegral {
     }
   }
 
-  pub fn calculate_likelihood(&mut self, tree_cfg: TreePolicyConfig, node: &ReconNode) -> f32 {
-    // FIXME(20160222)
-    unimplemented!();
+  pub fn calculate_likelihood(&mut self) -> f32 {
+    let &mut OmegaLikelihoodIntegral{
+      ref mut integrand,
+      ref mut workspace,
+      .. } = self;
+    let (res, _) = integrand.integrate_qags(
+        0.0, 1.0,
+        ABS_TOL, REL_TOL, MAX_INTERVALS,
+        workspace,
+    );
+    res as f32
   }
 }
 
@@ -208,14 +222,14 @@ impl OmegaDiagonalGFactorIntegral {
     }
   }
 
-  pub fn calculate_diagonal_g_factor(&mut self, tree_cfg: TreePolicyConfig, horizon: usize, node: &ReconNode) -> f32 {
+  pub fn calculate_diagonal_g_factor(&mut self) -> f32 {
     let &mut OmegaDiagonalGFactorIntegral{
       ref mut integrand,
       ref mut workspace,
       .. } = self;
     let (res, _) = integrand.integrate_qags(
         0.0, 1.0,
-        ABS_TOL, REL_TOL, MAX_ITERS,
+        ABS_TOL, REL_TOL, MAX_INTERVALS,
         workspace,
     );
     res as f32
@@ -225,6 +239,7 @@ impl OmegaDiagonalGFactorIntegral {
 struct OmegaCrossGFactorInnerData {
   shared_data:  Rc<RefCell<OmegaNodeSharedData>>,
   action_rank:  usize,
+  bias:         f64,
 }
 
 struct OmegaCrossGFactorOuterData {
@@ -252,6 +267,7 @@ impl OmegaCrossGFactorIntegral {
             data:           OmegaCrossGFactorInnerData{
               shared_data:  shared_data,
               action_rank:  0,
+              bias:         0.0,
             },
           },
           workspace:        IntegrationWorkspace::new(WORKSPACE_LEN),
@@ -261,70 +277,68 @@ impl OmegaCrossGFactorIntegral {
     }
   }
 
-  pub fn calculate_cross_g_factor(&mut self, tree_cfg: TreePolicyConfig, horizon: usize, node: &ReconNode) -> f32 {
+  pub fn calculate_cross_g_factor(&mut self, action_rank: usize) -> f32 {
     let &mut OmegaCrossGFactorIntegral{
       ref mut outer_integrand,
       ref mut workspace,
       .. } = self;
+    outer_integrand.data.action_rank = action_rank;
+    outer_integrand.data.inner_integrand.data.action_rank = action_rank;
     let (res, _) = outer_integrand.integrate_qags(
         0.0, 1.0,
-        ABS_TOL, REL_TOL, MAX_ITERS,
+        ABS_TOL, REL_TOL, MAX_INTERVALS,
         workspace,
     );
     res as f32
   }
 }
 
-pub struct OmegaNodeSharedData {
-  horizon:      usize,
-  prior_equiv:  f64,
-  diag_rank:    usize,
-  net_succs:    Vec<f64>,
-  net_fails:    Vec<f64>,
+#[derive(Clone, Copy)]
+pub enum MetaObjective {
+  SupervisedKLLoss,
 }
 
-impl OmegaNodeSharedData {
-  pub fn reset(&mut self, tree_cfg: TreePolicyConfig, action_rank: usize, horizon: usize, node: &ReconNode) {
-    self.horizon = horizon;
-    self.prior_equiv = tree_cfg.prior_equiv as f64;
-    self.diag_rank = action_rank;
-    for j in 0 .. horizon {
-      let succs_j = node.succ_counts[j].load(Ordering::Acquire) as f32;
-      let trials_j = node.trial_counts[j].load(Ordering::Acquire) as f32;
-      let e1 =
-          1.0 + tree_cfg.prior_equiv * node.prior_values[j]
-              + tree_cfg.mc_scale    * succs_j;
-      let e2 =
-          1.0 + tree_cfg.prior_equiv * (1.0 - node.prior_values[j])
-              + tree_cfg.mc_scale    * (trials_j - succs_j);
-      self.net_succs[j] = e1 as f64;
-      self.net_fails[j] = e2 as f64;
-    }
-  }
+#[derive(Clone, Copy)]
+pub enum MetaLabel {
+  ActionLabel{action: Action},
 }
 
 pub struct OmegaBatchWorker {
   tree_cfg:             TreePolicyConfig,
+  objective:            MetaObjective,
   shared_data:          Rc<RefCell<OmegaNodeSharedData>>,
+  likelihood_int:       OmegaLikelihoodIntegral,
   diag_g_factor_int:    OmegaDiagonalGFactorIntegral,
   cross_g_factor_int:   OmegaCrossGFactorIntegral,
-
-  prior_policy: ConvnetPriorPolicy,
+  prior_policy:         ConvnetPriorPolicy,
+  policy_worker:        Rc<RefCell<ConvnetPolicyWorker>>,
 }
 
 impl OmegaBatchWorker {
-  pub fn finalize_instance(&mut self) {
-    self.prior_policy().synchronize_gradients(GradSyncMode::Sum);
-    self.prior_policy().reset_gradients();
+  pub fn load_label(&mut self, label: MetaLabel) {
+    match (self.objective, label) {
+      (MetaObjective::SupervisedKLLoss, MetaLabel::ActionLabel{action}) => {
+        // FIXME(20160225)
+        unimplemented!();
+      }
+    }
+  }
+
+  /*pub fn finalize_instance(&mut self) {
+    let mut worker = self.policy_worker.borrow_mut();
+    worker.diff_prior_policy().synchronize_gradients(GradSyncMode::Sum);
+    worker.diff_prior_policy().reset_gradients();
 
     // FIXME(20160222)
     unimplemented!();
-  }
+  }*/
 }
 
 impl ExploreBatchWorker for OmegaBatchWorker {
-  fn prior_policy(&mut self) -> &mut DiffPriorPolicy {
-    &mut self.prior_policy
+  //fn with_prior_policy<V>(&mut self, mut f: &mut FnMut(&mut PriorPolicy) -> V) -> V {
+  fn with_prior_policy<F, V>(&mut self, mut f: F) -> V where F: FnOnce(&mut PriorPolicy) -> V {
+    let mut worker = self.policy_worker.borrow_mut();
+    f(worker.prior_policy())
   }
 
   fn update_batch(&mut self, root_node: Arc<RwLock<ReconNode>>, trace_batch: &SearchTraceBatch) {
@@ -343,27 +357,42 @@ impl ExploreBatchWorker for OmegaBatchWorker {
               &*node,
           );
 
+          let mut worker = self.policy_worker.borrow_mut();
+          let mut prior_policy = worker.diff_prior_policy();
+
           assert!(decision.horizon <= node.valid_actions.len());
+          let likelihood = self.likelihood_int.calculate_likelihood();
           for (j, &action_j) in node.valid_actions.iter().take(decision.horizon).enumerate() {
             let g_j = if decision.action == action_j {
-              self.diag_g_factor_int.calculate_diagonal_g_factor(self.tree_cfg, decision.horizon, &*node)
+              self.diag_g_factor_int.calculate_diagonal_g_factor()
             } else {
-              self.cross_g_factor_int.calculate_cross_g_factor(self.tree_cfg, decision.horizon, &*node)
+              self.cross_g_factor_int.calculate_cross_g_factor(j)
             };
-
-            node.state.get_data().features.extract_relative_features(turn, self.prior_policy().expose_input_buffer(j));
-            self.prior_policy().preload_action_label(j, action_j);
-            self.prior_policy().preload_loss_weight(j, g_j);
+            node.state.get_data().features.extract_relative_features(turn, prior_policy.expose_input_buffer(j));
+            prior_policy.preload_action_label(j, action_j);
+            prior_policy.preload_loss_weight(j, g_j / likelihood);
           }
 
-          self.prior_policy().load_inputs(decision.horizon);
-          self.prior_policy().forward(decision.horizon);
-          self.prior_policy().backward(decision.horizon);
-          self.prior_policy().accumulate_gradients(GradAccumMode::ScoreRatio);
+          prior_policy.load_inputs(decision.horizon);
+          prior_policy.forward(decision.horizon);
+          prior_policy.backward(decision.horizon);
 
           node.child_nodes[decision.action.idx()].clone()
         };
         node = next_node;
+      }
+    }
+  }
+
+  fn update_instance(&mut self, root_node: Arc<RwLock<ReconNode>>) {
+    let mut worker = self.policy_worker.borrow_mut();
+    worker.diff_prior_policy().sync_gradients(GradSyncMode::Sum);
+    worker.diff_prior_policy().reset_gradients();
+
+    match self.objective {
+      MetaObjective::SupervisedKLLoss => {
+        // FIXME(20160225)
+        unimplemented!();
       }
     }
   }

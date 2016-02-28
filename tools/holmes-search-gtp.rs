@@ -1,9 +1,10 @@
 extern crate getopts;
 extern crate holmes;
 
-use holmes::agents::parallel_search::{MonteCarloConfig, ParallelMonteCarloSearchAgent};
+use holmes::agents::parallel_search::{ParallelMonteCarloSearchAgent};
 use holmes::gtp::{GtpEngine};
 use holmes::gtp_client::{Client};
+use holmes::search::parallel_tree::{MonteCarloSearchConfig, TreePolicyConfig, HorizonConfig};
 
 use getopts::{Options};
 use std::env;
@@ -22,21 +23,21 @@ fn main() {
     .parse().ok().expect("FATAL: holmes: port should be an integer");
   println!("DEBUG: holmes: host: {}", host);
   println!("DEBUG: holmes: port: {}", port);
-  let mc_cfg = MonteCarloConfig{
-    /*num_rollouts:   1024,
-    batch_size:     32,*/
-
+  let mc_cfg = MonteCarloSearchConfig{
     num_rollouts:   1024,
-    //batch_size:     16,
-    batch_size:     128,
-
-    /*num_rollouts:   2048,
-    batch_size:     256,*/
-
-    /*num_rollouts:   5120,
-    batch_size:     256,*/
+    batch_size:     16,
+    //batch_size:     128,
   };
-  let agent = ParallelMonteCarloSearchAgent::new(mc_cfg, None);
+  let tree_cfg = TreePolicyConfig{
+    horizon_cfg:    HorizonConfig::Fixed{max_horizon: 20},
+    visit_thresh:   1,
+    mc_scale:       1.0,
+    //mc_scale:       0.125,
+    prior_equiv:    16.0,
+    rave:           false,
+    rave_equiv:     0.0,
+  };
+  let agent = ParallelMonteCarloSearchAgent::new(mc_cfg, tree_cfg, None);
   let client = Client::new(agent, host, port, None);
   GtpEngine::new(client).runloop();
 }

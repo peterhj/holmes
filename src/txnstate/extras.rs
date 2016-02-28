@@ -45,15 +45,18 @@ where F: FnMut(&TxnPosition, &TxnChainsList, Point) {
 
 #[derive(Clone)]
 pub struct TxnStateLegalityData {
-  cached_legal_moves: Vec<BitSet>,
-  test_state:         TxnState,
+  strict:       bool,
 
-  tmp_mark:           BitSet,
+  cached_legal_moves: Vec<BitSet>,
+  test_state:   TxnState,
+
+  tmp_mark:     BitSet,
 }
 
 impl TxnStateLegalityData {
-  pub fn new() -> TxnStateLegalityData {
+  pub fn new(strict: bool) -> TxnStateLegalityData {
     TxnStateLegalityData{
+      strict:   strict,
       cached_legal_moves: vec![
         BitSet::from_bit_vec(BitVec::from_elem(Board::SIZE, true)),
         BitSet::from_bit_vec(BitVec::from_elem(Board::SIZE, true)),
@@ -120,25 +123,38 @@ impl TxnStateLegalityData {
       // i.e., ones that fill in the current player's eye.
       match check_legal_move_simple(position, chains, turn, point) {
         Some(Ok(())) => {
-          if check_good_move_fast(position, chains, turn, point) {
-            self.cached_legal_moves[turn_off].insert(p);
+          if !self.strict {
+            if check_good_move_fast(position, chains, turn, point) {
+              self.cached_legal_moves[turn_off].insert(p);
+            } else {
+              self.cached_legal_moves[turn_off].remove(p);
+            }
           } else {
-            self.cached_legal_moves[turn_off].remove(p);
+            self.cached_legal_moves[turn_off].insert(p);
           }
         }
         Some(Err(_)) => {
           self.cached_legal_moves[turn_off].remove(p);
         }
         None => {
-          if check_good_move_fast(position, chains, turn, point) {
+          if !self.strict {
+            if check_good_move_fast(position, chains, turn, point) {
+              if self.test_state.try_place(turn, point).is_err() {
+                self.cached_legal_moves[turn_off].remove(p);
+              } else {
+                self.cached_legal_moves[turn_off].insert(p);
+              }
+              self.test_state.undo();
+            } else {
+              self.cached_legal_moves[turn_off].remove(p);
+            }
+          } else {
             if self.test_state.try_place(turn, point).is_err() {
               self.cached_legal_moves[turn_off].remove(p);
             } else {
               self.cached_legal_moves[turn_off].insert(p);
             }
             self.test_state.undo();
-          } else {
-            self.cached_legal_moves[turn_off].remove(p);
           }
         }
       }
@@ -218,7 +234,7 @@ impl TxnStateNodeData {
       //features: TxnStateLibFeaturesData::new(),
       //features: TxnStateAlphaFeatsV2Data::new(),
       features: TxnStateAlphaV3FeatsData::new(),
-      legality: TxnStateLegalityData::new(),
+      legality: TxnStateLegalityData::new(false),
     }
   }
 }
@@ -260,6 +276,7 @@ impl TxnStateRolloutData {
 
   pub fn from_node_data(node_data: &TxnStateNodeData) -> TxnStateRolloutData {
     TxnStateRolloutData{
+      //features: node_data.features.clone(),
       features: TxnStateAlphaMiniV3FeatsData::from_src_feats(&node_data.features),
     }
   }
@@ -275,7 +292,7 @@ impl TxnStateData for TxnStateRolloutData {
   }
 }
 
-#[derive(Clone)]
+/*#[derive(Clone)]
 pub struct TxnStateAllData {
   pub features: TxnStateFeaturesData,
   pub libfeats: TxnStateLibFeaturesData,
@@ -304,4 +321,4 @@ impl TxnStateData for TxnStateAllData {
     self.libfeats.update(position, chains, update_turn, update_action);
     self.legality.update(position, chains, update_turn, update_action);
   }
-}
+}*/

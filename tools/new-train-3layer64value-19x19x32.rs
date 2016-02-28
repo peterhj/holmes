@@ -55,31 +55,26 @@ fn train() {
   /*let num_workers = 4;
   let batch_size = 64;*/
 
-  let input_channels = 16;
-  let conv1_channels = 16;
-  let hidden_channels = 16;
+  let input_channels = 32;
+
+  let hidden_channels = 64;
 
   let sgd_opt_cfg = SgdOptConfig{
-    init_t:         0,
+    init_t:         180000,
     minibatch_size: num_workers * batch_size,
     step_size:      StepSizeSchedule::Decay{
-      //init_step:    0.015625,
-      //init_step:    0.03125,
-      init_step:    0.0625,
+      //init_step:    0.001,
+      init_step:    0.015625,
       decay_rate:   0.25,
-      decay_iters:  120000,
+      decay_iters:  180000,
     },
-    //momentum:       0.0625,
     momentum:       0.0,
     l2_reg_coef:    0.0,
     display_iters:  100,
-    /*valid_iters:    1500,
-    save_iters:     1500,*/
     valid_iters:    3000,
     save_iters:     3000,
   };
-  //let datum_cfg = SampleDatumConfig::BitsThenBytes3d{scale: 255};
-  let datum_cfg = SampleDatumConfig::Bits3d{scale: 255};
+  let datum_cfg = SampleDatumConfig::BitsThenBytes3d{scale: 255};
   /*let train_label_cfg = SampleLabelConfig::LookaheadCategories{
     num_categories: 361,
     lookahead:      3,
@@ -105,26 +100,28 @@ fn train() {
     conv_size:      5,
     conv_stride:    1,
     conv_pad:       2,
-    out_channels:   conv1_channels,
+    out_channels:   hidden_channels,
+    act_func:       ActivationFunction::Rect,
+    init_weights:   ParamsInitialization::Uniform{half_range: 0.05},
+  };
+  let inner_conv_layer_cfg = Conv2dLayerConfig{
+    in_dims:        (19, 19, hidden_channels),
+    conv_size:      3,
+    conv_stride:    1,
+    conv_pad:       1,
+    out_channels:   hidden_channels,
     act_func:       ActivationFunction::Rect,
     init_weights:   ParamsInitialization::Uniform{half_range: 0.05},
   };
   let final_conv_layer_cfg = Conv2dLayerConfig{
-    //in_dims:        (19, 19, hidden_channels),
-    in_dims:        (19, 19, conv1_channels),
+    in_dims:        (19, 19, hidden_channels),
     conv_size:      3,
     conv_stride:    1,
     conv_pad:       1,
-    //out_channels:   3,
     out_channels:   1,
-    act_func:       ActivationFunction::Identity,
+    act_func:       ActivationFunction::ScaledSigmoid{beta: 10.0},
     init_weights:   ParamsInitialization::Uniform{half_range: 0.05},
   };
-  /*let loss_layer_cfg = MultiCategoricalLossLayerConfig{
-    num_categories:     361,
-    train_lookahead:    3,
-    infer_lookahead:    1,
-  };*/
   let loss_layer_cfg = CategoricalLossLayerConfig{
     num_categories:     361,
   };
@@ -133,9 +130,11 @@ fn train() {
   arch_cfg
     .data3d(data_layer_cfg)
     .conv2d(conv1_layer_cfg)
+    .conv2d(inner_conv_layer_cfg)
     .conv2d(final_conv_layer_cfg)
     //.multi_softmax_kl_loss(loss_layer_cfg);
     .softmax_kl_loss(loss_layer_cfg);
+    //.antilogistic_kl_loss(loss_layer_cfg);
 
   let shared_seed = [thread_rng().next_u64(), thread_rng().next_u64()];
   let arch_shared = for_all_devices(num_workers, |contexts| {
@@ -155,8 +154,7 @@ fn train() {
         let mut arch_worker = PipelineArchWorker::new(
             batch_size,
             arch_cfg,
-            PathBuf::from("models/tmp_gogodb_w2015_alphaminiv3_new_action_2layer16_5x5_19x19x16"),
-            //PathBuf::from("models/tmp_gogodb_w2015_alphaminiv3_new_action_2layer16_9x9_19x19x16"),
+            PathBuf::from("models/tmp_gogodb_w2015_alphav3m_new_action_3layer64value_19x19x32"),
             tid,
             shared_seed,
             &arch_shared,
@@ -164,12 +162,11 @@ fn train() {
             &ctx,
         );
 
-        //let dataset_cfg = DatasetConfig::open(&PathBuf::from("data/gogodb_w2015_alphaminiv3_19x19x16_episode.data"));
-        let dataset_cfg = DatasetConfig::open(&PathBuf::from("datasets/gogodb_w2015-preproc-alphaminiv3m_19x19x16.data"));
+        let dataset_cfg = DatasetConfig::open(&PathBuf::from("datasets/gogodb_w2015-preproc-alphav3m_19x19x32.data"));
 
         let mut train_data =
-            CyclicEpisodeIterator::new(
             //RandomEpisodeIterator::new(
+            CyclicEpisodeIterator::new(
               Box::new(AugmentDataSource::new(SymmetryAugment::new(&mut thread_rng()), dataset_cfg.build_with_cfg(datum_cfg, train_label_cfg, "train"))),
             );
         let mut valid_data =
