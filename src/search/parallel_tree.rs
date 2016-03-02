@@ -8,7 +8,14 @@ use search::parallel_policies::{
   RolloutPolicyBuilder, RolloutMode, RolloutLeafs, RolloutPolicy,
 };
 use search::parallel_trace::{
-  SearchTrace, SearchTrajTrace, ExploreDecisionTrace,
+  SearchTrace, SearchTrajTrace,
+  TreeTrajTrace, TreeDecisionTrace, TreeExpansionTrace,
+  RolloutTrajTrace,
+  ParallelSearchReconWorkerBuilder,
+};
+use search::parallel_trace::omega::{
+  OmegaTreeBatchWorker,
+  MetaLevelWorker,
 };
 use txnstate::{
   TxnStateConfig, TxnState,
@@ -122,8 +129,9 @@ pub struct RolloutTraj {
   pub sim_state:    TxnState<TxnStateRolloutData>,
   pub sim_pairs:    Vec<(Stone, Point)>,
 
-  pub raw_score:    Option<f32>,
-  pub adj_score:    Option<[f32; 2]>,
+  pub score:    Option<f32>,
+  //pub raw_score:    Option<f32>,
+  //pub adj_score:    Option<[f32; 2]>,
 
   // FIXME(20151222): should probably move this to a `CommonTraj` data structure
   // but not critical.
@@ -157,16 +165,13 @@ impl RolloutTraj {
           TxnStateRolloutData::new(),
       ),
       sim_pairs:    vec![],
-      raw_score:    None,
-      adj_score:    None,
+      score:        None,
+      /*raw_score:    None,
+      adj_score:    None,*/
       rave_mask:    vec![
         BitSet::with_capacity(Board::SIZE),
         BitSet::with_capacity(Board::SIZE),
       ],
-      /*term_count:   vec![
-        repeat(0).take(Board::SIZE).collect(),
-        repeat(0).take(Board::SIZE).collect(),
-      ],*/
       mc_live_mask: vec![
         BitSet::with_capacity(Board::SIZE),
         BitSet::with_capacity(Board::SIZE),
@@ -200,19 +205,17 @@ impl RolloutTraj {
     //self.sim_state.replace_clone_from(leaf_state, TxnStateRolloutData::with_features(leaf_state.get_data().features.clone()));
     self.sim_state.replace_clone_from(leaf_state, TxnStateRolloutData::from_node_data(leaf_state.get_data()));
     self.sim_pairs.clear();
-    self.raw_score = None;
-    self.adj_score = None;
+    self.score = None;
+    /*self.raw_score = None;
+    self.adj_score = None;*/
     self.rave_mask[0].clear();
     self.rave_mask[1].clear();
-    /*for p in 0 .. Board::SIZE {
-      self.term_count[0][p] = 0;
-      self.term_count[1][p] = 0;
-    }*/
     self.mc_live_mask[0].clear();
     self.mc_live_mask[1].clear();
   }
 
-  pub fn score(&mut self, komi: f32, expected_score: f32) {
+  //pub fn score(&mut self, komi: f32, expected_score: f32) {
+  pub fn update_score(&mut self, komi: f32) {
     /*if !self.rollout {
       // FIXME(20151114)
       self.raw_score = Some(0.0);
@@ -234,8 +237,9 @@ impl RolloutTraj {
 
     //let score = self.sim_state.current_score_rollout(komi);
     let score = self.sim_state.current_score_tromp_taylor_undead(komi, &mut self.tt_scratch);
-    self.raw_score = Some(score);
-    self.adj_score = Some([score, score]);
+    self.score = Some(score);
+    /*self.raw_score = Some(score);
+    self.adj_score = Some([score, score]);*/
   }
 
   pub fn update_mc_live_counts(&mut self, mc_live_counts: &mut [Vec<usize>]) {
@@ -266,19 +270,15 @@ impl RolloutTraj {
       let stone = self.sim_state.current_stone(pt);
       match stone {
         Stone::Black => {
-          //mc_live_counts[0][p] += 1;
           self.mc_live_mask[0].insert(p);
         }
         Stone::White => {
-          //mc_live_counts[1][p] += 1;
           self.mc_live_mask[1].insert(p);
         }
         Stone::Empty => {
           if is_eyelike(&self.sim_state.position, &self.sim_state.chains, Stone::Black, pt) {
-            //mc_live_counts[0][p] += 1;
             self.mc_live_mask[0].insert(p);
           } else if is_eyelike(&self.sim_state.position, &self.sim_state.chains, Stone::White, pt) {
-            //mc_live_counts[1][p] += 1;
             self.mc_live_mask[1].insert(p);
           }
         }
@@ -430,16 +430,21 @@ impl NodeValues for RefCell<FloatNodeValues> {
 }
 
 pub struct AtomicNodeValues {
+  pub prior_values:     Vec<f32>,
   pub horizon:          AtomicUsize,
   pub total_trials:     AtomicUsize,
   pub total_score:      AtomicUsize,
-  pub prior_values:     Vec<f32>,
   pub num_trials:       Vec<AtomicUsize>,
-  pub scores:           Vec<AtomicUsize>,
   pub num_succs:        Vec<AtomicUsize>,
-  pub num_raw_succs:    Vec<AtomicUsize>,
+  //pub num_raw_succs:    Vec<AtomicUsize>,
   pub num_trials_rave:  Vec<AtomicUsize>,
   pub num_succs_rave:   Vec<AtomicUsize>,
+  pub scores:           Vec<AtomicUsize>,
+  pub total_live_stats: Vec<Vec<AtomicUsize>>,
+  //pub live_counts:      Vec<AtomicUsize>,
+  //pub live_counts_var:  Vec<AtomicUsize>,
+  pub total_live_succs: AtomicUsize,
+  pub live_succs:       Vec<AtomicUsize>,
 }
 
 impl AtomicNodeValues {
@@ -468,18 +473,14 @@ impl NodeValues for AtomicNodeValues {
     for _ in 0 .. num_arms {
       num_trials.push(AtomicUsize::new(0));
     }
-    let mut scores = Vec::with_capacity(num_arms);
-    for _ in 0 .. num_arms {
-      scores.push(AtomicUsize::new(0));
-    }
     let mut num_succs = Vec::with_capacity(num_arms);
     for _ in 0 .. num_arms {
       num_succs.push(AtomicUsize::new(0));
     }
-    let mut num_raw_succs = Vec::with_capacity(num_arms);
+    /*let mut num_raw_succs = Vec::with_capacity(num_arms);
     for _ in 0 .. num_arms {
       num_raw_succs.push(AtomicUsize::new(0));
-    }
+    }*/
     let mut num_trials_rave = Vec::with_capacity(num_arms);
     for _ in 0 .. num_arms {
       num_trials_rave.push(AtomicUsize::new(0));
@@ -488,8 +489,32 @@ impl NodeValues for AtomicNodeValues {
     for _ in 0 .. num_arms {
       num_succs_rave.push(AtomicUsize::new(0));
     }
+    let mut scores = Vec::with_capacity(num_arms);
+    for _ in 0 .. num_arms {
+      scores.push(AtomicUsize::new(0));
+    }
+    let mut total_live_stats = vec![];
+    for _ in 0 .. 2 {
+      let mut sub_total_live_stats = Vec::with_capacity(num_arms);
+      for _ in 0 .. num_arms {
+        sub_total_live_stats.push(AtomicUsize::new(0));
+      }
+      total_live_stats.push(sub_total_live_stats);
+    }
+    /*let mut live_counts = Vec::with_capacity(num_arms);
+    for _ in 0 .. num_arms {
+      live_counts.push(AtomicUsize::new(0));
+    }*/
+    /*let mut live_counts_var = Vec::with_capacity(num_arms);
+    for _ in 0 .. num_arms {
+      live_counts_var.push(AtomicUsize::new(0));
+    }*/
+    let mut live_succs = Vec::with_capacity(num_arms);
+    for _ in 0 .. num_arms {
+      live_succs.push(AtomicUsize::new(0));
+    }
     AtomicNodeValues{
-      // FIXME(20160125): switch on progressive widening.
+      prior_values:     repeat(0.5).take(num_arms).collect(),
       horizon:          match horizon_cfg {
         HorizonConfig::All => {
           AtomicUsize::new(num_arms)
@@ -503,13 +528,17 @@ impl NodeValues for AtomicNodeValues {
       },
       total_trials:     AtomicUsize::new(0),
       total_score:      AtomicUsize::new(0),
-      prior_values:     repeat(0.5).take(num_arms).collect(),
       num_trials:       num_trials,
-      scores:           scores,
       num_succs:        num_succs,
-      num_raw_succs:    num_raw_succs,
+      //num_raw_succs:    num_raw_succs,
       num_trials_rave:  num_trials_rave,
       num_succs_rave:   num_succs_rave,
+      scores:           scores,
+      total_live_stats: total_live_stats,
+      //live_counts:      live_counts,
+      //live_counts_var:  live_counts_var,
+      total_live_succs: AtomicUsize::new(0),
+      live_succs:       live_succs,
     }
   }
 
@@ -522,7 +551,8 @@ impl NodeValues for AtomicNodeValues {
     //for j in 0 .. self.num_trials.len() {
     for j in 0 .. self.horizon() {
       // XXX(20160210): Using the "raw" count of successes.
-      let s_j = self.num_raw_succs[j].load(Ordering::Acquire) as f32;
+      //let s_j = self.num_raw_succs[j].load(Ordering::Acquire) as f32;
+      let s_j = self.num_succs[j].load(Ordering::Acquire) as f32;
       let n_j = self.num_trials[j].load(Ordering::Acquire) as f32;
       if n_j < 32.0 {
         xs.push(0.0);
@@ -599,10 +629,10 @@ impl Node {
     self.valid_moves.is_empty()
   }
 
-  pub fn update_visits(&self, horizon_cfg: HorizonConfig, raw_score: f32) {
+  pub fn update_visits(&self, horizon_cfg: HorizonConfig, score: f32) {
     self.values.total_trials.fetch_add(1, Ordering::AcqRel);
 
-    let uint_score = (2.0 * raw_score).round() as isize as usize;
+    let uint_score = (2.0 * score).round() as isize as usize;
     self.values.total_score.fetch_add(uint_score, Ordering::AcqRel);
 
     match horizon_cfg {
@@ -626,24 +656,74 @@ impl Node {
     }
   }
 
-  pub fn update_arm(&self, j: usize, adj_score: f32, raw_score: f32) {
+  //pub fn update_arm(&self, j: usize, adj_score: f32, raw_score: f32) {
+  pub fn update_arm(&self, j: usize, score: f32) {
     self.values.num_trials[j].fetch_add(1, Ordering::AcqRel);
 
-    let uint_score = (2.0 * raw_score).round() as isize as usize;
+    //let uint_score = (2.0 * raw_score).round() as isize as usize;
+    let uint_score = (2.0 * score).round() as isize as usize;
     self.values.scores[j].fetch_add(uint_score, Ordering::AcqRel);
 
     let turn = self.state.current_turn();
-    if (Stone::White == turn && adj_score >= 0.0) ||
-        (Stone::Black == turn && adj_score < 0.0)
+    if (Stone::White == turn && score >= 0.0) ||
+        (Stone::Black == turn && score < 0.0)
     {
       self.values.num_succs[j].fetch_add(1, Ordering::AcqRel);
     }
-    if (Stone::White == turn && raw_score >= 0.0) ||
+    /*if (Stone::White == turn && raw_score >= 0.0) ||
         (Stone::Black == turn && raw_score < 0.0)
     {
       self.values.num_raw_succs[j].fetch_add(1, Ordering::AcqRel);
+    }*/
+  }
+
+  pub fn update_total_live_stats(&self, rollout_traj: &RolloutTraj) -> isize {
+    let turn = self.state.current_turn();
+    let turn_off = turn.offset();
+    let mut counts: [isize; 2] = [0, 0];
+    for offset in 0 .. 2 {
+      let rel_offset = match turn_off {
+        0 => offset,
+        1 => 1 - offset,
+        _ => unreachable!(),
+      };
+      for p in 0 .. Board::SIZE {
+        if rollout_traj.mc_live_mask[offset].contains(p) {
+          self.values.total_live_stats[rel_offset][p].fetch_add(1, Ordering::AcqRel);
+          counts[rel_offset] += 1;
+        }
+      }
+    }
+    counts[0] - counts[1]
+  }
+
+  pub fn update_arm_live_succs(&self, j: usize, live_diff: isize, komi: f32) {
+    // FIXME(20160301): this first version of shaping is pretty broken.
+    // Need to define the potential function at each backup.
+    let rel_komi = match self.state.current_turn() {
+      Stone::Black => -komi,
+      Stone::White => komi,
+      _ => unreachable!(),
+    };
+    if live_diff as f32 + rel_komi >= 0.0 {
+      self.values.total_live_succs.fetch_add(1, Ordering::AcqRel);
+      self.values.live_succs[j].fetch_add(1, Ordering::AcqRel);
     }
   }
+
+  /*pub fn update_arm_live_counts(&self, j: usize, alive_count: usize) {
+    let prev_sum = self.values.live_counts[j].fetch_add(alive_count, Ordering::AcqRel);
+    // FIXME(20160301): update variance estimate (requires fixed point atomic).
+    /*let curr_sum = prev_sum + alive_count;
+    loop {
+      let prev_var = self.values.live_counts_var[j].load(Ordering::Acquire);
+      let var_update = (...);
+      let prev_var_2 = self.values.live_counts_var[j].fetch_add(var_update, Ordering::AcqRel);
+      if prev_var == prev_var_2 {
+        break;
+      }
+    }*/
+  }*/
 
   pub fn rave_update_arm(&self, j: usize, score: f32) {
     let turn = self.state.current_turn();
@@ -672,14 +752,15 @@ pub fn search_principal_variation(init_node: Arc<RwLock<Node>>, depth: usize) ->
         let argmax_point = node.valid_moves[argmax_j];
         let j_score = node.values.arm_score(argmax_j);
         let j_trials = num_trials[argmax_j];
-        //let j_adj_succs = node.values.num_succs[argmax_j].load(Ordering::Acquire);
-        let j_raw_succs = node.values.num_raw_succs[argmax_j].load(Ordering::Acquire);
-        //let adj_value = j_adj_succs as f32 / j_trials;
-        let raw_value = j_raw_succs as f32 / j_trials;
-        if raw_value < 0.1 {
-          (Action::Resign, j_trials as usize, j_score, raw_value)
+        //let j_raw_succs = node.values.num_raw_succs[argmax_j].load(Ordering::Acquire);
+        let j_succs = node.values.num_succs[argmax_j].load(Ordering::Acquire);
+        let value = j_succs as f32 / j_trials;
+        //let raw_value = j_raw_succs as f32 / j_trials;
+        //if raw_value < 0.1 {
+        if value < 0.1 {
+          (Action::Resign, j_trials as usize, j_score, value)
         } else {
-          (Action::Place{point: argmax_point}, j_trials as usize, j_score, raw_value)
+          (Action::Place{point: argmax_point}, j_trials as usize, j_score, value)
         }
       } else {
         (Action::Pass, 0, 0.0, 0.5)
@@ -698,7 +779,7 @@ pub fn search_principal_variation(init_node: Arc<RwLock<Node>>, depth: usize) ->
   pv
 }
 
-pub fn search_principal_multi_variation(init_node: Arc<RwLock<Node>>, depth: usize) -> Vec<(Stone, Vec<(Action, usize, usize, f32, f32)>)> {
+/*pub fn search_principal_multi_variation(init_node: Arc<RwLock<Node>>, depth: usize) -> Vec<(Stone, Vec<(Action, usize, usize, f32, f32)>)> {
   let mut pv = vec![];
   let mut node = init_node;
   for t in 0 .. depth {
@@ -715,8 +796,8 @@ pub fn search_principal_multi_variation(init_node: Arc<RwLock<Node>>, depth: usi
         let argmax_point = node.valid_moves[argmax_j];
         let j_score = node.values.arm_score(argmax_j);
         let j_trials = num_trials[argmax_j];
-        //let j_adj_succs = node.values.num_succs[argmax_j].load(Ordering::Acquire);
-        let j_raw_succs = node.values.num_raw_succs[argmax_j].load(Ordering::Acquire);
+        //let j_raw_succs = node.values.num_raw_succs[argmax_j].load(Ordering::Acquire);
+        let j_adj_succs = node.values.num_succs[argmax_j].load(Ordering::Acquire);
         //let adj_value = j_adj_succs as f32 / j_trials;
         let raw_value = j_raw_succs as f32 / j_trials;
         if raw_value < 0.1 {
@@ -740,7 +821,7 @@ pub fn search_principal_multi_variation(init_node: Arc<RwLock<Node>>, depth: usi
     }
   }
   pv
-}
+}*/
 
 pub enum TreeResult {
   NonTerminal,
@@ -876,10 +957,12 @@ pub struct TreeOps;
 
 impl TreeOps {
   pub fn traverse(
-      horizon_cfg:      HorizonConfig,
+      //horizon_cfg:      HorizonConfig,
+      tree_cfg:         TreePolicyConfig,
       root_node:        Arc<RwLock<Node>>,
       tree_traj:        &mut TreeTraj,
-      mut traj_trace:   Option<&mut SearchTrajTrace>,
+      //mut traj_trace:   Option<&mut SearchTrajTrace>,
+      mut tree_trace:   Option<&mut TreeTrajTrace>,
       prior_policy:     &mut PriorPolicy,
       tree_policy:      &mut TreePolicy<R=Xorshiftplus128Rng>,
       //stats:            &mut SearchStats,
@@ -895,7 +978,7 @@ impl TreeOps {
       // number of trials.
       ply += 1;
       let cursor_trials = cursor_node.read().unwrap().values.total_trials.load(Ordering::Acquire);
-      if cursor_trials < 1 {
+      if cursor_trials < tree_cfg.visit_thresh {
         // Not enough trials, stop the walk and do a rollout.
         //stats.old_leaf_count += 1;
         break;
@@ -906,16 +989,10 @@ impl TreeOps {
         let (res, horizon) = tree_policy.execute_search(&*cursor_node.read().unwrap(), rng);
         match res {
           Some((place_point, j)) => {
-            if let Some(ref mut traj_trace) = traj_trace {
-              traj_trace.explore_traj.decisions.push(
-                ExploreDecisionTrace{
-                  action:       Action::Place{point: place_point},
-                  action_rank:  j,
-                  horizon:      horizon,
-                }
-              );
-            }
             tree_traj.backup_triples.push((cursor_node.clone(), place_point, j));
+            if let Some(ref mut tree_trace) = tree_trace {
+              tree_trace.decisions.push(TreeDecisionTrace::new(Action::Place{point: place_point}, j, horizon));
+            }
             let has_child = cursor_node.read().unwrap().child_nodes[j].is_some();
             if has_child {
               // Existing inner node, simply update the cursor.
@@ -940,9 +1017,12 @@ impl TreeOps {
                       panic!("walk failed due to illegal move: {:?}", e);
                     }
                   }
-                  let mut leaf_node = Arc::new(RwLock::new(Node::new(leaf_state, prior_policy, horizon_cfg)));
+                  let inner_leaf_node = Node::new(leaf_state, prior_policy, tree_cfg.horizon_cfg);
+                  if let Some(ref mut tree_trace) = tree_trace {
+                    tree_trace.expansion = Some(TreeExpansionTrace::new(&inner_leaf_node));
+                  }
+                  let mut leaf_node = Arc::new(RwLock::new(inner_leaf_node));
                   cursor_node.child_nodes[j] = Some(leaf_node.clone());
-                  //cursor_node = leaf_node;
                   //stats.new_leaf_count += 1;
                   leaf_node
                 } else {
@@ -962,40 +1042,47 @@ impl TreeOps {
       }
     }
 
-    // TODO(20151111): if the cursor node is terminal, score it now and backup;
-    // otherwise do a rollout and then backup.
     //stats.max_ply = max(stats.max_ply, ply);
     tree_traj.leaf_node = Some(cursor_node.clone());
     let terminal = cursor_node.read().unwrap().is_terminal();
     if terminal {
       TreeResult::Terminal
     } else {
-      if let Some(traj_trace) = traj_trace {
-        traj_trace.explore_traj.rollout = true;
-      }
+      /*if let Some(traj_trace) = traj_trace {
+        traj_trace.tree_traj.rollout = true;
+      }*/
       TreeResult::NonTerminal
     }
   }
 
   pub fn backup(
       use_rave:         bool,
+      komi:             f32,
       horizon_cfg:      HorizonConfig,
       tree_traj:        &TreeTraj,
       rollout_traj:     &mut RolloutTraj,
-      mut traj_trace:   Option<&mut SearchTrajTrace>,
+      //mut traj_trace:   Option<&mut SearchTrajTrace>,
+      mut rollout_trace:    Option<&mut RolloutTrajTrace>,
       rng:              &mut Xorshiftplus128Rng)
   {
-    let raw_score = match rollout_traj.raw_score {
+    /*let raw_score = match rollout_traj.raw_score {
       Some(raw_score) => raw_score,
       None => panic!("missing raw score for backup!"),
     };
     let adj_score = match rollout_traj.adj_score {
       Some(adj_score) => adj_score,
       None => panic!("missing adj score for backup!"),
+    };*/
+    rollout_traj.update_score(komi);
+    //rollout_traj.update_mc_live_mask();
+
+    let score = match rollout_traj.score {
+      Some(score) => score,
+      None => panic!("missing raw score for backup!"),
     };
 
-    if let Some(ref mut traj_trace) = traj_trace {
-      traj_trace.rollout_traj.score = Some(raw_score);
+    if let Some(ref mut rollout_trace) = rollout_trace {
+      rollout_trace.score = Some(score);
     }
 
     if use_rave {
@@ -1014,7 +1101,19 @@ impl TreeOps {
       if leaf_turn == update_turn {
         if let Some(&update_j) = leaf_node.action_idxs.get(&update_point.idx()) {
           assert_eq!(update_point, leaf_node.valid_moves[update_j]);
-          leaf_node.update_arm(update_j, adj_score[update_turn.offset()], raw_score);
+          //leaf_node.update_arm(update_j, adj_score[update_turn.offset()], raw_score);
+          leaf_node.update_arm(update_j, score);
+
+          /*let arm_alive_diff = leaf_node.update_total_live_stats(rollout_traj);
+          leaf_node.update_arm_live_succs(update_j, arm_alive_diff, komi);*/
+          /*if !tree_traj.backup_triples.is_empty() {
+            let tree_traj_len = tree_traj.backup_triples.len();
+            let (pred_node, pred_update_j) = (
+              tree_traj.backup_triples[tree_traj_len - 1].0.read().unwrap(),
+              tree_traj.backup_triples[tree_traj_len - 1].2,
+            );
+            pred_node.update_arm_live_counts(pred_update_j, arm_alive_count)
+          }*/
         } else {
           panic!("WARNING: leaf_node action_idxs does not contain update arm: {:?}", update_point);
         }
@@ -1028,7 +1127,8 @@ impl TreeOps {
           let sim_point = Point::from_idx(sim_p);
           if let Some(&sim_j) = leaf_node.action_idxs.get(&sim_point.idx()) {
             assert_eq!(sim_point, leaf_node.valid_moves[sim_j]);
-            leaf_node.rave_update_arm(sim_j, adj_score[update_turn.offset()]);
+            //leaf_node.rave_update_arm(sim_j, adj_score[update_turn.offset()]);
+            leaf_node.rave_update_arm(sim_j, score);
           }
         }
       }
@@ -1036,15 +1136,26 @@ impl TreeOps {
 
     {
       let leaf_node = tree_traj.leaf_node.as_ref().unwrap().read().unwrap();
-      leaf_node.update_visits(horizon_cfg, raw_score);
+      leaf_node.update_visits(horizon_cfg, score);
     }
 
-    for &(ref node, update_point, update_j) in tree_traj.backup_triples.iter().rev() {
+    for (i, &(ref node, update_point, update_j)) in tree_traj.backup_triples.iter().enumerate().rev() {
       let node = node.read().unwrap();
 
       assert_eq!(update_point, node.valid_moves[update_j]);
       let update_turn = node.state.current_turn();
-      node.update_arm(update_j, adj_score[update_turn.offset()], raw_score);
+      //node.update_arm(update_j, adj_score[update_turn.offset()], raw_score);
+      node.update_arm(update_j, score);
+
+      /*let arm_alive_diff = node.update_total_live_stats(rollout_traj);
+      node.update_arm_live_succs(update_j, arm_alive_diff, komi);*/
+      /*if i >= 1 {
+        let (pred_node, pred_update_j) = (
+          tree_traj.backup_triples[i - 1].0.read().unwrap(),
+          tree_traj.backup_triples[i - 1].2,
+        );
+        //pred_node.update_arm_live_counts(pred_update_j, arm_alive_count);
+      }*/
 
       if use_rave {
         rollout_traj.rave_mask[update_turn.offset()].insert(update_point.idx());
@@ -1052,12 +1163,13 @@ impl TreeOps {
           let sim_point = Point::from_idx(sim_p);
           if let Some(&sim_j) = node.action_idxs.get(&sim_point.idx()) {
             assert_eq!(sim_point, node.valid_moves[sim_j]);
-            node.rave_update_arm(sim_j, adj_score[update_turn.offset()]);
+            //node.rave_update_arm(sim_j, adj_score[update_turn.offset()]);
+            node.rave_update_arm(sim_j, score);
           }
         }
       }
 
-      node.update_visits(horizon_cfg, raw_score);
+      node.update_visits(horizon_cfg, score);
     }
   }
 }
@@ -1224,6 +1336,7 @@ pub struct RolloutStats {
 
 #[derive(Clone)]
 pub enum SearchWorkerCommand {
+  Quit,
   ResetSerialSearch{
     cfg:        SearchWorkerConfig,
     init_state: TxnState<TxnStateNodeData>,
@@ -1231,11 +1344,14 @@ pub enum SearchWorkerCommand {
   ResetSearch{
     cfg:            SearchWorkerConfig,
     shared_tree:    SharedTree,
-    //green_stone:    Stone,
     init_state:     TxnState<TxnStateNodeData>,
     record_search:  bool,
   },
-  ResetEval{
+  TrainMetaLevelTD0Gradient{
+    t: usize,
+  },
+  TrainMetaLevelTD0Descent,
+  /*ResetEval{
     cfg:            SearchWorkerConfig,
     shared_data:    EvalSharedData,
     record_trace:   bool,
@@ -1270,8 +1386,7 @@ pub enum SearchWorkerCommand {
   SaveFriendlyRolloutParamsToMem,
   LoadOpponentRolloutParamsFromMem{
     params_blob:    Arc<Vec<u8>>,
-  },
-  Quit,
+  },*/
 }
 
 pub enum SearchWorkerOutput {
@@ -1323,12 +1438,16 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
     let mut in_txs = vec![];
     let (out_tx, out_rx) = channel();
 
-    let shared_rollout_rewards = Arc::new(AtomicUsize::new(0));
+    /*let shared_rollout_rewards = Arc::new(AtomicUsize::new(0));
     let shared_rollout_count = Arc::new(AtomicUsize::new(0));
-    let shared_traces_count = Arc::new(AtomicUsize::new(0));
+    let shared_traces_count = Arc::new(AtomicUsize::new(0));*/
+
+    let recon_worker_builder = ParallelSearchReconWorkerBuilder::new(num_workers);
 
     for tid in 0 .. num_workers {
       let worker_builder = worker_builder.clone();
+      let recon_worker_builder = recon_worker_builder.clone();
+
       let barrier = barrier.clone();
       let out_barrier = out_barrier.clone();
 
@@ -1336,20 +1455,24 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
       in_txs.push(in_tx);
       let out_tx = out_tx.clone();
 
-      // FIXME(20160225): these `shared_*` variables are deprecated.
+      /*// FIXME(20160225): these `shared_*` variables are deprecated.
       let shared_rollout_rewards = shared_rollout_rewards.clone();
       let shared_rollout_count = shared_rollout_count.clone();
-      let shared_traces_count = shared_traces_count.clone();
+      let shared_traces_count = shared_traces_count.clone();*/
 
       pool.execute(move || {
         let mut rng = Xorshiftplus128Rng::new(&mut thread_rng());
-        let mut worker = worker_builder.into_worker(tid, worker_batch_capacity);
+        let worker = Rc::new(RefCell::new(worker_builder.into_worker(tid, worker_batch_capacity)));
+        let omega_worker = OmegaTreeBatchWorker::new(worker.clone());
+        let recon_worker = Rc::new(RefCell::new(recon_worker_builder.into_worker(tid, omega_worker, ())));
+        let meta_worker = MetaLevelWorker::new(recon_worker.clone());
 
         let barrier = barrier;
         let in_rx = in_rx;
         let out_barrier = out_barrier;
 
         let use_rave = {
+          let mut worker = worker.borrow_mut();
           let (_, tree_policy) = worker.exploration_policies();
           tree_policy.use_rave()
         };
@@ -1387,6 +1510,10 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
           // estimate; should check for termination within inner batch loop.
           let cmd: SearchWorkerCommand = in_rx.recv().unwrap();
           match cmd {
+            SearchWorkerCommand::Quit => {
+              break;
+            }
+
             SearchWorkerCommand::ResetSerialSearch{cfg, init_state} => {
               // FIXME(20160124)
               unimplemented!();
@@ -1396,7 +1523,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
               // XXX(20160107): If the tree has no root node, this sets it;
               // otherwise use the existing root node.
               let tree = shared_tree;
-              tree.try_reset(init_state, worker.prior_policy());
+              tree.try_reset(init_state, worker.borrow_mut().prior_policy());
 
               let batch_size = cfg.batch_size;
               let num_batches = cfg.num_batches;
@@ -1419,11 +1546,13 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
 
               if record_search {
                 let root_node = root_node.read().unwrap();
-                search_trace.reset(tree_cfg, root_node.state.clone());
+                search_trace.reset(tree_cfg, &*root_node);
               }
 
-              let mut worker_mean_score: f32 = 0.0;
-              let mut worker_backup_count: f32 = 0.0;
+              let mut explore_elapsed_ms = 0;
+              let mut rollout_elapsed_ms = 0;
+              /*let mut worker_mean_score: f32 = 0.0;
+              let mut worker_backup_count: f32 = 0.0;*/
               for p in 0 .. Board::SIZE {
                 mc_live_counts[0][p] = 0;
                 mc_live_counts[1][p] = 0;
@@ -1444,9 +1573,6 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
               barrier.wait();
               fence(Ordering::AcqRel);
 
-              let mut explore_elapsed_ms = 0;
-              let mut rollout_elapsed_ms = 0;
-
               for batch in 0 .. num_batches {
                 /*println!("DEBUG: worker {} batch {}/{}",
                     tid, batch, num_batches);*/
@@ -1458,16 +1584,17 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
                 }
 
                 {
+                  let mut worker = worker.borrow_mut();
                   let (prior_policy, tree_policy) = worker.exploration_policies();
                   for batch_idx in 0 .. batch_size {
                     let tree_traj = &mut tree_trajs[batch_idx];
                     let rollout_traj = &mut rollout_trajs[batch_idx];
-                    let traj_trace = if record_search {
-                      Some(&mut search_trace.batches[batch].traj_traces[batch_idx])
+                    let tree_trace = if record_search {
+                      Some(&mut search_trace.batches[batch].traj_traces[batch_idx].tree_trace)
                     } else {
                       None
                     };
-                    match TreeOps::traverse(tree_cfg.horizon_cfg, root_node.clone(), tree_traj, traj_trace, prior_policy, tree_policy, /*&mut stats,*/ &mut rng) {
+                    match TreeOps::traverse(tree_cfg, root_node.clone(), tree_traj, tree_trace, prior_policy, tree_policy, /*&mut stats,*/ &mut rng) {
                       /*TreeResult::Terminal => {
                         let leaf_state = &tree_traj.leaf_node.as_ref().unwrap().read().unwrap().state;
                         rollout_traj.reset_terminal(leaf_state);
@@ -1498,7 +1625,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
                   } else {
                     None
                   };
-                  worker.rollout_policy().rollout_batch(
+                  worker.borrow_mut().rollout_policy().rollout_batch(
                       batch_size,
                       //green_stone,
                       RolloutLeafs::TreeTrajs(&tree_trajs),
@@ -1514,17 +1641,18 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
                 for batch_idx in 0 .. batch_size {
                   let tree_traj = &tree_trajs[batch_idx];
                   let rollout_traj = &mut rollout_trajs[batch_idx];
-                  let traj_trace = if record_search {
-                    Some(&mut search_trace.batches[batch].traj_traces[batch_idx])
+                  let rollout_trace = if record_search {
+                    Some(&mut search_trace.batches[batch].traj_traces[batch_idx].rollout_trace)
                   } else {
                     None
                   };
-                  rollout_traj.score(cfg.komi, cfg.prev_mean_score);
                   rollout_traj.update_mc_live_counts(&mut mc_live_counts);
-                  TreeOps::backup(use_rave, tree_cfg.horizon_cfg, tree_traj, rollout_traj, traj_trace, &mut rng);
-                  let raw_score = rollout_traj.raw_score.unwrap();
+                  TreeOps::backup(use_rave, cfg.komi, tree_cfg.horizon_cfg, tree_traj, rollout_traj, rollout_trace, &mut rng);
+
+                  /*//let raw_score = rollout_traj.raw_score.unwrap();
+                  let score = rollout_traj.score.unwrap();
                   worker_backup_count += 1.0;
-                  worker_mean_score += (raw_score - worker_mean_score) / worker_backup_count;
+                  worker_mean_score += (score - worker_mean_score) / worker_backup_count;*/
                 }
                 barrier.wait();
                 fence(Ordering::AcqRel);
@@ -1538,7 +1666,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
               let shared_mc_live_counts = {
                 let mut inner = tree.inner.lock().unwrap();
 
-                inner.mean_raw_score += worker_mean_score / (num_workers as f32);
+                //inner.mean_raw_score += worker_mean_score / (num_workers as f32);
                 inner.explore_elapsed_ms.fetch_add(explore_elapsed_ms, Ordering::AcqRel);
                 inner.rollout_elapsed_ms.fetch_add(rollout_elapsed_ms, Ordering::AcqRel);
 
@@ -1554,7 +1682,17 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
               fence(Ordering::AcqRel);
             }
 
-            SearchWorkerCommand::ResetEval{cfg, shared_data, record_trace, green_stone, init_state} => {
+            SearchWorkerCommand::TrainMetaLevelTD0Gradient{..} => {
+              // FIXME(20160301)
+              unimplemented!();
+            }
+
+            SearchWorkerCommand::TrainMetaLevelTD0Descent => {
+              // FIXME(20160301)
+              unimplemented!();
+            }
+
+            /*SearchWorkerCommand::ResetEval{cfg, shared_data, record_trace, green_stone, init_state} => {
               let batch_size = cfg.batch_size;
               let num_batches = cfg.num_batches;
               assert!(batch_size <= worker_batch_capacity);
@@ -1597,8 +1735,10 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
 
                 for batch_idx in 0 .. batch_size {
                   let rollout_traj = &mut rollout_trajs[batch_idx];
-                  rollout_traj.score(cfg.komi, cfg.prev_mean_score);
-                  let raw_score = rollout_traj.raw_score.unwrap();
+                  //rollout_traj.score(cfg.komi, cfg.prev_mean_score);
+                  rollout_traj.update_score(cfg.komi);
+                  //let raw_score = rollout_traj.raw_score.unwrap();
+                  let raw_score = rollout_traj.score.unwrap();
                   let value = match init_turn {
                     Stone::Black => {
                       if raw_score < 0.0 {
@@ -1632,9 +1772,9 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
               }
 
               out_barrier.wait();
-            }
+            }*/
 
-            SearchWorkerCommand::EvalGradientsAndBackup{learning_rate, baseline, target_value, eval_value} => {
+            /*SearchWorkerCommand::EvalGradientsAndBackup{learning_rate, baseline, target_value, eval_value} => {
               let mut num_traces = 0;
               worker.rollout_policy().init_traces();
               for trace in traces.iter() {
@@ -1647,15 +1787,15 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
               }
 
               out_barrier.wait();
-            }
+            }*/
 
-            SearchWorkerCommand::SaveRolloutParams{save_dir, num_iters} => {
+            /*SearchWorkerCommand::SaveRolloutParams{save_dir, num_iters} => {
               worker.rollout_policy().save_params(&save_dir, num_iters);
 
               out_barrier.wait();
-            }
+            }*/
 
-            SearchWorkerCommand::ResetRollout{cfg, green_stone, init_state, stats} => {
+            /*SearchWorkerCommand::ResetRollout{cfg, green_stone, init_state, stats} => {
               let batch_size = cfg.batch_size;
               let num_batches = cfg.num_batches;
               assert!(batch_size <= worker_batch_capacity);
@@ -1696,9 +1836,10 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
 
               for batch_idx in 0 .. batch_size {
                 let rollout_traj = &mut rollout_trajs[batch_idx];
-                // FIXME(20160208): compute the score using Tromp Taylor.
-                rollout_traj.score(cfg.komi, cfg.prev_mean_score);
-                let raw_score = rollout_traj.raw_score.unwrap();
+                //rollout_traj.score(cfg.komi, cfg.prev_mean_score);
+                rollout_traj.update_score(cfg.komi);
+                //let raw_score = rollout_traj.raw_score.unwrap();
+                let raw_score = rollout_traj.score.unwrap();
                 // XXX(20160208): Compute terminal value.
                 let reward = translate_score_to_reward(green_stone, raw_score);
                 traces[batch_idx].value = Some(reward as f32);
@@ -1715,9 +1856,9 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
 
               out_barrier.wait();
               fence(Ordering::AcqRel);
-            }
+            }*/
 
-            SearchWorkerCommand::TraceDescend{step_size, baseline, batch_size, green_stone} => {
+            /*SearchWorkerCommand::TraceDescend{step_size, baseline, batch_size, green_stone} => {
               if tid == 0 {
                 shared_traces_count.store(0, Ordering::Release);
               }
@@ -1742,9 +1883,9 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
 
               out_barrier.wait();
               fence(Ordering::AcqRel);
-            }
+            }*/
 
-            SearchWorkerCommand::SaveFriendlyRolloutParamsToMem => {
+            /*SearchWorkerCommand::SaveFriendlyRolloutParamsToMem => {
               if tid == 0 {
                 let params_blob = worker.rollout_policy().save_green_params();
                 out_tx.send(SearchWorkerOutput::OpponentRolloutParams{
@@ -1752,16 +1893,16 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
                 }).unwrap();
               }
               out_barrier.wait();
-            }
+            }*/
 
-            SearchWorkerCommand::LoadOpponentRolloutParamsFromMem{params_blob} => {
+            /*SearchWorkerCommand::LoadOpponentRolloutParamsFromMem{params_blob} => {
               worker.rollout_policy().load_red_params(&params_blob);
               out_barrier.wait();
-            }
+            }*/
 
-            SearchWorkerCommand::Quit => {
-              break;
-            }
+            /*_ => {
+              unimplemented!();
+            }*/
           };
 
         }
@@ -1807,7 +1948,7 @@ pub struct MonteCarloSearchResult {
   pub turn:             Stone,
   pub action:           Action,
   pub expected_score:   f32,
-  pub expected_adj_val: f32,
+  //pub expected_adj_val: f32,
   pub expected_value:   f32,
   pub b_mc_alive:       usize,
   pub w_mc_alive:       usize,
@@ -1815,6 +1956,7 @@ pub struct MonteCarloSearchResult {
   pub b_alive_ter:      usize,
   pub w_alive_ch:       usize,
   pub w_alive_ter:      usize,*/
+  pub top_prior_values: Vec<(Action, f32)>,
   pub pv:               Vec<(Stone, Action, usize, usize, f32, f32)>,
 }
 
@@ -1931,7 +2073,7 @@ impl ParallelMonteCarloSearch {
 
     /*let root_node_opt = tree.root_node.read().unwrap();
     let root_node = root_node_opt.as_ref().unwrap().read().unwrap();*/
-    let (root_node, mean_raw_score, shared_mc_live_counts) = {
+    let (root_node, /*mean_raw_score,*/ shared_mc_live_counts) = {
       let inner_tree = shared_tree.inner.lock().unwrap();
 
       stats.avg_explore_elapsed_ms = inner_tree.explore_elapsed_ms.load(Ordering::Acquire) / num_workers;
@@ -1942,7 +2084,7 @@ impl ParallelMonteCarloSearch {
       inner_tree.rollout_elapsed_ms.store(0, Ordering::Release);
 
       ( inner_tree.root_node.as_ref().unwrap().clone(),
-        inner_tree.mean_raw_score,
+        //inner_tree.mean_raw_score,
         inner_tree.mc_live_counts.clone(),
       )
     };
@@ -1960,11 +2102,16 @@ impl ParallelMonteCarloSearch {
     }
 
     let root_pv = search_principal_variation(root_node.clone(), 3);
-    /*for mov in root_pv {
-    }*/
 
     let root_node = root_node.read().unwrap();
     let root_turn = root_node.state.current_turn();
+
+    let mut top_prior_values = Vec::with_capacity(5);
+    for k in 0 .. min(5, root_node.valid_moves.len()) {
+      let pt = Action::Place{point: root_node.valid_moves[k]};
+      let prior = root_node.values.prior_values[k];
+      top_prior_values.push((pt, prior));
+    }
 
     /*let mut scratch = BensonScratch::new();
     let (b_alive_ch, b_alive_ter) = root_node.state.count_unconditionally_alive(Stone::Black, &mut scratch);
@@ -1979,32 +2126,33 @@ impl ParallelMonteCarloSearch {
     //let root_ratios = root_node.values.succ_ratios_float();
     //let (action, adj_value, raw_value) = if let Some(argmax_j) = array_argmax(&root_ratios) {
     let root_trials = root_node.values.num_trials_float();
-    let (action, expected_score, adj_value, raw_value) = if let Some(argmax_j) = array_argmax(&root_trials) {
+    let (action, expected_score, value) = if let Some(argmax_j) = array_argmax(&root_trials) {
       stats.argmax_rank = Some(argmax_j);
       stats.argmax_ntrials = root_trials[argmax_j] as usize;
 
       let argmax_point = root_node.valid_moves[argmax_j];
       let j_score = root_node.values.arm_score(argmax_j);
       let j_adj_succs = root_node.values.num_succs[argmax_j].load(Ordering::Acquire);
-      let j_raw_succs = root_node.values.num_raw_succs[argmax_j].load(Ordering::Acquire);
+      //let j_raw_succs = root_node.values.num_raw_succs[argmax_j].load(Ordering::Acquire);
       let j_trials = root_trials[argmax_j];
-      let adj_value = j_adj_succs as f32 / j_trials;
-      let raw_value = j_raw_succs as f32 / j_trials;
+      let value = j_adj_succs as f32 / j_trials;
+      //let raw_value = j_raw_succs as f32 / j_trials;
 
       /*if root_turn == Stone::Black && -(b_mc_alive as f32) + cfg.komi < 0.0 {
-        (Action::Pass, j_score, adj_value, raw_value)
+        (Action::Pass, j_score, value, raw_value)
       } else if root_turn == Stone::White && w_mc_alive as f32 + cfg.komi >= 0.0 {
-        (Action::Pass, j_score, adj_value, raw_value)
+        (Action::Pass, j_score, value, raw_value)
       } else */
 
-      if raw_value < 0.1 {
-        (Action::Resign, j_score, adj_value, raw_value)
+      //if raw_value < 0.1 {
+      if value < 0.1 {
+        (Action::Resign, j_score, value)
       } else {
-        (Action::Place{point: argmax_point}, j_score, adj_value, raw_value)
+        (Action::Place{point: argmax_point}, j_score, value)
       }
     } else {
       stats.argmax_rank = None;
-      (Action::Pass, 0.0, 0.5, 0.5)
+      (Action::Pass, 0.0, 0.5)
     };
 
     (MonteCarloSearchResult{
@@ -2012,14 +2160,15 @@ impl ParallelMonteCarloSearch {
       action: action,
       //expected_score:   mean_raw_score,
       expected_score:   expected_score,
-      expected_adj_val: adj_value,
-      expected_value:   raw_value,
+      //expected_adj_val: value,
+      expected_value:   value,
       b_mc_alive:       b_mc_alive,
       w_mc_alive:       w_mc_alive,
       /*b_alive_ch:       b_alive_ch,
       b_alive_ter:      b_alive_ter,
       w_alive_ch:       w_alive_ch,
       w_alive_ter:      w_alive_ter,*/
+      top_prior_values: top_prior_values,
       pv:               root_pv,
     }, stats)
   }
@@ -2108,7 +2257,7 @@ impl ParallelMonteCarloSearchAndTrace {
   }
 }
 
-#[derive(Clone, Copy, Debug)]
+/*#[derive(Clone, Copy, Debug)]
 pub struct MonteCarloEvalResult {
   pub expected_value:   f32,
 }
@@ -2390,4 +2539,4 @@ impl ParallelMonteCarloLoadOpponentParams {
     }
     server.join();
   }
-}
+}*/

@@ -81,7 +81,7 @@ fn main() {
 
     //trials_path:    PathBuf::from("experiments/convnet_alphav3m_13ppn384multi3_t_786k_white.0.experiment"),
     //trials_path:    PathBuf::from("experiments/convnet_alphav3m_13ppn384multi3_t_660k_white.0.experiment"),
-    trials_path:    PathBuf::from("experiments/convnet_alphav3m_13ppn384multi3_t_951k_white.0.experiment"),
+    trials_path:    PathBuf::from("experiments/convnet_alphav3m_13ppn384multi3_t_1569k_white.0.experiment"),
 
     scratch_prefix: PathBuf::from("/scratch/phj/space/holmes-project/holmes"),
     num_trials:     256,

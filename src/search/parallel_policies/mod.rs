@@ -11,7 +11,9 @@ use rand::{Rng};
 use std::path::{Path};
 
 pub mod convnet;
+//pub mod shaped_thompson;
 pub mod thompson;
+pub mod ucb;
 
 pub trait SearchPolicyWorkerBuilder: Send + Clone {
   type Worker: SearchPolicyWorker;

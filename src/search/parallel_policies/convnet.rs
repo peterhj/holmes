@@ -11,6 +11,7 @@ use convnet_new::{
   build_2layer16_5x5_19x19x16_arch_nodir,
   //build_2layer16_9x9_19x19x16_arch_nodir,
   build_13layer384multi3_19x19x32_arch_nodir,
+  build_value_3layer64_19x19x32_arch_nodir,
 };
 use discrete::{DiscreteFilter};
 use discrete::bfilter::{BFilter};
@@ -64,6 +65,9 @@ impl ConvnetPolicyWorkerBuilder {
 
     let prior_arch_cfg = build_13layer384multi3_19x19x32_arch_nodir(1);
     let prior_save_path = PathBuf::from("models/gogodb_w2015-preproc-alphav3m_19x19x32_13layer384multi3.saved");
+
+    let prior_arch_cfg = build_value_3layer64_19x19x32_arch_nodir(1);
+    let prior_save_path = PathBuf::from("models/gogodb_w2015-preproc-alphav3m_19x19x32_value_3layer64.saved");
 
     // FIXME(20160121): temporarily using existing balance run.
     /*let rollout_arch_cfg = build_2layer16_19x19x16_arch_nodir(worker_batch_size);
@@ -396,7 +400,7 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
         for batch_idx in 0 .. batch_size {
           if let Some(ref mut trace_batch) = trace_batch {
             trace_batch.traj_traces[batch_idx]
-              .rollout_traj.actions.push(Action::Pass);
+              .rollout_trace.actions.push(Action::Pass);
           }
           let sim_turn = rollout_trajs[batch_idx].sim_state.current_turn();
           assert_eq!(sim_turn, leaf_turn);
@@ -478,7 +482,7 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
               } else {
                 if let Some(ref mut trace_batch) = trace_batch {
                   trace_batch.traj_traces[batch_idx]
-                    .rollout_traj.actions.push(Action::Place{point: sim_point});
+                    .rollout_trace.actions.push(Action::Place{point: sim_point});
                 }
                 if record_trace {
                   let trace_len = traces[batch_idx].actions.len();
@@ -531,7 +535,7 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
                   } else {
                     if let Some(ref mut trace_batch) = trace_batch {
                       trace_batch.traj_traces[batch_idx]
-                        .rollout_traj.actions.push(Action::Place{point: sim_point});
+                        .rollout_trace.actions.push(Action::Place{point: sim_point});
                     }
                     if record_trace {
                       let trace_len = traces[batch_idx].actions.len();
@@ -569,7 +573,7 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
         if !made_move {
           if let Some(ref mut trace_batch) = trace_batch {
             trace_batch.traj_traces[batch_idx]
-              .rollout_traj.actions.push(Action::Pass);
+              .rollout_trace.actions.push(Action::Pass);
           }
           rollout_trajs[batch_idx].sim_state.try_action(sim_turn, Action::Pass);
           rollout_trajs[batch_idx].sim_state.commit();

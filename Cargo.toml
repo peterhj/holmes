@@ -141,6 +141,10 @@ path = "tools/new-train-13layer384-19x19x32.rs"
 name = "new-train-13layer384multi3-19x19x32"
 path = "tools/new-train-13layer384multi3-19x19x32.rs"
 
+[[bin]]
+name = "new-train-value-13layer384multi3-19x19x32"
+path = "tools/new-train-value-13layer384multi3-19x19x32.rs"
+
 #[[bin]]
 #name = "policygrad-balance"
 #path = "tools/policygrad-balance.rs"

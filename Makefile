@@ -1,5 +1,5 @@
 .PHONY: all debug clean test \
-	test-omega test-txnstate
+	test-bfilter test-omega test-txnstate
 
 all:
 	cargo build --release
@@ -10,7 +10,9 @@ debug:
 clean:
 	cargo clean
 
-test: test-omega test-txnstate
+test: test-bfilter test-omega test-txnstate
+test-bfilter:
+	cargo test --release --test bfilter -- --nocapture
 test-omega:
 	cargo test --release --test omega -- --nocapture
 test-txnstate:

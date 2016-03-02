@@ -50,6 +50,7 @@ pub mod pg;
 pub mod random;
 pub mod search;
 pub mod sgf;
+pub mod stats;
 //pub mod table;
 pub mod txnstate;
 pub mod util;
