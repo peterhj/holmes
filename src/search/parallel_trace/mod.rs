@@ -22,28 +22,27 @@ pub struct SearchTrace {
   pub tree_cfg:     Option<TreePolicyConfig>,
   pub root_state:   Option<TxnState<TxnStateNodeData>>,
   pub root_trace:   Option<TreeExpansionTrace>,
+  pub root_value:   Option<f32>,
   pub batches:      Vec<SearchTraceBatch>,
 }
 
 impl SearchTrace {
   pub fn new() -> SearchTrace {
     SearchTrace{
-      tree_cfg:     None, //tree_cfg,
+      tree_cfg:     None,
       root_state:   None,
       root_trace:   None,
+      root_value:   None,
       batches:      vec![],
     }
   }
 
   //pub fn reset(&mut self, tree_cfg: TreePolicyConfig, root_state: TxnState<TxnStateNodeData>) {
-  pub fn reset(&mut self, tree_cfg: TreePolicyConfig, root_node: &Node) {
+  pub fn start_instance(&mut self, tree_cfg: TreePolicyConfig, root_node: &Node) {
     self.tree_cfg = Some(tree_cfg);
     self.root_state = Some(root_node.state.clone());
     self.root_trace = Some(TreeExpansionTrace::new(root_node));
-    /*self.root_trace = Some(TreeExpansionTrace{
-      valid_actions:  root_node.valid_moves.iter().map(|&pt| Action::Place{point: pt}).collect(),
-      prior_values:   root_node.values.prior_values.clone(),
-    });*/
+    self.root_value = None;
     self.batches.clear();
   }
 
@@ -65,6 +64,10 @@ impl SearchTrace {
       batch_size:   batch_size,
       traj_traces:  traj_traces,
     });
+  }
+
+  pub fn update_instance(&mut self, root_node: &Node) {
+    self.root_value = Some(root_node.get_argmax_value().unwrap_or((Action::Pass, 0.5)).1);
   }
 }
 
@@ -232,7 +235,7 @@ pub trait TreeBatchWorker {
   //fn with_prior_policy<V>(&mut self, mut f: &mut FnMut(&mut PriorPolicy) -> V) -> V;
   fn with_search_worker<F, V>(&mut self, mut f: F) -> V where F: FnOnce(&mut SearchPolicyWorker) -> V;
   fn with_prior_policy<F, V>(&mut self, mut f: F) -> V where F: FnOnce(&mut PriorPolicy) -> V;
-  fn start_instance(&mut self, tree_cfg: TreePolicyConfig);
+  fn start_instance(&mut self, search_trace: &SearchTrace);
   fn update_batch(&mut self, root_node: Arc<RwLock<ReconNode>>, trace_batch: &SearchTraceBatch);
   fn update_instance(&mut self, root_node: Arc<RwLock<ReconNode>>);
 }
@@ -309,7 +312,8 @@ where TreeWork: TreeBatchWorker,
     self.shared_tree.try_reset(search_trace.root_state.as_ref().unwrap().clone());
     self.worker_data.sync();
 
-    self.tree_batch_worker.start_instance(search_trace.tree_cfg.as_ref().unwrap().clone());
+    //self.tree_batch_worker.start_instance(search_trace.tree_cfg.as_ref().unwrap().clone());
+    self.tree_batch_worker.start_instance(search_trace);
 
     let root_node = {
       let root_node = self.shared_tree.root_node.lock().unwrap();

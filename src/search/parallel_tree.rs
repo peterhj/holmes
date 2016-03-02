@@ -6,6 +6,7 @@ use search::parallel_policies::{
   SearchPolicyWorkerBuilder, SearchPolicyWorker,
   PriorPolicy, TreePolicy,
   RolloutPolicyBuilder, RolloutMode, RolloutLeafs, RolloutPolicy,
+  GradSyncMode,
 };
 use search::parallel_trace::{
   SearchTrace, SearchTrajTrace,
@@ -15,6 +16,8 @@ use search::parallel_trace::{
 };
 use search::parallel_trace::omega::{
   OmegaTreeBatchWorker,
+  OmegaWorkerMemory,
+  ObjectLevelObjective,
   MetaLevelWorker,
 };
 use txnstate::{
@@ -627,6 +630,19 @@ impl Node {
 
   pub fn is_terminal(&self) -> bool {
     self.valid_moves.is_empty()
+  }
+
+  pub fn get_argmax_value(&self) -> Option<(Action, f32)> {
+    let num_trials = self.values.num_trials_float();
+    if let Some(argmax_j) = array_argmax(&num_trials) {
+      let argmax_point = self.valid_moves[argmax_j];
+      let s_j = self.values.num_succs[argmax_j].load(Ordering::Acquire);
+      let n_j = num_trials[argmax_j];
+      let value = s_j as f32 / n_j;
+      Some((Action::Place{point: argmax_point}, value))
+    } else {
+      None
+    }
   }
 
   pub fn update_visits(&self, horizon_cfg: HorizonConfig, score: f32) {
@@ -1350,7 +1366,9 @@ pub enum SearchWorkerCommand {
   TrainMetaLevelTD0Gradient{
     t: usize,
   },
-  TrainMetaLevelTD0Descent,
+  TrainMetaLevelTD0Descent{
+    step_size:  f32,
+  },
   /*ResetEval{
     cfg:            SearchWorkerConfig,
     shared_data:    EvalSharedData,
@@ -1443,10 +1461,12 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
     let shared_traces_count = Arc::new(AtomicUsize::new(0));*/
 
     let recon_worker_builder = ParallelSearchReconWorkerBuilder::new(num_workers);
+    let omega_memory = Arc::new(RwLock::new(OmegaWorkerMemory::new()));
 
     for tid in 0 .. num_workers {
       let worker_builder = worker_builder.clone();
       let recon_worker_builder = recon_worker_builder.clone();
+      let omega_memory = omega_memory.clone();
 
       let barrier = barrier.clone();
       let out_barrier = out_barrier.clone();
@@ -1463,9 +1483,10 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
       pool.execute(move || {
         let mut rng = Xorshiftplus128Rng::new(&mut thread_rng());
         let worker = Rc::new(RefCell::new(worker_builder.into_worker(tid, worker_batch_capacity)));
-        let omega_worker = OmegaTreeBatchWorker::new(worker.clone());
+        let omega_worker = OmegaTreeBatchWorker::new(omega_memory.clone(), worker.clone());
         let recon_worker = Rc::new(RefCell::new(recon_worker_builder.into_worker(tid, omega_worker, ())));
-        let meta_worker = MetaLevelWorker::new(recon_worker.clone());
+        //let meta_worker = MetaLevelWorker::new(recon_worker.clone());
+        let omega_memory = omega_memory;
 
         let barrier = barrier;
         let in_rx = in_rx;
@@ -1544,11 +1565,6 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
                 inner.root_node.as_ref().unwrap().clone()
               };
 
-              if record_search {
-                let root_node = root_node.read().unwrap();
-                search_trace.reset(tree_cfg, &*root_node);
-              }
-
               let mut explore_elapsed_ms = 0;
               let mut rollout_elapsed_ms = 0;
               /*let mut worker_mean_score: f32 = 0.0;
@@ -1556,6 +1572,11 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
               for p in 0 .. Board::SIZE {
                 mc_live_counts[0][p] = 0;
                 mc_live_counts[1][p] = 0;
+              }
+
+              if record_search {
+                let root_node = root_node.read().unwrap();
+                search_trace.start_instance(tree_cfg, &*root_node);
               }
 
               // FIXME(20151222): should share stats between workers.
@@ -1663,6 +1684,11 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
                 rollout_elapsed_ms += (end_time - mid_time).num_milliseconds() as usize;
               }
 
+              if record_search {
+                let root_node = root_node.read().unwrap();
+                search_trace.update_instance(&*root_node);
+              }
+
               let shared_mc_live_counts = {
                 let mut inner = tree.inner.lock().unwrap();
 
@@ -1682,12 +1708,41 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
               fence(Ordering::AcqRel);
             }
 
-            SearchWorkerCommand::TrainMetaLevelTD0Gradient{..} => {
-              // FIXME(20160301)
-              unimplemented!();
+            SearchWorkerCommand::TrainMetaLevelTD0Gradient{t} => {
+              if tid == 0 {
+                let mut omega_memory = omega_memory.write().unwrap();
+                if t == 0 {
+                  omega_memory.reset();
+                }
+                omega_memory.set_state(ObjectLevelObjective::TD0L2Loss, t, search_trace.root_value.unwrap());
+              }
+
+              let mut recon_worker = recon_worker.borrow_mut();
+              recon_worker.reconstruct_trace(&search_trace);
+              if tid == 0 {
+                let mut root_node = recon_worker.shared_tree.root_node.lock().unwrap();
+                let root_value = root_node.as_ref().unwrap().read().unwrap().get_value();
+                assert_eq!(root_value, omega_memory.read().unwrap().inner_values[t]);
+              }
+
+              out_barrier.wait();
+              fence(Ordering::AcqRel);
             }
 
-            SearchWorkerCommand::TrainMetaLevelTD0Descent => {
+            SearchWorkerCommand::TrainMetaLevelTD0Descent{step_size} => {
+              if tid == 0 {
+                let omega_memory = omega_memory.read().unwrap();
+                let step_scale = omega_memory.inner_values[0] - omega_memory.inner_values[1];
+                let mut worker = worker.borrow_mut();
+                let mut prior_policy = worker.diff_prior_policy();
+                prior_policy.sync_gradients(GradSyncMode::Sum);
+                prior_policy.descend_params(step_scale * step_size);
+                prior_policy.reset_gradients();
+              }
+
+              out_barrier.wait();
+              fence(Ordering::AcqRel);
+
               // FIXME(20160301)
               unimplemented!();
             }

@@ -304,7 +304,9 @@ impl OmegaCrossGFactorIntegral {
 
 pub struct OmegaTreeBatchWorker<W> where W: SearchPolicyWorker {
   tree_cfg:     Option<TreePolicyConfig>,
-  batch_scale:  f32,
+  memory:       Arc<RwLock<OmegaWorkerMemory>>,
+  //inner_value:  f32,
+  //batch_scale:  f32,
   shared_data:          Rc<RefCell<OmegaNodeSharedData>>,
   likelihood_int:       OmegaLikelihoodIntegral,
   diag_g_factor_int:    OmegaDiagonalGFactorIntegral,
@@ -316,11 +318,13 @@ pub struct OmegaTreeBatchWorker<W> where W: SearchPolicyWorker {
 //impl OmegaTreeBatchWorker {
 impl<W> OmegaTreeBatchWorker<W> where W: SearchPolicyWorker {
   //pub fn new(tree_cfg: TreePolicyConfig, /*objective: ObjectLevelObjective,*/ search_worker: Rc<RefCell<ConvnetPolicyWorker>>) -> OmegaTreeBatchWorker {
-  pub fn new(search_worker: Rc<RefCell<W>>) -> OmegaTreeBatchWorker<W> {
+  pub fn new(memory: Arc<RwLock<OmegaWorkerMemory>>, search_worker: Rc<RefCell<W>>) -> OmegaTreeBatchWorker<W> {
     let shared_data = Rc::new(RefCell::new(OmegaNodeSharedData::new()));
     OmegaTreeBatchWorker{
       tree_cfg:     None, //tree_cfg,
-      batch_scale:  1.0,
+      memory:       memory,
+      //inner_value:  0.0,
+      //batch_scale:  1.0,
       likelihood_int:       OmegaLikelihoodIntegral::new(shared_data.clone()),
       diag_g_factor_int:    OmegaDiagonalGFactorIntegral::new(shared_data.clone()),
       cross_g_factor_int:   OmegaCrossGFactorIntegral::new(shared_data.clone()),
@@ -330,6 +334,12 @@ impl<W> OmegaTreeBatchWorker<W> where W: SearchPolicyWorker {
       //obj_label:    None,
     }
   }
+
+  /*fn reset(&mut self, objective: ObjectLevelObjective, search_trace: &SearchTrace) {
+    self.tree_cfg = None;
+    // FIXME(20160301): inner value depends on the current objective.
+    self.inner_value = search_trace.root_value.unwrap();
+  }*/
 }
 
 //impl TreeBatchWorker for OmegaTreeBatchWorker {
@@ -344,8 +354,11 @@ impl<W> TreeBatchWorker for OmegaTreeBatchWorker<W> where W: SearchPolicyWorker 
     f(worker.prior_policy())
   }
 
-  fn start_instance(&mut self, tree_cfg: TreePolicyConfig) {
-    self.tree_cfg = Some(tree_cfg);
+  //fn start_instance(&mut self, tree_cfg: TreePolicyConfig) {
+  fn start_instance(&mut self, search_trace: &SearchTrace) {
+    self.tree_cfg = Some(search_trace.tree_cfg.unwrap());
+    // FIXME(20160301): inner value depends on the current objective.
+    //self.inner_value = search_trace.root_value.unwrap();
   }
 
   fn update_batch(&mut self, root_node: Arc<RwLock<ReconNode>>, trace_batch: &SearchTraceBatch) {
@@ -368,6 +381,7 @@ impl<W> TreeBatchWorker for OmegaTreeBatchWorker<W> where W: SearchPolicyWorker 
           let mut prior_policy = worker.diff_prior_policy();
 
           assert!(decision.horizon <= node.valid_actions.len());
+          let inner_value = self.memory.read().unwrap().read_inner_value();
           let likelihood = self.likelihood_int.calculate_likelihood();
           for (j, &action_j) in node.valid_actions.iter().take(decision.horizon).enumerate() {
             let g_j = if decision.action == action_j {
@@ -377,7 +391,8 @@ impl<W> TreeBatchWorker for OmegaTreeBatchWorker<W> where W: SearchPolicyWorker 
             };
             node.state.get_data().features.extract_relative_features(turn, prior_policy.expose_input_buffer(j));
             prior_policy.preload_action_label(j, action_j);
-            prior_policy.preload_loss_weight(j, self.batch_scale * g_j / likelihood);
+            // XXX(20160301): The inner value includes the baseline.
+            prior_policy.preload_loss_weight(j, g_j * inner_value / likelihood);
           }
 
           prior_policy.load_inputs(decision.horizon);
@@ -392,28 +407,50 @@ impl<W> TreeBatchWorker for OmegaTreeBatchWorker<W> where W: SearchPolicyWorker 
   }
 
   fn update_instance(&mut self, root_node: Arc<RwLock<ReconNode>>) {
-    /*let mut worker = self.search_worker.borrow_mut();
-    worker.diff_prior_policy().sync_gradients(GradSyncMode::Sum);
-    worker.diff_prior_policy().reset_gradients();
+  }
+}
 
-    match (self.objective, self.obj_label) {
-      (ObjectLevelObjective::SupervisedKLLoss, Some(ObjectLevelLabel::Action{action})) => {
-        // FIXME(20160225)
-        unimplemented!();
+pub struct OmegaWorkerMemory {
+  pub inner_values: Vec<f32>,
+
+  t: usize,
+}
+
+impl OmegaWorkerMemory {
+  pub fn new() -> OmegaWorkerMemory {
+    OmegaWorkerMemory{
+      inner_values: vec![0.0, 0.0],
+      t: 0,
+    }
+  }
+
+  pub fn reset(&mut self) {
+    self.inner_values.clear();
+  }
+
+  pub fn set_state(&mut self, objective: ObjectLevelObjective, t: usize, bare_inner_value: f32) {
+    // FIXME(20160301): currently specialized for TD0 objective.
+    match t {
+      0 => {
+        self.inner_values[t] = bare_inner_value;
       }
-      (ObjectLevelObjective::TemporalDiff0L2Loss, _) => {
-        // FIXME(20160301)
-        unimplemented!();
+      1 => {
+        self.inner_values[t] = 1.0 - bare_inner_value;
       }
-      _ => unimplemented!(),
-    }*/
+      _ => unreachable!(),
+    }
+    self.t = t;
+  }
+
+  pub fn read_inner_value(&self) -> f32 {
+    self.inner_values[self.t]
   }
 }
 
 #[derive(Clone, Copy)]
 pub enum ObjectLevelObjective {
   SupervisedKLLoss,
-  TemporalDiff0L2Loss,
+  TD0L2Loss,
 }
 
 //#[derive(Clone)]
@@ -467,7 +504,7 @@ impl<W> MetaLevelWorker<W> where W: SearchPolicyWorker {
         self.traces.clear();
         self.traces.push(trace);
       }
-      (Some(ObjectLevelObjective::TemporalDiff0L2Loss), ObjectLevelInput::PairTraces{trace1, trace2}) => {
+      (Some(ObjectLevelObjective::TD0L2Loss), ObjectLevelInput::PairTraces{trace1, trace2}) => {
         self.traces.clear();
         self.traces.push(trace1);
         self.traces.push(trace2);
@@ -481,7 +518,7 @@ impl<W> MetaLevelWorker<W> where W: SearchPolicyWorker {
       (Some(ObjectLevelObjective::SupervisedKLLoss), Some(ObjectLevelLabel::Action{action})) => {
         self.obj_label = label;
       }
-      (Some(ObjectLevelObjective::TemporalDiff0L2Loss), None) => {
+      (Some(ObjectLevelObjective::TD0L2Loss), None) => {
         self.obj_label = None;
       }
       _ => unimplemented!(),
@@ -494,7 +531,7 @@ impl<W> MetaLevelWorker<W> where W: SearchPolicyWorker {
         // FIXME(20160301)
         unimplemented!();
       }
-      Some(ObjectLevelObjective::TemporalDiff0L2Loss) => {
+      Some(ObjectLevelObjective::TD0L2Loss) => {
         let &mut MetaLevelWorker{
           step_size,
           ref traces,
@@ -504,27 +541,23 @@ impl<W> MetaLevelWorker<W> where W: SearchPolicyWorker {
 
         let mut expected_values = [0.0, 0.0];
 
-        // XXX: Flip signs for the first state.
-        recon_worker.with_tree_worker(|tree_worker| {
-          tree_worker.batch_scale = -1.0;
-        });
+        // FIXME(20160301): this whole idea is likely misguided.
+        // There is always a single working SearchTrace, which we do not want to
+        // clone. So this data structure should process one tree/trace at a time.
+
         recon_worker.reconstruct_trace(&traces[0]);
         {
           let mut root_node = recon_worker.shared_tree.root_node.lock().unwrap();
           expected_values[0] = root_node.as_ref().unwrap().read().unwrap().get_value();
         }
 
-        // XXX: Flip the signs back for the second state.
-        recon_worker.with_tree_worker(|tree_worker| {
-          tree_worker.batch_scale = 1.0;
-        });
         recon_worker.reconstruct_trace(&traces[1]);
         {
           let mut root_node = recon_worker.shared_tree.root_node.lock().unwrap();
           expected_values[1] = root_node.as_ref().unwrap().read().unwrap().get_value();
         }
 
-        let step_scale = expected_values[1] - expected_values[0];
+        let step_scale = expected_values[0] + expected_values[1] - 1.0;
 
         recon_worker.with_tree_worker(|tree_worker| {
           tree_worker.with_search_worker(|search_worker| {
@@ -550,6 +583,8 @@ pub struct MetaLevelSearch;
 impl MetaLevelSearch {
   pub fn join<W>(&self,
       objective:    ObjectLevelObjective,
+      step_size:    f32,
+      baseline:     f32,
       search_cfg:   MonteCarloSearchConfig,
       tree_cfg:     TreePolicyConfig,
       server:       &ParallelMonteCarloSearchServer<W>,
@@ -572,7 +607,7 @@ impl MetaLevelSearch {
     };
 
     match (objective, input) {
-      (ObjectLevelObjective::TemporalDiff0L2Loss, ObjectLevelInput::PairStates{state1, state2}) => {
+      (ObjectLevelObjective::TD0L2Loss, ObjectLevelInput::PairStates{state1, state2}) => {
         // FIXME(20160301): need to search and trace twice.
         for (t, state) in [state1, state2].into_iter().enumerate() {
           let shared_tree = SharedTree::new(tree_cfg);
@@ -593,7 +628,7 @@ impl MetaLevelSearch {
         }
 
         for tid in 0 .. num_workers {
-          server.enqueue(tid, SearchWorkerCommand::TrainMetaLevelTD0Descent);
+          server.enqueue(tid, SearchWorkerCommand::TrainMetaLevelTD0Descent{step_size: step_size});
         }
         server.join();
 
