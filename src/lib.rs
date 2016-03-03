@@ -32,6 +32,7 @@ pub mod agents;
 pub mod array_util;
 pub mod board;
 //pub mod book;
+pub mod client;
 pub mod contains;
 pub mod convnet;
 pub mod convnet_new;

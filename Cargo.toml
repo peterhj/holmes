@@ -257,6 +257,10 @@ path = "tools/holmes-convnet-gtp.rs"
 name = "holmes-search-gtp"
 path = "tools/holmes-search-gtp.rs"
 
+[[bin]]
+name = "holmes-nngs"
+path = "tools/holmes-nngs.rs"
+
 [dependencies]
 bit-set = "*"
 bit-vec = "*"
