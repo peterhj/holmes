@@ -1,4 +1,5 @@
 use board::{Stone, Action, Point};
+use client::agent::{AsyncAgent, AgentMsg};
 use gtp_board::{Coord};
 
 use byteorder::{ReadBytesExt, WriteBytesExt};
@@ -15,8 +16,8 @@ use std::thread::{JoinHandle, sleep_ms, spawn};
 pub struct NngsServerConfig {
   pub host:     String,
   pub port:     u16,
-  pub login:    Vec<u8>,
-  pub password: Option<Vec<u8>>,
+  pub login:    String,
+  pub password: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -27,50 +28,7 @@ pub struct NngsMatchConfig {
   pub byoyomi:  i32,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub enum AgentMsg {
-  StartMatch{our_stone: Stone, board_size: i32, main_time_secs: i32, byoyomi_time_secs: i32},
-  CheckTime,
-  RecvTime,
-  SubmitAction{turn: Stone, action: Action},
-  RecvAction{move_number: i32, turn: Stone, action: Action},
-}
-
-pub trait OneShotAgent {
-  fn spawn_runloop(agent_in_rx: Receiver<AgentMsg>, agent_out_tx: Sender<AgentMsg>) -> JoinHandle<()>;
-}
-
-pub struct HelloOneShotAgent;
-
-impl OneShotAgent for HelloOneShotAgent {
-  fn spawn_runloop(agent_in_rx: Receiver<AgentMsg>, agent_out_tx: Sender<AgentMsg>) -> JoinHandle<()> {
-    spawn(move || {
-      let mut started_match = false;
-      let mut match_stone = None;
-      loop {
-        match agent_in_rx.recv() {
-          Ok(AgentMsg::StartMatch{our_stone, ..}) => {
-            started_match = true;
-            match_stone = Some(our_stone);
-          }
-          Ok(AgentMsg::RecvTime) => {
-            assert!(started_match);
-          }
-          Ok(AgentMsg::RecvAction{..}) => {
-            assert!(started_match);
-            agent_out_tx.send(AgentMsg::SubmitAction{
-              turn:     match_stone.unwrap(),
-              action:   Action::Pass,
-            }).unwrap();
-          }
-          _ => {}
-        }
-      }
-    })
-  }
-}
-
-pub struct NngsOneShotClient<A> where A: OneShotAgent {
+pub struct NngsOneShotClient<A> where A: AsyncAgent {
   server_cfg:   NngsServerConfig,
   match_cfg:    Option<NngsMatchConfig>,
   barrier:      Arc<Barrier>,
@@ -78,9 +36,6 @@ pub struct NngsOneShotClient<A> where A: OneShotAgent {
   bridge:       JoinHandle<()>,
   reader:       JoinHandle<()>,
   writer:       JoinHandle<()>,
-  //reader:       BufReader<TcpStream>,
-  //writer:       TcpStream,
-  //_history:     Vec<Vec<u8>>,
   _marker:      PhantomData<A>,
 }
 
@@ -102,13 +57,13 @@ enum LoProtocol {
   GameCleanupPrompt,    // 1 7
   GenericInfo{line: Vec<u8>},   // 9
   MoveInfo{line: Vec<u8>},      // 15
-  ObserveInfo,          // 16
-  ScoreInfo,            // 20
-  ShoutInfo,            // 21
-  GameInfo,             // 22
+  ObserveInfo{line: Vec<u8>},   // 16
+  ScoreInfo{line: Vec<u8>},     // 20
+  ShoutInfo{line: Vec<u8>},     // 21
+  GameInfo{line: Vec<u8>},      // 22
 }
 
-impl<A> NngsOneShotClient<A> where A: OneShotAgent {
+impl<A> NngsOneShotClient<A> where A: AsyncAgent {
   pub fn new(server_cfg: NngsServerConfig, match_cfg: Option<NngsMatchConfig>) -> NngsOneShotClient<A> {
     let stream = match TcpStream::connect((&server_cfg.host as &str, server_cfg.port)) {
       Ok(stream) => stream,
@@ -118,23 +73,22 @@ impl<A> NngsOneShotClient<A> where A: OneShotAgent {
       Ok(stream) => stream,
       Err(_) => panic!("failed to clone stream"),
     });
-    let barrier = Arc::new(Barrier::new(2));
+    let barrier = Arc::new(Barrier::new(4));
     let (agent_in_tx, agent_in_rx) = channel();
     let (agent_out_tx, agent_out_rx) = channel();
     let (writer_tx, writer_rx) = channel();
 
-    let agent_thr = A::spawn_runloop(agent_in_rx, agent_out_tx);
+    let agent_thr = A::spawn_runloop(barrier.clone(), agent_in_rx, agent_out_tx);
 
     let bridge_thr = {
+      let barrier = barrier.clone();
       let agent_out_rx = agent_out_rx;
       let writer_tx = writer_tx.clone();
       spawn(move || {
         loop {
           match agent_out_rx.recv() {
             Ok(AgentMsg::CheckTime) => {
-              // FIXME(20160307)
               writer_tx.send(InternalMsg::WriteCmd{cmd: b"time".to_vec()}).unwrap();
-              unimplemented!();
             }
             Ok(AgentMsg::SubmitAction{turn, action}) => {
               let cmd = match action {
@@ -147,24 +101,27 @@ impl<A> NngsOneShotClient<A> where A: OneShotAgent {
               };
               writer_tx.send(InternalMsg::WriteCmd{cmd: cmd}).unwrap();
             }
-            Ok(_) => unreachable!(),
+            Ok(_) => {}
             Err(e) => {
-              println!("WARNING: writer failed to recv internal msg: {:?}", e);
+              //println!("WARNING: writer failed to recv internal msg: {:?}", e);
+              break;
             }
           }
-          sleep_ms(200);
+          sleep_ms(100);
         }
+        barrier.wait();
       })
     };
 
     let reader_thr = {
-      //let barrier = barrier.clone();
+      let barrier = barrier.clone();
       let agent_in_tx = agent_in_tx;
       let writer_tx = writer_tx;
       let mut reader = reader;
       spawn(move || {
         let mut history: Vec<LoProtocol> = Vec::with_capacity(1024);
         let mut prev_idx: Option<usize> = None;
+        let mut recently_finished_match = false;
         let mut idx: usize = 0;
         loop {
           let mut buf = Vec::with_capacity(160);
@@ -172,8 +129,19 @@ impl<A> NngsOneShotClient<A> where A: OneShotAgent {
             Ok(_) => {}
             Err(e) => {
               // FIXME(20160307): gracefully shutdown.
+              break;
             }
           }
+          if buf.is_empty() {
+            break;
+          }
+          print!("DEBUG: server: {}", String::from_utf8_lossy(&buf));
+          /*{
+            let s = String::from_utf8_lossy(&buf);
+            if !s.is_empty() {
+              print!("DEBUG: server: {}", s);
+            }
+          }*/
 
           if buf.len() >= 2 && buf[0] == b'1' && buf[1] == b' ' {
             if buf.len() >= 3 && buf[2] == b'5' {
@@ -225,7 +193,12 @@ impl<A> NngsOneShotClient<A> where A: OneShotAgent {
                 }
               }
 
-              if is_match_request {
+              if is_resigned || recently_finished_match {
+                agent_in_tx.send(AgentMsg::FinishMatch).unwrap();
+                //writer_tx.send(InternalMsg::WriteCmd{cmd: b"quit".to_vec()}).unwrap();
+                writer_tx.send(InternalMsg::Quit).unwrap();
+
+              } else if is_match_request {
                 // Send match details to agent channel.
                 agent_in_tx.send(AgentMsg::StartMatch{
                   our_stone:    match_our_stone.unwrap(),
@@ -235,9 +208,6 @@ impl<A> NngsOneShotClient<A> where A: OneShotAgent {
                 }).unwrap();
                 // Auto-accept match request.
                 writer_tx.send(InternalMsg::WriteCmd{cmd: match_cmd.unwrap()}).unwrap();
-
-              } else if is_resigned {
-                writer_tx.send(InternalMsg::WriteCmd{cmd: b"quit".to_vec()}).unwrap();
               }
 
             } else if buf.len() >= 3 && buf[2] == b'6' {
@@ -290,8 +260,10 @@ impl<A> NngsOneShotClient<A> where A: OneShotAgent {
             } else if buf.len() >= 3 && buf[2] == b'7' {
               history.push(LoProtocol::GameCleanupPrompt);
 
-              writer_tx.send(InternalMsg::WriteCmd{cmd: b"done".to_vec()}).unwrap();
-              writer_tx.send(InternalMsg::WriteCmd{cmd: b"quit".to_vec()}).unwrap();
+              if !recently_finished_match {
+                recently_finished_match = true;
+                writer_tx.send(InternalMsg::WriteCmd{cmd: b"done".to_vec()}).unwrap();
+              }
 
             } else {
               history.push(LoProtocol::UnknownPrompt);
@@ -301,29 +273,34 @@ impl<A> NngsOneShotClient<A> where A: OneShotAgent {
             history.push(LoProtocol::GenericInfo{line: buf});
           } else if buf.len() >= 3 && buf[0] == b'1' && buf[1] == b'5' && buf[2] == b' ' {
             history.push(LoProtocol::MoveInfo{line: buf});
+          } else if buf.len() >= 3 && buf[0] == b'1' && buf[1] == b'6' && buf[2] == b' ' {
+            history.push(LoProtocol::ObserveInfo{line: buf});
           } else if buf.len() >= 3 && buf[0] == b'2' && buf[1] == b'0' && buf[2] == b' ' {
+            history.push(LoProtocol::ScoreInfo{line: buf});
           } else if buf.len() >= 3 && buf[0] == b'2' && buf[1] == b'1' && buf[2] == b' ' {
+            history.push(LoProtocol::ShoutInfo{line: buf});
           } else if buf.len() >= 3 && buf[0] == b'2' && buf[1] == b'2' && buf[2] == b' ' {
+            history.push(LoProtocol::GameInfo{line: buf});
           } else {
             history.push(LoProtocol::Line{line: buf});
           }
           idx += 1;
-          sleep_ms(200);
         }
+        barrier.wait();
       })
     };
 
     let writer_thr = {
       let server_cfg = server_cfg.clone();
       let match_cfg = match_cfg.clone();
-      //let barrier = barrier.clone();
+      let barrier = barrier.clone();
       let writer_rx = writer_rx;
       let mut writer = stream;
       spawn(move || {
         // Enter login details.
-        submit(&mut writer, &server_cfg.login);
+        submit(&mut writer, server_cfg.login.as_bytes());
         if let Some(ref password) = server_cfg.password {
-          submit(&mut writer, password);
+          submit(&mut writer, password.as_bytes());
         }
 
         // Set modes.
@@ -334,18 +311,20 @@ impl<A> NngsOneShotClient<A> where A: OneShotAgent {
         loop {
           match writer_rx.recv() {
             Ok(InternalMsg::Quit) => {
+              submit(&mut writer, b"quit");
               break;
             }
             Ok(InternalMsg::WriteCmd{ref cmd}) => {
               submit(&mut writer, cmd);
             }
             Err(e) => {
-              println!("WARNING: writer failed to recv internal msg: {:?}", e);
+              //println!("WARNING: writer failed to recv internal msg: {:?}", e);
+              break;
             }
           }
         }
 
-        //barrier.wait();
+        barrier.wait();
       })
     };
 
@@ -357,17 +336,16 @@ impl<A> NngsOneShotClient<A> where A: OneShotAgent {
       bridge:   bridge_thr,
       reader:   reader_thr,
       writer:   writer_thr,
-      //_history: Vec::with_capacity(500),
       _marker:  PhantomData,
     }
   }
 
   pub fn run_loop(&mut self) {
-    loop {
-      sleep_ms(200);
-    }
+    self.barrier.wait();
+  }
 
-    /*let server_cfg = self.server_cfg.clone();
+  /*pub fn run_loop(&mut self) {
+    let server_cfg = self.server_cfg.clone();
     let match_cfg = self.match_cfg.clone();
     self.submit(&server_cfg.login);
     if let Some(ref password) = server_cfg.password {
@@ -375,10 +353,10 @@ impl<A> NngsOneShotClient<A> where A: OneShotAgent {
     }
     self.submit(b"set client TRUE");
     self.submit(b"set verbose FALSE");
-    self.read_to_first_prompt();*/
+    self.read_to_first_prompt();
   }
 
-  /*fn submit(&mut self, msg: &[u8]) {
+  fn submit(&mut self, msg: &[u8]) {
     self.writer.write_all(msg).unwrap();
     self.writer.write_u8(b'\n').unwrap();
   }
@@ -402,7 +380,7 @@ impl<A> NngsOneShotClient<A> where A: OneShotAgent {
   }*/
 }
 
-pub struct NngsConfig {
+/*pub struct NngsConfig {
   pub host:     String,
   pub port:     u16,
   pub login:    Vec<u8>,
@@ -526,4 +504,4 @@ impl NngsClient {
     self.writer.write_all(msg).unwrap();
     self.writer.write_u8(b'\n').unwrap();
   }
-}
+}*/

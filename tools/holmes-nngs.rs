@@ -1,7 +1,8 @@
 extern crate holmes;
 
 //use holmes::client::nngs::{NngsClient, NngsConfig};
-use holmes::client::nngs::{NngsOneShotClient, NngsServerConfig, NngsMatchConfig, HelloOneShotAgent};
+use holmes::client::agent::{HelloAsyncAgent};
+use holmes::client::nngs::{NngsOneShotClient, NngsServerConfig, NngsMatchConfig};
 
 fn main() {
   /*let config = NngsConfig{
@@ -14,13 +15,13 @@ fn main() {
   let server_cfg = NngsServerConfig{
     host:     "jsb.cs.uec.ac.jp".to_string(),
     port:     9696,
-    login:    b"guest2".to_vec(),
+    login:    "guest2".to_string(),
     password: None,
   };
 
   /*let mut client = NngsOneShotClient::new(server_cfg, None);
   client.run_loop();*/
 
-  let mut client = NngsOneShotClient::<HelloOneShotAgent>::new(server_cfg, None);
+  let mut client = NngsOneShotClient::<HelloAsyncAgent>::new(server_cfg, None);
   client.run_loop();
 }
