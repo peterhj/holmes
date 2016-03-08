@@ -11,6 +11,7 @@ use txnstate::extras::{TxnStateNodeData};
 use worker::{WorkerSharedData};
 
 //use std::cell::{RefCell};
+use std::cmp::{max, min};
 //use std::rc::{Rc};
 use std::sync::{Arc, Barrier, Mutex, RwLock};
 use std::sync::atomic::{AtomicUsize, Ordering, fence};
@@ -89,7 +90,7 @@ pub struct TreeTrajTrace {
   pub expansion:    Option<TreeExpansionTrace>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TreeDecisionTrace {
   pub action:       Action,
   pub action_rank:  usize,
@@ -106,7 +107,7 @@ impl TreeDecisionTrace {
   }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TreeExpansionTrace {
   pub valid_actions:    Vec<Action>,
   pub prior_values:     Vec<f32>,
@@ -212,15 +213,16 @@ impl ReconNode {
     }
   }
 
-  pub fn backup(&self, action: Action, score: f32) {
+  pub fn backup(&self, action: Action, action_rank: usize, score: f32) {
     self.visit_count.fetch_add(1, Ordering::AcqRel);
     if let Action::Place{point} = action {
-      let p = point.idx();
-      self.trial_counts[p].fetch_add(1, Ordering::AcqRel);
+      //let p = point.idx();
+      let j = action_rank;
+      self.trial_counts[j].fetch_add(1, Ordering::AcqRel);
       match translate_score_to_reward(self.state.current_turn(), score) {
         0 => {}
         1 => {
-          self.succ_counts[p].fetch_add(1, Ordering::AcqRel);
+          self.succ_counts[j].fetch_add(1, Ordering::AcqRel);
         }
         _ => { unreachable!(); }
       }
@@ -320,8 +322,16 @@ where TreeWork: TreeBatchWorker,
       root_node.as_ref().unwrap().clone()
     };
 
+    {
+      let mut root_node = root_node.write().unwrap();
+      let root_trace = search_trace.root_trace.as_ref().unwrap();
+      root_node.initialize(&root_trace.valid_actions, &root_trace.prior_values);
+    }
+    self.worker_data.sync();
+
     let num_batches = search_trace.batches.len();
     for batch in 0 .. num_batches {
+      //println!("DEBUG: reconstruct_trace: batch: {}/{}", batch, num_batches);
       let trace_batch = &search_trace.batches[batch];
 
       // Populate all the tree nodes for this batch.
@@ -332,20 +342,21 @@ where TreeWork: TreeBatchWorker,
         let mut terminated = false;
         for decision in traj_trace.tree_trace.decisions.iter() {
           assert!(!terminated);
-          let action_idx = decision.action.idx();
+          //let action_idx = decision.action.idx();
+          let j = decision.action_rank;
           let (turn, visit_count, has_child) = {
             let node = node.read().unwrap();
             (
               node.state.current_turn(),
               node.visit_count.load(Ordering::Acquire),
-              node.child_nodes.contains_key(&action_idx),
+              node.child_nodes.contains_key(&j),
             )
           };
           if visit_count < search_trace.tree_cfg.unwrap().visit_thresh {
             terminated = true;
           }
           let next_node = if has_child {
-            node.read().unwrap().child_nodes[action_idx].clone()
+            node.read().unwrap().child_nodes[j].clone()
           } else {
             let mut new_state = node.read().unwrap().state.clone();
             if new_state.try_action(turn, decision.action).is_err() {
@@ -358,10 +369,10 @@ where TreeWork: TreeBatchWorker,
             });*/
             let new_node = Arc::new(RwLock::new(ReconNode::new(new_state)));
             let mut node = node.write().unwrap();
-            if node.child_nodes.contains_key(&action_idx) {
-              node.child_nodes[action_idx].clone()
+            if node.child_nodes.contains_key(&j) {
+              node.child_nodes[j].clone()
             } else {
-              node.child_nodes.insert(action_idx, new_node.clone());
+              node.child_nodes.insert(j, new_node.clone());
               new_node
             }
           };
@@ -372,9 +383,11 @@ where TreeWork: TreeBatchWorker,
       for batch_idx in 0 .. trace_batch.batch_size {
         let traj_trace = &trace_batch.traj_traces[batch_idx];
         if let Some(ref expansion) = traj_trace.tree_trace.expansion {
-          let mut leaf_node = &mut leaf_nodes[batch_idx];
-          let mut leaf_node = leaf_node.write().unwrap();
+          let mut leaf_node = leaf_nodes[batch_idx].write().unwrap();
           leaf_node.initialize(&expansion.valid_actions, &expansion.prior_values);
+          //println!("DEBUG: initialized leaf node");
+          //println!("DEBUG: new leaf node valid actions: {:?}", leaf_node.valid_actions);
+          //println!("DEBUG: new leaf node prior values:  {:?}", leaf_node.prior_values);
         }
       }
       self.worker_data.sync();
@@ -400,21 +413,67 @@ where TreeWork: TreeBatchWorker,
 
         if rollout_trace.actions.len() >= 1 {
           let first_action = rollout_trace.actions[0];
-          leaf_nodes[batch_idx].read().unwrap().backup(first_action, score);
+          // FIXME(20160303): need action rank.
+          let leaf_node = leaf_nodes[batch_idx].read().unwrap();
+          let mut first_rank = None;
+          for j in 0 .. leaf_node.valid_actions.len() {
+            if first_action == leaf_node.valid_actions[j] {
+              first_rank = Some(j);
+              break;
+            }
+          }
+          //assert!(first_rank.is_some());
+          if first_rank.is_none() {
+            println!("WARNING: first rollout action not present in leaf node: {:?}", first_action);
+            println!("         leaf node actions: {:?}", leaf_node.valid_actions);
+            println!("         leaf node pvalues: {:?}", leaf_node.prior_values);
+            //panic!();
+          } else {
+            leaf_node.backup(first_action, first_rank.unwrap(), score);
+          }
         }
 
         let mut node = root_node.clone();
         for decision in tree_trace.decisions.iter() {
-          let action_idx = decision.action.idx();
+          //let action_idx = decision.action.idx();
+          let j = decision.action_rank;
           let next_node = {
             let node = node.read().unwrap();
-            node.backup(decision.action, score);
-            node.child_nodes[action_idx].clone()
+            node.backup(decision.action, j, score);
+            node.child_nodes[j].clone()
           };
           node = next_node;
         }
       }
       self.worker_data.sync();
+
+      {
+        let root = root_node.read().unwrap();
+        let mut top_stats = Vec::with_capacity(20);
+        for j in 0 .. min(20, root.prior_values.len()) {
+          top_stats.push((
+              root.prior_values[j],
+              root.succ_counts[j].load(Ordering::Acquire),
+              root.trial_counts[j].load(Ordering::Acquire),
+          ));
+        }
+        /*let mut bot_stats = Vec::with_capacity(5);
+        for j in max(5, root.prior_values.len())-5 .. root.prior_values.len() {
+          bot_stats.push((
+              root.prior_values[j],
+              root.succ_counts[j].load(Ordering::Acquire),
+              root.trial_counts[j].load(Ordering::Acquire),
+          ));
+        }*/
+        println!("DEBUG: recon: batch {}/{} visits: {} stats: {:?}",
+            batch, num_batches,
+            root.visit_count.load(Ordering::Acquire),
+            &top_stats,
+            //&bot_stats,
+            /*root.succ_counts[0].load(Ordering::Acquire),
+            root.trial_counts[0].load(Ordering::Acquire),*/
+        );
+      }
     }
 
     self.tree_batch_worker.update_instance(root_node.clone());

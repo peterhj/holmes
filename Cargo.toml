@@ -261,6 +261,10 @@ path = "tools/holmes-search-gtp.rs"
 name = "holmes-nngs"
 path = "tools/holmes-nngs.rs"
 
+[[bin]]
+name = "trace-meta"
+path = "tools/trace-meta.rs"
+
 [dependencies]
 bit-set = "*"
 bit-vec = "*"

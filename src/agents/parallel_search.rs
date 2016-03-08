@@ -48,11 +48,13 @@ impl ParallelMonteCarloSearchAgent {
   pub fn new(config: MonteCarloSearchConfig, tree_cfg: TreePolicyConfig, num_workers: Option<usize>) -> ParallelMonteCarloSearchAgent {
     println!("DEBUG: parallel search agent: search config: {:?}", config);
     println!("DEBUG: parallel search agent: tree policy config: {:?}", tree_cfg);
-    let batch_capacity = 256;
     let num_devices = CudaDevice::count().unwrap();
     let num_workers = num_workers.unwrap_or(num_devices);
     let num_workers = min(num_workers, num_devices);
-    let worker_batch_capacity = batch_capacity / num_workers;
+    //let batch_capacity = 256;
+    //let worker_batch_capacity = batch_capacity / num_workers;
+    //let worker_batch_capacity = 576;
+    let worker_batch_capacity = 256;
     ParallelMonteCarloSearchAgent{
       config:   config,
       tree_cfg: tree_cfg,
@@ -71,8 +73,8 @@ impl ParallelMonteCarloSearchAgent {
       tree:     None,
       rng:      Xorshiftplus128Rng::new(&mut thread_rng()),
       server:   ParallelMonteCarloSearchServer::new(
-          num_workers, worker_batch_capacity,
-          ConvnetPolicyWorkerBuilder::new(tree_cfg, num_workers, worker_batch_capacity),
+          num_workers, 1, worker_batch_capacity,
+          ConvnetPolicyWorkerBuilder::new(tree_cfg, num_workers, 1, worker_batch_capacity),
       ),
     }
   }

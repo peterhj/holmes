@@ -180,6 +180,88 @@ impl EpisodePreproc for GogodbEpisodePreproc {
   }
 }
 
+pub struct LazyEpisodeLoader<P> where P: EpisodePreproc {
+  rng:      Xorshiftplus128Rng,
+  paths:    Vec<PathBuf>,
+  preproc:  P,
+}
+
+impl<P> LazyEpisodeLoader<P> where P: EpisodePreproc {
+  pub fn new(index_path: PathBuf, preproc: P) -> LazyEpisodeLoader<P> {
+    let index_file = BufReader::new(File::open(&index_path).unwrap());
+    let mut index_lines = Vec::new();
+    for line in index_file.lines() {
+      let line = line.unwrap();
+      index_lines.push(line);
+    }
+    let sgf_paths: Vec<_> = index_lines.iter()
+      .map(|line| PathBuf::from(line)).collect();
+
+    let rng = Xorshiftplus128Rng::new(&mut thread_rng());
+    LazyEpisodeLoader{
+      rng:      rng,
+      paths:    sgf_paths,
+      preproc:  preproc,
+    }
+
+    /*for sgf_path in sgf_paths.iter() {
+      //let mut sgf_file = match File::open(sgf_path) {
+    }*/
+  }
+
+  pub fn for_each_episode<F>(&mut self, mut f: F)
+  where F: FnMut(&Episode) {
+    loop {
+      let idx = self.rng.gen_range(0, self.paths.len());
+      let sgf_path = self.paths[idx].clone();
+      let mut sgf_file = match File::open(&sgf_path) {
+        Ok(file) => file,
+        Err(_) => {
+          println!("WARNING: failed to open sgf file: {:?}", &sgf_path);
+          continue;
+        }
+      };
+      match self.preproc.try_load(&mut sgf_file) {
+        Some(episode) => {
+          f(&episode);
+        }
+        None => {
+          println!("WARNING: failed to load: {:?}", &sgf_path);
+        }
+      }
+    }
+  }
+
+  pub fn for_each_random_pair<F>(&mut self, mut f: F)
+  where F: FnMut(&(TxnState<TxnStateNodeData>, Stone, Action), &(TxnState<TxnStateNodeData>, Stone, Action)) {
+    loop {
+      let idx = self.rng.gen_range(0, self.paths.len());
+      let sgf_path = self.paths[idx].clone();
+      let mut sgf_file = match File::open(&sgf_path) {
+        Ok(file) => file,
+        Err(_) => {
+          println!("WARNING: failed to open sgf file: {:?}", &sgf_path);
+          continue;
+        }
+      };
+      match self.preproc.try_load(&mut sgf_file) {
+        Some(episode) => {
+          if episode.history.len() < 2 {
+            println!("WARNING: episode is too short: {:?}", &sgf_path);
+            continue;
+          }
+          let k = self.rng.gen_range(0, episode.history.len() - 1);
+          f(&episode.history[k], &episode.history[k+1]);
+        }
+        None => {
+          println!("WARNING: failed to load: {:?}", &sgf_path);
+          continue;
+        }
+      }
+    }
+  }
+}
+
 pub struct EpisodeFrame<'a> {
   pub state:    &'a TxnState<TxnStateNodeData>,
   pub turn:     Stone,

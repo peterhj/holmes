@@ -19,7 +19,7 @@ pub trait SearchPolicyWorkerBuilder: Send + Clone {
   type Worker: SearchPolicyWorker;
 
   //fn build_worker(&self, tid: usize, worker_batch_size: usize) -> Self::Worker;
-  fn into_worker(self, tid: usize, worker_batch_size: usize) -> Self::Worker;
+  fn into_worker(self, tid: usize, worker_tree_batch_capacity: usize, worker_rollout_batch_capacity: usize) -> Self::Worker;
 }
 
 pub trait SearchPolicyWorker {

@@ -64,9 +64,11 @@ impl TreePolicy for ThompsonTreePolicy {
       };*/
       let (pn, ps) = (self.cfg.prior_equiv, self.cfg.prior_equiv * node.values.prior_values[j]);
       let (es, ef) = if !self.cfg.rave {
-        ((s + ps), 0.0f32.max((n + pn) - (s + ps)))
+        (0.0f32.max(s + ps), 0.0f32.max((n + pn) - (s + ps)))
       } else {
-        let rn = node.values.num_trials_rave[j].load(Ordering::Acquire) as f32;
+        // XXX(20160304)
+        unimplemented!();
+        /*let rn = node.values.num_trials_rave[j].load(Ordering::Acquire) as f32;
         if rn == 0.0 {
           ((s + ps), 0.0f32.max((n + pn) - (s + ps)))
         } else {
@@ -80,7 +82,7 @@ impl TreePolicy for ThompsonTreePolicy {
           let es = ev * (n + pn);
           let ef = 0.0f32.max((1.0 - ev) * (n + pn));
           (es, ef)
-        }
+        }*/
       };
       // XXX: Sample two gamma distributions to get a beta distributed
       // random variable.

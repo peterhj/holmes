@@ -166,6 +166,12 @@ impl Point {
   }
 }
 
+/*impl fmt::Debug for Point {
+  fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+    formatter.write_str(&format!("Point({})", point.to_coord().to_string()))
+  }
+}*/
+
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum Action {
   Place{point: Point},

@@ -1,11 +1,13 @@
 //use array_util::{array_argmax};
 use board::{Board, Action};
+use data::{EpisodePreproc, LazyEpisodeLoader};
 use search::parallel_policies::{
   SearchPolicyWorker,
   PriorPolicy, DiffPriorPolicy,
   GradAccumMode, GradSyncMode,
 };
 use search::parallel_policies::convnet::{
+  ConvnetPolicyWorkerBuilder,
   ConvnetPolicyWorker,
   ConvnetPriorPolicy,
 };
@@ -15,8 +17,8 @@ use search::parallel_trace::{
   ParallelSearchReconWorker,
 };
 use search::parallel_tree::{
-  TreePolicyConfig,
   MonteCarloSearchConfig,
+  TreePolicyConfig,
   SharedTree,
   ParallelMonteCarloSearchServer,
   SearchWorkerConfig,
@@ -25,7 +27,9 @@ use search::parallel_tree::{
 use txnstate::{TxnState};
 use txnstate::extras::{TxnStateNodeData};
 
-use gsl::functions::{exp_e10, beta, log_beta, norm_inc_beta, psi, beta_pdf, beta_cdf};
+use cuda::runtime::{CudaDevice};
+use gsl::{Gsl, panic_error_handler};
+use gsl::functions::{exp, exp_e10, beta, log_beta, norm_inc_beta_error, psi, beta_pdf, beta_cdf};
 use gsl::integration::{IntegrationWorkspace, Integrand};
 
 use libc::{c_void};
@@ -38,8 +42,8 @@ use std::sync::atomic::{Ordering};
 
 const ABS_TOL:          f64 = 0.0;
 const REL_TOL:          f64 = 1.0e-6;
-const MAX_INTERVALS:    usize = 1024;
-const WORKSPACE_LEN:    usize = 1024;
+const MAX_INTERVALS:    usize = 4096;
+const WORKSPACE_LEN:    usize = 4096;
 
 fn omega_likelihood_fun(u: f64, d: &OmegaNodeSharedData) -> f64 {
   // XXX(20160222): This computes the $ H(u;s_j,a_j) * p(u;s_j,a_j) $ term
@@ -95,8 +99,27 @@ extern "C" fn omega_cross_g_factor_inner_extfun(t: f64, unsafe_data: *mut c_void
   let bias = data.bias;
   let e1 = d.net_succs[j];
   let e2 = d.net_fails[j];
+  //let x = exp_e10(bias + t.ln().ln() - (1.0 - t).ln().ln() + (e1 - 1.0) * t.ln() + (e2 - 1.0) * (1.0 - t).ln()).value();
   let mut x = exp_e10(bias + (e1 - 1.0) * t.ln() + (e2 - 1.0) * (1.0 - t).ln()).value();
+  //println!("DEBUG: cross g: inner fun value: {:6}", x);
   x *= (t / (1.0 - t)).ln();
+  x
+}
+
+extern "C" fn omega_cross_g_factor_normalization_extfun(t: f64, unsafe_data: *mut c_void) -> f64 {
+  // XXX(20160222): This computes the normalization of the "cross" G-factor:
+  //
+  //    $ t ^ (e1-1) * (1 - t) ^ (e2-1) $
+  //
+  // In other words it is the integrand of the (unnormalized) incomplete beta
+  // function.
+  let data: &OmegaCrossGFactorInnerData = unsafe { transmute(unsafe_data) };
+  let d = &*data.shared_data.borrow();
+  let j = data.action_rank;
+  let bias = data.bias;
+  let e1 = d.net_succs[j];
+  let e2 = d.net_fails[j];
+  let x = exp_e10(bias + (e1 - 1.0) * t.ln() + (e2 - 1.0) * (1.0 - t).ln()).value();
   x
 }
 
@@ -110,25 +133,68 @@ extern "C" fn omega_cross_g_factor_outer_extfun(u: f64, unsafe_data: *mut c_void
     action_rank,
     ref shared_data,
     ref mut inner_integrand,
+    ref mut norm_integrand,
     ref mut workspace} = data;
   let d = &*shared_data.borrow();
   let j = action_rank;
   let e1 = d.net_succs[j];
   let e2 = d.net_fails[j];
   let z = log_beta(e1, e2);
+  inner_integrand.data.action_rank = j;
   inner_integrand.data.bias = -z;
-  let (mut x, _) = inner_integrand.integrate_qags(
-      0.0, u,
-      ABS_TOL, REL_TOL, MAX_INTERVALS,
-      workspace,
-  );
-  x /= norm_inc_beta(u, e1, e2);
+  //let mut norm = norm_inc_beta(u, e1, e2);
+  let (mut norm, _) = norm_inc_beta_error(u, e1, e2);
+  let mut rare_case = false;
+  if norm == 0.0 {
+    norm_integrand.data.action_rank = j;
+    let mut shift = 4.0;
+    loop {
+      norm_integrand.data.bias = -z + shift;
+      // FIXME(20160306): integrate normalization.
+      let (new_norm, _) = norm_integrand.integrate_qags(
+          0.0, u,
+          ABS_TOL, REL_TOL, MAX_INTERVALS,
+          workspace,
+      );
+      if new_norm > 0.0 {
+        //println!("DEBUG: cross g_j outer extfun: final norm: {:e} shift: {:.0}", new_norm, shift);
+        inner_integrand.data.bias = -z + shift;
+        norm = new_norm;
+        break;
+      } else {
+        if shift >= 512.0 {
+          /*println!("WARNING:  cross g_j outer extfun: shift reached limit");
+          println!("          j: {} u: {:e} e1: {:e} e2: {:e}", j, u, e1, e2);
+          panic!();*/
+          rare_case = true;
+          break;
+        }
+        shift *= 4.0;
+      }
+    }
+  }
+  let mut x = if !rare_case {
+    let (mut x, _) = inner_integrand.integrate_qags(
+        0.0, u,
+        ABS_TOL, REL_TOL, MAX_INTERVALS,
+        workspace,
+    );
+    x /= norm;
+    x
+  } else {
+    (u / (1.0 - u)).ln()
+  };
   x -= psi(e1) - psi(e2);
   x *= omega_likelihood_fun(u, d);
   x *= d.prior_equiv;
+  /*if !x.is_finite() {
+    panic!("cross g_j is nonfinite: {:?} {:?} {:?}",
+        inner_integrand.data.bias, e1, e2);
+  }*/
   x
 }
 
+#[derive(Debug)]
 pub struct OmegaNodeSharedData {
   pub horizon:      usize,
   pub prior_equiv:  f64,
@@ -156,8 +222,8 @@ impl OmegaNodeSharedData {
       let succs_j = node.succ_counts[j].load(Ordering::Acquire) as f32;
       let trials_j = node.trial_counts[j].load(Ordering::Acquire) as f32;
       let e1 =
-          1.0 + tree_cfg.prior_equiv * node.prior_values[j]
-              + tree_cfg.mc_scale    * succs_j;
+          1.0 + 0.0f32.max(tree_cfg.prior_equiv * node.prior_values[j])
+              + 0.0f32.max(tree_cfg.mc_scale    * succs_j);
       let e2 =
           1.0 + 0.0f32.max(tree_cfg.prior_equiv * (1.0 - node.prior_values[j]))
               + 0.0f32.max(tree_cfg.mc_scale    * (trials_j - succs_j));
@@ -195,7 +261,7 @@ impl OmegaLikelihoodIntegral {
     }
   }
 
-  pub fn calculate_likelihood(&mut self) -> f32 {
+  pub fn calculate_likelihood(&mut self) -> f64 {
     let &mut OmegaLikelihoodIntegral{
       ref mut integrand,
       ref mut workspace,
@@ -205,7 +271,7 @@ impl OmegaLikelihoodIntegral {
         ABS_TOL, REL_TOL, MAX_INTERVALS,
         workspace,
     );
-    res as f32
+    res
   }
 }
 
@@ -231,7 +297,7 @@ impl OmegaDiagonalGFactorIntegral {
     }
   }
 
-  pub fn calculate_diagonal_g_factor(&mut self) -> f32 {
+  pub fn calculate_diagonal_g_factor(&mut self) -> f64 {
     let &mut OmegaDiagonalGFactorIntegral{
       ref mut integrand,
       ref mut workspace,
@@ -241,7 +307,7 @@ impl OmegaDiagonalGFactorIntegral {
         ABS_TOL, REL_TOL, MAX_INTERVALS,
         workspace,
     );
-    res as f32
+    res
   }
 }
 
@@ -255,6 +321,7 @@ struct OmegaCrossGFactorOuterData {
   shared_data:  Rc<RefCell<OmegaNodeSharedData>>,
   action_rank:  usize,
   inner_integrand:  Integrand<OmegaCrossGFactorInnerData>,
+  norm_integrand:   Integrand<OmegaCrossGFactorInnerData>,
   workspace:        IntegrationWorkspace,
 }
 
@@ -269,24 +336,32 @@ impl OmegaCrossGFactorIntegral {
       outer_integrand:  Integrand{
         function:       omega_cross_g_factor_outer_extfun,
         data:           OmegaCrossGFactorOuterData{
-          shared_data:  shared_data.clone(),
           action_rank:  0,
           inner_integrand:  Integrand{
             function:       omega_cross_g_factor_inner_extfun,
             data:           OmegaCrossGFactorInnerData{
-              shared_data:  shared_data,
+              shared_data:  shared_data.clone(),
               action_rank:  0,
               bias:         0.0,
             },
           },
-          workspace:        IntegrationWorkspace::new(WORKSPACE_LEN),
+          norm_integrand:   Integrand{
+            function:       omega_cross_g_factor_normalization_extfun,
+            data:           OmegaCrossGFactorInnerData{
+              shared_data:  shared_data.clone(),
+              action_rank:  0,
+              bias:         0.0,
+            },
+          },
+          shared_data:  shared_data,
+          workspace:    IntegrationWorkspace::new(WORKSPACE_LEN),
         },
       },
       workspace:        IntegrationWorkspace::new(WORKSPACE_LEN),
     }
   }
 
-  pub fn calculate_cross_g_factor(&mut self, action_rank: usize) -> f32 {
+  pub fn calculate_cross_g_factor(&mut self, action_rank: usize) -> f64 {
     let &mut OmegaCrossGFactorIntegral{
       ref mut outer_integrand,
       ref mut workspace,
@@ -298,7 +373,7 @@ impl OmegaCrossGFactorIntegral {
         ABS_TOL, REL_TOL, MAX_INTERVALS,
         workspace,
     );
-    res as f32
+    res
   }
 }
 
@@ -317,7 +392,7 @@ pub struct OmegaTreeBatchWorker<W> where W: SearchPolicyWorker {
 
 //impl OmegaTreeBatchWorker {
 impl<W> OmegaTreeBatchWorker<W> where W: SearchPolicyWorker {
-  //pub fn new(tree_cfg: TreePolicyConfig, /*objective: ObjectLevelObjective,*/ search_worker: Rc<RefCell<ConvnetPolicyWorker>>) -> OmegaTreeBatchWorker {
+  //pub fn new(tree_cfg: TreePolicyConfig, /*objective: MetaLevelObjective,*/ search_worker: Rc<RefCell<ConvnetPolicyWorker>>) -> OmegaTreeBatchWorker {
   pub fn new(memory: Arc<RwLock<OmegaWorkerMemory>>, search_worker: Rc<RefCell<W>>) -> OmegaTreeBatchWorker<W> {
     let shared_data = Rc::new(RefCell::new(OmegaNodeSharedData::new()));
     OmegaTreeBatchWorker{
@@ -334,12 +409,6 @@ impl<W> OmegaTreeBatchWorker<W> where W: SearchPolicyWorker {
       //obj_label:    None,
     }
   }
-
-  /*fn reset(&mut self, objective: ObjectLevelObjective, search_trace: &SearchTrace) {
-    self.tree_cfg = None;
-    // FIXME(20160301): inner value depends on the current objective.
-    self.inner_value = search_trace.root_value.unwrap();
-  }*/
 }
 
 //impl TreeBatchWorker for OmegaTreeBatchWorker {
@@ -362,10 +431,16 @@ impl<W> TreeBatchWorker for OmegaTreeBatchWorker<W> where W: SearchPolicyWorker 
   }
 
   fn update_batch(&mut self, root_node: Arc<RwLock<ReconNode>>, trace_batch: &SearchTraceBatch) {
+    let inner_value = self.memory.read().unwrap().read_inner_value();
     for batch_idx in 0 .. trace_batch.batch_size {
       let mut node = root_node.clone();
       let tree_trace = &trace_batch.traj_traces[batch_idx].tree_trace;
-      for decision in tree_trace.decisions.iter() {
+      for (k, decision) in tree_trace.decisions.iter().enumerate() {
+        /*println!("DEBUG: omega: batch_idx: {}/{} decision: {}/{} {:?}",
+            batch_idx, trace_batch.batch_size,
+            k, tree_trace.decisions.len(),
+            decision,
+        );*/
         let next_node = {
           let node = node.read().unwrap();
           let turn = node.state.current_turn();
@@ -381,25 +456,62 @@ impl<W> TreeBatchWorker for OmegaTreeBatchWorker<W> where W: SearchPolicyWorker 
           let mut prior_policy = worker.diff_prior_policy();
 
           assert!(decision.horizon <= node.valid_actions.len());
-          let inner_value = self.memory.read().unwrap().read_inner_value();
           let likelihood = self.likelihood_int.calculate_likelihood();
+          /*println!("DEBUG: omega: batch_idx: {}/{} likelihood: {:.6}",
+              batch_idx, trace_batch.batch_size,
+              likelihood,
+          );*/
+          if !likelihood.is_finite() {
+            /*panic!("WARNING: omega: likelihood is nonfinite: shared: {:?}",
+                self.shared_data.borrow(),
+            );*/
+            println!("WARNING:  omega: likelihood is nonfinite:");
+            println!("          batch_idx: {}/{} decision: {}/{} {:?}",
+                batch_idx, trace_batch.batch_size,
+                k, tree_trace.decisions.len(),
+                decision,
+            );
+            println!("          shared: {:?}",
+                self.shared_data.borrow(),
+            );
+            panic!();
+          }
           for (j, &action_j) in node.valid_actions.iter().take(decision.horizon).enumerate() {
             let g_j = if decision.action == action_j {
+              //println!("DEBUG: omega: calculating diagonal g: {:?} {} {:?}", decision, j, action_j);
               self.diag_g_factor_int.calculate_diagonal_g_factor()
             } else {
+              //println!("DEBUG: omega: calculating cross g: {:?} {} {:?}", decision, j, action_j);
               self.cross_g_factor_int.calculate_cross_g_factor(j)
             };
+            if !g_j.is_finite() {
+              println!("WARNING:  omega: g_j is nonfinite:");
+              println!("          batch_idx: {}/{} decision: {}/{} {:?}",
+                  batch_idx, trace_batch.batch_size,
+                  k, tree_trace.decisions.len(),
+                  decision,
+              );
+              println!("          action: {} {:?} shared: {:?}",
+                  j, action_j,
+                  self.shared_data.borrow(),
+              );
+              panic!();
+            }
             node.state.get_data().features.extract_relative_features(turn, prior_policy.expose_input_buffer(j));
             prior_policy.preload_action_label(j, action_j);
-            // XXX(20160301): The inner value includes the baseline.
-            prior_policy.preload_loss_weight(j, g_j * inner_value / likelihood);
+            // XXX(20160301): The inner value should include the baseline.
+            prior_policy.preload_loss_weight(j, inner_value * (g_j / likelihood) as f32);
+            /*println!("DEBUG: omega: batch_idx: {}/{} factor: {:.6} g_j: {:.6}",
+                batch_idx, trace_batch.batch_size,
+                inner_value * g_j / likelihood, g_j,
+            );*/
           }
 
           prior_policy.load_inputs(decision.horizon);
           prior_policy.forward(decision.horizon);
           prior_policy.backward(decision.horizon);
 
-          node.child_nodes[decision.action.idx()].clone()
+          node.child_nodes[decision.action_rank].clone()
         };
         node = next_node;
       }
@@ -425,10 +537,12 @@ impl OmegaWorkerMemory {
   }
 
   pub fn reset(&mut self) {
-    self.inner_values.clear();
+    //self.inner_values.clear();
+    self.inner_values[0] = 0.0;
+    self.inner_values[1] = 0.0;
   }
 
-  pub fn set_state(&mut self, objective: ObjectLevelObjective, t: usize, bare_inner_value: f32) {
+  pub fn set_state(&mut self, objective: MetaLevelObjective, t: usize, bare_inner_value: f32) {
     // FIXME(20160301): currently specialized for TD0 objective.
     match t {
       0 => {
@@ -448,13 +562,13 @@ impl OmegaWorkerMemory {
 }
 
 #[derive(Clone, Copy)]
-pub enum ObjectLevelObjective {
+pub enum MetaLevelObjective {
   SupervisedKLLoss,
   TD0L2Loss,
 }
 
 //#[derive(Clone)]
-pub enum ObjectLevelInput {
+pub enum MetaLevelInput {
   SingleState{state: TxnState<TxnStateNodeData>},
   PairStates{state1: TxnState<TxnStateNodeData>, state2: TxnState<TxnStateNodeData>},
   SingleTrace{trace: SearchTrace},
@@ -462,23 +576,23 @@ pub enum ObjectLevelInput {
 }
 
 #[derive(Clone, Copy)]
-pub enum ObjectLevelLabel {
+pub enum MetaLevelLabel {
   Action{action: Action},
 }
 
 pub struct OmegaTrainingConfig {
-  pub objective:    Option<ObjectLevelObjective>,
+  pub objective:    Option<MetaLevelObjective>,
   pub step_size:    f32,
 }
 
-pub struct MetaLevelWorker<W> where W: SearchPolicyWorker {
-  objective:    Option<ObjectLevelObjective>,
+/*pub struct MetaLevelWorker<W> where W: SearchPolicyWorker {
+  objective:    Option<MetaLevelObjective>,
   step_size:    f32,
   recon_worker: Rc<RefCell<ParallelSearchReconWorker<OmegaTreeBatchWorker<W>, ()>>>,
 
   //traces:   Vec<TxnState<TxnStateNodeData>>,
   traces:       Vec<SearchTrace>,
-  obj_label:    Option<ObjectLevelLabel>,
+  obj_label:    Option<MetaLevelLabel>,
 }
 
 //impl MetaLevelWorker {
@@ -493,18 +607,18 @@ impl<W> MetaLevelWorker<W> where W: SearchPolicyWorker {
     }
   }
 
-  pub fn reset(&mut self, objective: ObjectLevelObjective, step_size: f32) {
+  pub fn reset(&mut self, objective: MetaLevelObjective, step_size: f32) {
     self.objective = Some(objective);
     self.step_size = step_size;
   }
 
-  pub fn load_input(&mut self, input: ObjectLevelInput) {
+  pub fn load_input(&mut self, input: MetaLevelInput) {
     match (self.objective, input) {
-      (Some(ObjectLevelObjective::SupervisedKLLoss), ObjectLevelInput::SingleTrace{trace}) => {
+      (Some(MetaLevelObjective::SupervisedKLLoss), MetaLevelInput::SingleTrace{trace}) => {
         self.traces.clear();
         self.traces.push(trace);
       }
-      (Some(ObjectLevelObjective::TD0L2Loss), ObjectLevelInput::PairTraces{trace1, trace2}) => {
+      (Some(MetaLevelObjective::TD0L2Loss), MetaLevelInput::PairTraces{trace1, trace2}) => {
         self.traces.clear();
         self.traces.push(trace1);
         self.traces.push(trace2);
@@ -513,12 +627,12 @@ impl<W> MetaLevelWorker<W> where W: SearchPolicyWorker {
     }
   }
 
-  pub fn load_label(&mut self, label: Option<ObjectLevelLabel>) {
+  pub fn load_label(&mut self, label: Option<MetaLevelLabel>) {
     match (self.objective, label) {
-      (Some(ObjectLevelObjective::SupervisedKLLoss), Some(ObjectLevelLabel::Action{action})) => {
+      (Some(MetaLevelObjective::SupervisedKLLoss), Some(MetaLevelLabel::Action{action})) => {
         self.obj_label = label;
       }
-      (Some(ObjectLevelObjective::TD0L2Loss), None) => {
+      (Some(MetaLevelObjective::TD0L2Loss), None) => {
         self.obj_label = None;
       }
       _ => unimplemented!(),
@@ -527,11 +641,11 @@ impl<W> MetaLevelWorker<W> where W: SearchPolicyWorker {
 
   pub fn train_sample(&mut self) {
     match self.objective {
-      Some(ObjectLevelObjective::SupervisedKLLoss) => {
+      Some(MetaLevelObjective::SupervisedKLLoss) => {
         // FIXME(20160301)
         unimplemented!();
       }
-      Some(ObjectLevelObjective::TD0L2Loss) => {
+      Some(MetaLevelObjective::TD0L2Loss) => {
         let &mut MetaLevelWorker{
           step_size,
           ref traces,
@@ -576,19 +690,20 @@ impl<W> MetaLevelWorker<W> where W: SearchPolicyWorker {
       }
     }
   }
-}
+}*/
 
 pub struct MetaLevelSearch;
 
 impl MetaLevelSearch {
   pub fn join<W>(&self,
-      objective:    ObjectLevelObjective,
+      iter:         usize,
+      objective:    MetaLevelObjective,
       step_size:    f32,
       baseline:     f32,
       search_cfg:   MonteCarloSearchConfig,
       tree_cfg:     TreePolicyConfig,
       server:       &ParallelMonteCarloSearchServer<W>,
-      input:        ObjectLevelInput,
+      input:        MetaLevelInput,
       //rng:          &mut Xorshiftplus128Rng,
       )
   where W: SearchPolicyWorker
@@ -598,7 +713,7 @@ impl MetaLevelSearch {
     assert!(worker_batch_size >= 1);
     assert!(worker_num_batches >= 1);
 
-    let cfg = SearchWorkerConfig{
+    let worker_cfg = SearchWorkerConfig{
       batch_size:       worker_batch_size,
       num_batches:      worker_num_batches,
       // FIXME(20160112): use correct komi value.
@@ -607,13 +722,14 @@ impl MetaLevelSearch {
     };
 
     match (objective, input) {
-      (ObjectLevelObjective::TD0L2Loss, ObjectLevelInput::PairStates{state1, state2}) => {
-        // FIXME(20160301): need to search and trace twice.
+      (MetaLevelObjective::TD0L2Loss, MetaLevelInput::PairStates{state1, state2}) => {
+        // XXX(20160301): Need to search and trace twice.
         for (t, state) in [state1, state2].into_iter().enumerate() {
+          println!("DEBUG: MetaLevelSearch: frame {} (search)", t+1);
           let shared_tree = SharedTree::new(tree_cfg);
           for tid in 0 .. num_workers {
             server.enqueue(tid, SearchWorkerCommand::ResetSearch{
-              cfg:            cfg,
+              cfg:            worker_cfg,
               shared_tree:    shared_tree.clone(),
               init_state:     state.clone(),
               record_search:  true,
@@ -621,22 +737,72 @@ impl MetaLevelSearch {
           }
           server.join();
 
+          println!("DEBUG: MetaLevelSearch: frame {} (gradient)", t+1);
           for tid in 0 .. num_workers {
             server.enqueue(tid, SearchWorkerCommand::TrainMetaLevelTD0Gradient{t: t});
           }
           server.join();
         }
 
+        println!("DEBUG: MetaLevelSearch: descent");
         for tid in 0 .. num_workers {
           server.enqueue(tid, SearchWorkerCommand::TrainMetaLevelTD0Descent{step_size: step_size});
         }
         server.join();
-
-        // FIXME(20160301)
-        unimplemented!();
       }
 
       _ => unimplemented!(),
     }
+  }
+}
+
+pub struct MetaLevelDriver {
+  mc_cfg:   MonteCarloSearchConfig,
+  tree_cfg: TreePolicyConfig,
+  server:   ParallelMonteCarloSearchServer<ConvnetPolicyWorker>,
+}
+
+impl MetaLevelDriver {
+  pub fn new(mc_cfg: MonteCarloSearchConfig, tree_cfg: TreePolicyConfig) -> MetaLevelDriver {
+    //setup_ieee_env();
+    Gsl::disable_error_handler();
+    //Gsl::set_error_handler(panic_error_handler);
+    let worker_tree_batch_capacity = 32;
+    let worker_rollout_batch_capacity = 576;
+    let num_workers = CudaDevice::count().unwrap();
+    let server =  ParallelMonteCarloSearchServer::new(
+        num_workers,
+        worker_tree_batch_capacity,
+        worker_rollout_batch_capacity,
+        ConvnetPolicyWorkerBuilder::new(
+            tree_cfg, num_workers,
+            worker_tree_batch_capacity,
+            worker_rollout_batch_capacity,
+        ),
+    );
+    MetaLevelDriver{
+      mc_cfg:   mc_cfg,
+      tree_cfg: tree_cfg,
+      server:   server,
+    }
+  }
+
+  pub fn train<P>(&mut self, loader: &mut LazyEpisodeLoader<P>) where P: EpisodePreproc {
+    let mut iter = 0;
+    loader.for_each_random_pair(|frame1, frame2| {
+      println!("DEBUG: iter: {}", iter);
+      let search = MetaLevelSearch;
+      search.join(
+          iter,
+          MetaLevelObjective::TD0L2Loss,
+          0.0001,
+          0.0,
+          self.mc_cfg,
+          self.tree_cfg,
+          &self.server,
+          MetaLevelInput::PairStates{state1: frame1.0.clone(), state2: frame2.0.clone()},
+      );
+      iter += 1;
+    });
   }
 }

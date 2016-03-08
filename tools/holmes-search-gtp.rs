@@ -24,10 +24,10 @@ fn main() {
   println!("DEBUG: holmes: host: {}", host);
   println!("DEBUG: holmes: port: {}", port);
   let mc_cfg = MonteCarloSearchConfig{
-    //num_rollouts:   1024,
-    num_rollouts:   4096,
-    //batch_size:     16,
-    batch_size:     128,
+    num_rollouts:   1024,
+    batch_size:     16,
+    //num_rollouts:   4096,
+    //batch_size:     128,
   };
   let tree_cfg = TreePolicyConfig{
     horizon_cfg:    HorizonConfig::Fixed{max_horizon: 20},

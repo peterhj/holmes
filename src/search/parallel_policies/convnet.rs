@@ -12,6 +12,7 @@ use convnet_new::{
   //build_2layer16_9x9_19x19x16_arch_nodir,
   build_13layer384multi3_19x19x32_arch_nodir,
   build_value_3layer64_19x19x32_arch_nodir,
+  build_value_13layer384multi3_19x19x32_arch_nodir,
 };
 use discrete::{DiscreteFilter};
 use discrete::bfilter::{BFilter};
@@ -57,17 +58,23 @@ pub struct ConvnetPolicyWorkerBuilder {
 }
 
 impl ConvnetPolicyWorkerBuilder {
-  pub fn new(tree_cfg: TreePolicyConfig, num_workers: usize, worker_batch_size: usize) -> ConvnetPolicyWorkerBuilder {
+  pub fn new(tree_cfg: TreePolicyConfig, num_workers: usize, worker_tree_batch_size: usize, worker_batch_size: usize) -> ConvnetPolicyWorkerBuilder {
     //let (prior_arch_cfg, prior_save_path) = build_12layer128_19x19x16_arch(1);
 
     //let prior_arch_cfg = build_12layer384_19x19x44_arch_nodir(1);
     //let prior_save_path = PathBuf::from("models/gogodb_w2015_alphav2_new_action_12layer384_19x19x44.saved");
 
-    let prior_arch_cfg = build_13layer384multi3_19x19x32_arch_nodir(1);
-    let prior_save_path = PathBuf::from("models/gogodb_w2015-preproc-alphav3m_19x19x32_13layer384multi3.saved");
+    //let prior_arch_cfg = build_13layer384multi3_19x19x32_arch_nodir(worker_tree_batch_size);
+    //let prior_save_path = PathBuf::from("models/gogodb_w2015-preproc-alphav3m_19x19x32_13layer384multi3.saved");
 
-    let prior_arch_cfg = build_value_3layer64_19x19x32_arch_nodir(1);
-    let prior_save_path = PathBuf::from("models/gogodb_w2015-preproc-alphav3m_19x19x32_value_3layer64.saved");
+    //let prior_arch_cfg = build_value_3layer64_19x19x32_arch_nodir(worker_tree_batch_size);
+    //let prior_save_path = PathBuf::from("models/gogodb_w2015-preproc-alphav3m_19x19x32_value_3layer64.saved");
+
+    let prior_arch_cfg = build_value_3layer64_19x19x32_arch_nodir(worker_tree_batch_size);
+    let prior_save_path = PathBuf::from("models/tmp_gogodb_w2015-preproc-alphav3m_19x19x32_value_3layer64.meta");
+
+    //let prior_arch_cfg = build_value_13layer384multi3_19x19x32_arch_nodir(worker_tree_batch_size);
+    //let prior_save_path = PathBuf::from("models/gogodb_w2015-preproc-alphav3m_19x19x32_value_13layer384multi3.saved");
 
     // FIXME(20160121): temporarily using existing balance run.
     /*let rollout_arch_cfg = build_2layer16_19x19x16_arch_nodir(worker_batch_size);
@@ -109,11 +116,11 @@ impl ConvnetPolicyWorkerBuilder {
 impl SearchPolicyWorkerBuilder for ConvnetPolicyWorkerBuilder {
   type Worker = ConvnetPolicyWorker;
 
-  fn into_worker(self, tid: usize, worker_batch_size: usize) -> ConvnetPolicyWorker {
+  fn into_worker(self, tid: usize, worker_tree_batch_size: usize, worker_batch_size: usize) -> ConvnetPolicyWorker {
     let context = Rc::new(DeviceContext::new(tid));
     let ctx = (*context).as_ref();
     let mut prior_arch = PipelineArchWorker::new(
-        1,
+        worker_tree_batch_size,
         self.prior_arch_cfg,
         self.prior_save_path,
         tid,
@@ -219,16 +226,14 @@ impl DiffPriorPolicy for ConvnetPriorPolicy {
   }
 
   fn preload_loss_weight(&mut self, batch_idx: usize, weight: f32) {
-    // FIXME(20160222)
-    unimplemented!();
+    self.arch.loss_layer().preload_weight(batch_idx, weight);
   }
 
   fn load_inputs(&mut self, batch_size: usize) {
     let ctx = (*self.context).as_ref();
     self.arch.input_layer().load_frames(batch_size, &ctx);
     self.arch.loss_layer().load_labels(batch_size, &ctx);
-    // FIXME(20160222): load loss weights.
-    unimplemented!();
+    self.arch.loss_layer().load_weights(batch_size, &ctx);
   }
 
   fn forward(&mut self, batch_size: usize) {
@@ -250,15 +255,22 @@ impl DiffPriorPolicy for ConvnetPriorPolicy {
   }*/
 
   fn sync_gradients(&mut self, sync_mode: GradSyncMode) {
-    unimplemented!();
+    let ctx = (*self.context).as_ref();
+    match sync_mode {
+      GradSyncMode::Sum => {
+        self.arch.dev_allreduce_sum_gradients(&ctx);
+      }
+    }
   }
 
   fn reset_gradients(&mut self) {
-    unimplemented!();
+    let ctx = (*self.context).as_ref();
+    self.arch.reset_gradients(0.0, &ctx);
   }
 
   fn descend_params(&mut self, step_size: f32) {
-    unimplemented!();
+    let ctx = (*self.context).as_ref();
+    self.arch.descend(step_size, 0.0, &ctx);
   }
 }
 
@@ -451,9 +463,9 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
         let sim_turn = rollout_trajs[batch_idx].sim_state.current_turn();
         let sim_turn_off = sim_turn.offset();
 
-        if record_trace {
+        /*if record_trace {
           traces[batch_idx].actions.push((sim_turn, Action::Pass));
-        }
+        }*/
 
         let mut made_move = false;
         let mut spin_count = 0;
@@ -480,14 +492,15 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
                 spin_count += 1;
                 continue;
               } else {
+                rollout_trajs[batch_idx].sim_pairs.push((sim_turn, sim_point));
                 if let Some(ref mut trace_batch) = trace_batch {
                   trace_batch.traj_traces[batch_idx]
                     .rollout_trace.actions.push(Action::Place{point: sim_point});
                 }
-                if record_trace {
+                /*if record_trace {
                   let trace_len = traces[batch_idx].actions.len();
                   traces[batch_idx].actions[trace_len - 1].1 = Action::Place{point: sim_point};
-                }
+                }*/
                 rollout_trajs[batch_idx].sim_state.commit();
                 for_each_touched_empty(
                     &rollout_trajs[batch_idx].sim_state.position,
@@ -533,14 +546,15 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
                     spin_count += 1;
                     continue;
                   } else {
+                    rollout_trajs[batch_idx].sim_pairs.push((sim_turn, sim_point));
                     if let Some(ref mut trace_batch) = trace_batch {
                       trace_batch.traj_traces[batch_idx]
                         .rollout_trace.actions.push(Action::Place{point: sim_point});
                     }
-                    if record_trace {
+                    /*if record_trace {
                       let trace_len = traces[batch_idx].actions.len();
                       traces[batch_idx].actions[trace_len - 1].1 = Action::Place{point: sim_point};
-                    }
+                    }*/
                     rollout_trajs[batch_idx].sim_state.commit();
                     for_each_touched_empty(
                         &rollout_trajs[batch_idx].sim_state.position,
@@ -561,6 +575,7 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
                 }
               }
             }
+            break;
           }
         }
         assert!(spin_count <= Board::SIZE);
@@ -739,7 +754,7 @@ impl BiConvnetPolicyWorkerBuilder {
 impl SearchPolicyWorkerBuilder for BiConvnetPolicyWorkerBuilder {
   type Worker = BiConvnetPolicyWorker;
 
-  fn into_worker(self, tid: usize, worker_batch_size: usize) -> BiConvnetPolicyWorker {
+  fn into_worker(self, tid: usize, _worker_tree_batch_capacity: usize, worker_batch_size: usize) -> BiConvnetPolicyWorker {
     let context = Rc::new(DeviceContext::new(tid));
     let ctx = (*context).as_ref();
     let mut green_rollout_arch = PipelineArchWorker::new(
