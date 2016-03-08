@@ -88,9 +88,11 @@ impl<A> NngsOneShotClient<A> where A: AsyncAgent {
         loop {
           match agent_out_rx.recv() {
             Ok(AgentMsg::CheckTime) => {
-              writer_tx.send(InternalMsg::WriteCmd{cmd: b"time".to_vec()}).unwrap();
+              // FIXME(20160308): ignore time command.
+              //writer_tx.send(InternalMsg::WriteCmd{cmd: b"time".to_vec()}).unwrap();
             }
             Ok(AgentMsg::SubmitAction{turn, action}) => {
+              println!("DEBUG: client bridge: received agent action: {:?} {:?}", turn, action);
               let cmd = match action {
                 Action::Resign => b"resign".to_vec(),
                 Action::Pass => b"pass".to_vec(),
@@ -107,13 +109,13 @@ impl<A> NngsOneShotClient<A> where A: AsyncAgent {
               break;
             }
           }
-          sleep_ms(100);
         }
         barrier.wait();
       })
     };
 
     let reader_thr = {
+      let server_cfg = server_cfg.clone();
       let barrier = barrier.clone();
       let agent_in_tx = agent_in_tx;
       let writer_tx = writer_tx;
@@ -135,7 +137,7 @@ impl<A> NngsOneShotClient<A> where A: AsyncAgent {
           if buf.is_empty() {
             break;
           }
-          print!("DEBUG: server: {}", String::from_utf8_lossy(&buf));
+          print!("DEBUG: client: {}", String::from_utf8_lossy(&buf));
           /*{
             let s = String::from_utf8_lossy(&buf);
             if !s.is_empty() {
@@ -146,16 +148,44 @@ impl<A> NngsOneShotClient<A> where A: AsyncAgent {
           if buf.len() >= 2 && buf[0] == b'1' && buf[1] == b' ' {
             if buf.len() >= 3 && buf[2] == b'5' {
               history.push(LoProtocol::ServerPrompt);
+            } else if buf.len() >= 3 && buf[2] == b'6' {
+              println!("DEBUG: client reader: got game prompt");
+              history.push(LoProtocol::GamePrompt);
+            } else if buf.len() >= 3 && buf[2] == b'7' {
+              history.push(LoProtocol::GameCleanupPrompt);
+            } else {
+              history.push(LoProtocol::UnknownPrompt);
+            }
 
+            if buf.len() >= 3 && (buf[2] == b'5' || buf[2] == b'6') {
+              let mut is_resigned = false;
+              //let mut who_resigned = None;
+
+              for i in prev_idx.unwrap_or(0) .. idx {
+                match &history[i] {
+                  &LoProtocol::GenericInfo{ref line} => {
+                    let line_str = String::from_utf8_lossy(line);
+                    if line_str.contains("has resigned the game") {
+                      is_resigned = true;
+                    }
+                  }
+                  _ => {}
+                }
+              }
+
+              if is_resigned || recently_finished_match {
+                agent_in_tx.send(AgentMsg::FinishMatch).unwrap();
+                writer_tx.send(InternalMsg::Quit).unwrap();
+              }
+            }
+
+            if buf.len() >= 3 && buf[2] == b'5' {
               let mut is_match_request = false;
               let mut match_cmd = None;
               let mut match_our_stone = None;
               let mut match_board_size = None;
-              let mut match_main_time = None;
-              let mut match_byoyomi_time = None;
-
-              let mut is_resigned = false;
-              //let mut who_resigned = None;
+              let mut match_main_time_mins = None;
+              let mut match_byoyomi_time_mins = None;
 
               for i in prev_idx.unwrap_or(0) .. idx {
                 match &history[i] {
@@ -183,37 +213,31 @@ impl<A> NngsOneShotClient<A> where A: AsyncAgent {
                       match_cmd = Some(tmp_match_cmd.as_bytes().to_vec());
                       match_our_stone = Some(our_stone);
                       match_board_size = Some(board_size);
-                      match_main_time = Some(main_time);
-                      match_byoyomi_time = Some(byoyomi_time);
-                    } else if line_str.contains("has resigned the game") {
-                      is_resigned = true;
+                      match_main_time_mins = Some(main_time);
+                      match_byoyomi_time_mins = Some(byoyomi_time);
                     }
                   }
                   _ => {}
                 }
               }
 
-              if is_resigned || recently_finished_match {
-                agent_in_tx.send(AgentMsg::FinishMatch).unwrap();
-                //writer_tx.send(InternalMsg::WriteCmd{cmd: b"quit".to_vec()}).unwrap();
-                writer_tx.send(InternalMsg::Quit).unwrap();
-
-              } else if is_match_request {
+              if is_match_request {
                 // Send match details to agent channel.
                 agent_in_tx.send(AgentMsg::StartMatch{
                   our_stone:    match_our_stone.unwrap(),
                   board_size:   match_board_size.unwrap(),
-                  main_time_secs:       60 * match_main_time.unwrap(),
-                  byoyomi_time_secs:    60 * match_byoyomi_time.unwrap(),
+                  main_time_secs:       60 * match_main_time_mins.unwrap(),
+                  byoyomi_time_secs:    60 * match_byoyomi_time_mins.unwrap(),
                 }).unwrap();
                 // Auto-accept match request.
                 writer_tx.send(InternalMsg::WriteCmd{cmd: match_cmd.unwrap()}).unwrap();
               }
+            }
 
-            } else if buf.len() >= 3 && buf[2] == b'6' {
-              history.push(LoProtocol::GamePrompt);
-
+            if buf.len() >= 3 && buf[2] == b'6' {
               let mut is_move = false;
+              let mut move_main_time_left_s = None;
+              //let mut move_byoyomi_time_left_s = None;
               let mut move_number = None;
               let mut move_turn = None;
               let mut move_action = None;
@@ -222,7 +246,21 @@ impl<A> NngsOneShotClient<A> where A: AsyncAgent {
                 match &history[i] {
                   &LoProtocol::MoveInfo{ref line} => {
                     let line_str = String::from_utf8_lossy(line);
-                    if !line_str.contains("Game") {
+                    if line_str.contains("Game") {
+                      println!("DEBUG: client reader: found game info");
+                      let pre_toks: Vec<_> = line_str.splitn(2, ":").collect();
+                      let pair_toks: Vec<_> = pre_toks[1].splitn(2, "vs").collect();
+                      for tok in pair_toks.iter() {
+                        let toks: Vec<_> = tok.trim().split_whitespace().collect();
+                        let name = toks[0];
+                        if name != &server_cfg.login {
+                          continue;
+                        }
+                        let main_time_left_s: i32 = toks[2].parse().unwrap();
+                        move_main_time_left_s = Some(main_time_left_s);
+                      }
+                    } else {
+                      println!("DEBUG: client reader: found move info");
                       is_move = true;
                       let pre_toks: Vec<_> = line_str.splitn(2, "15").collect();
                       let suf_toks: Vec<_> = pre_toks[1].splitn(2, "(").collect();
@@ -250,24 +288,24 @@ impl<A> NngsOneShotClient<A> where A: AsyncAgent {
 
               if is_move {
                 // Send move details to agent channel.
+                println!("DEBUG: client reader: send move to agent: {:?} {:?}", move_turn, move_action);
                 agent_in_tx.send(AgentMsg::RecvAction{
-                  move_number:  move_number.unwrap(),
                   turn:         move_turn.unwrap(),
                   action:       move_action.unwrap(),
+                  move_number:  move_number,
+                  time_left_s:  move_main_time_left_s,
+                  // FIXME(20160308): byoyomi time left?
                 }).unwrap();
               }
+            }
 
-            } else if buf.len() >= 3 && buf[2] == b'7' {
-              history.push(LoProtocol::GameCleanupPrompt);
-
+            if buf.len() >= 3 && buf[2] == b'7' {
               if !recently_finished_match {
                 recently_finished_match = true;
                 writer_tx.send(InternalMsg::WriteCmd{cmd: b"done".to_vec()}).unwrap();
               }
-
-            } else {
-              history.push(LoProtocol::UnknownPrompt);
             }
+
             prev_idx = Some(idx);
           } else if buf.len() >= 2 && buf[0] == b'9' && buf[1] == b' ' {
             history.push(LoProtocol::GenericInfo{line: buf});

@@ -29,10 +29,7 @@ fn main() {
 
   //let mut state = TxnState::new(RuleSet::KgsJapanese.rules(), ());
   let mut state = TxnState::new(
-      TxnStateConfig{
-        rules:  RuleSet::KgsJapanese.rules(),
-        ranks:  [PlayerRank::Dan(9), PlayerRank::Dan(9)],
-      },
+      TxnStateConfig::default(),
       TxnStateLegalityData::new(false),
   );
   //let mut state = TxnState::new(RuleSet::KgsJapanese.rules(), TxnStateFeaturesData::new());

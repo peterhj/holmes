@@ -61,13 +61,7 @@ impl TxnStateLegalityData {
         BitSet::from_bit_vec(BitVec::from_elem(Board::SIZE, true)),
         BitSet::from_bit_vec(BitVec::from_elem(Board::SIZE, true)),
       ],
-      test_state: TxnState::new(
-          TxnStateConfig{
-            rules:  RuleSet::KgsJapanese.rules(),
-            ranks:  [PlayerRank::Dan(9), PlayerRank::Dan(9)],
-          },
-          (),
-      ),
+      test_state: TxnState::new(TxnStateConfig::default(), ()),
       tmp_mark: BitSet::with_capacity(Board::SIZE),
     }
   }

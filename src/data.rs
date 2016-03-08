@@ -128,10 +128,8 @@ impl EpisodePreproc for GogodbEpisodePreproc {
 
     let mut history = vec![];
     let mut state = TxnState::new(
-        TxnStateConfig{
-          rules:  RuleSet::KgsJapanese.rules(),
-          ranks:  [PlayerRank::Dan(9), PlayerRank::Dan(9)],
-        },
+        // FIXME(20160308): infer correct state cfg (namely, komi and ranks).
+        TxnStateConfig::default(),
         TxnStateNodeData::new(),
         //TxnStateLibFeaturesData::new(),
     );

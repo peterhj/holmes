@@ -22,9 +22,10 @@ use search::parallel_tree::{
   SharedTree,
   ParallelMonteCarloSearchServer,
   SearchWorkerConfig,
+  SearchWorkerBatchConfig,
   SearchWorkerCommand,
 };
-use txnstate::{TxnState};
+use txnstate::{TxnStateConfig, TxnState};
 use txnstate::extras::{TxnStateNodeData};
 
 use cuda::runtime::{CudaDevice};
@@ -713,12 +714,17 @@ impl MetaLevelSearch {
     assert!(worker_batch_size >= 1);
     assert!(worker_num_batches >= 1);
 
-    let worker_cfg = SearchWorkerConfig{
+    /*let worker_cfg = SearchWorkerConfig{
       batch_size:       worker_batch_size,
       num_batches:      worker_num_batches,
       // FIXME(20160112): use correct komi value.
       komi:             7.5,
       prev_mean_score:  0.0,
+    };*/
+    let worker_cfg = SearchWorkerConfig{
+      batch_cfg:            SearchWorkerBatchConfig::Fixed{num_batches: worker_num_batches},
+      tree_batch_size:      None,
+      rollout_batch_size:   worker_batch_size,
     };
 
     match (objective, input) {
@@ -763,7 +769,7 @@ pub struct MetaLevelDriver {
 }
 
 impl MetaLevelDriver {
-  pub fn new(mc_cfg: MonteCarloSearchConfig, tree_cfg: TreePolicyConfig) -> MetaLevelDriver {
+  pub fn new(state_cfg: TxnStateConfig, search_cfg: MonteCarloSearchConfig, tree_cfg: TreePolicyConfig) -> MetaLevelDriver {
     //setup_ieee_env();
     Gsl::disable_error_handler();
     //Gsl::set_error_handler(panic_error_handler);
@@ -771,6 +777,7 @@ impl MetaLevelDriver {
     let worker_rollout_batch_capacity = 576;
     let num_workers = CudaDevice::count().unwrap();
     let server =  ParallelMonteCarloSearchServer::new(
+        state_cfg,
         num_workers,
         worker_tree_batch_capacity,
         worker_rollout_batch_capacity,
@@ -781,7 +788,7 @@ impl MetaLevelDriver {
         ),
     );
     MetaLevelDriver{
-      mc_cfg:   mc_cfg,
+      mc_cfg:   search_cfg,
       tree_cfg: tree_cfg,
       server:   server,
     }

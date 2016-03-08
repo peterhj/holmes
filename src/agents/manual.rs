@@ -19,10 +19,7 @@ impl ManualAgent {
       player:   None,
       history:  vec![],
       state:    TxnState::new(
-          TxnStateConfig{
-            rules:  RuleSet::KgsJapanese.rules(),
-            ranks:  [PlayerRank::Dan(9), PlayerRank::Dan(9)],
-          },
+          TxnStateConfig::default(),
           (),
       ),
     }

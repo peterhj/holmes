@@ -8,6 +8,8 @@ use search::parallel_tree::{
   MonteCarloSearchConfig,
   TreePolicyConfig,
   SharedTree,
+  SearchWorkerConfig,
+  SearchWorkerBatchConfig,
   MonteCarloSearchResult,
   ParallelMonteCarloSearchServer,
   ParallelMonteCarloSearch,
@@ -48,6 +50,7 @@ impl ParallelMonteCarloSearchAgent {
   pub fn new(config: MonteCarloSearchConfig, tree_cfg: TreePolicyConfig, num_workers: Option<usize>) -> ParallelMonteCarloSearchAgent {
     println!("DEBUG: parallel search agent: search config: {:?}", config);
     println!("DEBUG: parallel search agent: tree policy config: {:?}", tree_cfg);
+    let state_cfg = TxnStateConfig::default();
     let num_devices = CudaDevice::count().unwrap();
     let num_workers = num_workers.unwrap_or(num_devices);
     let num_workers = min(num_workers, num_devices);
@@ -63,16 +66,14 @@ impl ParallelMonteCarloSearchAgent {
       history:  vec![],
       ply:      0,
       state:    TxnState::new(
-          TxnStateConfig{
-            rules:  RuleSet::KgsJapanese.rules(),
-            ranks:  [PlayerRank::Dan(9), PlayerRank::Dan(9)],
-          },
+          state_cfg,
           TxnStateNodeData::new(),
       ),
       result:   None,
       tree:     None,
       rng:      Xorshiftplus128Rng::new(&mut thread_rng()),
       server:   ParallelMonteCarloSearchServer::new(
+          state_cfg,
           num_workers, 1, worker_batch_capacity,
           ConvnetPolicyWorkerBuilder::new(tree_cfg, num_workers, 1, worker_batch_capacity),
       ),
@@ -172,10 +173,14 @@ impl Agent for ParallelMonteCarloSearchAgent {
     } else {
       self.tree.as_ref().unwrap().clone()
     };
+    let worker_cfg = SearchWorkerConfig{
+      batch_cfg:    SearchWorkerBatchConfig::Fixed{num_batches: num_rollouts / batch_size},
+      tree_batch_size:      None,
+      rollout_batch_size:   batch_size,
+    };
     let mut search = ParallelMonteCarloSearch::new();
     let (search_res, search_stats) = search.join(
-        num_rollouts,
-        batch_size,
+        worker_cfg,
         &mut self.server,
         self.player.unwrap(),
         &self.state,

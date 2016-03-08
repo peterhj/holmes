@@ -843,7 +843,7 @@ impl BensonScratch {
 pub struct TxnStateConfig {
   pub rules:    Rules,
   pub ranks:    [PlayerRank; 2],
-  //pub komi:     f32,
+  pub komi:     f32,
 }
 
 impl Default for TxnStateConfig {
@@ -854,6 +854,7 @@ impl Default for TxnStateConfig {
         PlayerRank::Dan(9),
         PlayerRank::Dan(9),
       ],
+      komi:     6.5,
     }
   }
 }

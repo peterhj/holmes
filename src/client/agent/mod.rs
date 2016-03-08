@@ -8,11 +8,24 @@ pub mod parallel_search;
 
 #[derive(Clone, Copy, Debug)]
 pub enum AgentMsg {
-  StartMatch{our_stone: Stone, board_size: i32, main_time_secs: i32, byoyomi_time_secs: i32},
+  StartMatch{
+    our_stone: Stone,
+    board_size: i32,
+    main_time_secs: i32,
+    byoyomi_time_secs: i32,
+  },
   CheckTime,
   RecvTime,
-  SubmitAction{turn: Stone, action: Action},
-  RecvAction{move_number: i32, turn: Stone, action: Action},
+  SubmitAction{
+    turn:   Stone,
+    action: Action,
+  },
+  RecvAction{
+    turn:         Stone,
+    action:       Action,
+    move_number:  Option<i32>,
+    time_left_s:  Option<i32>,
+  },
   FinishMatch,
 }
 

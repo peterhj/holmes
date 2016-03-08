@@ -345,6 +345,7 @@ fn main() {
         TxnStateConfig{
           rules:  RuleSet::KgsJapanese.rules(),
           ranks:  [b_rank, w_rank],
+          komi:   6.5,
         },
         FeatsData::new(),
     );

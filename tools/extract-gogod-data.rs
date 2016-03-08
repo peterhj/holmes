@@ -115,6 +115,7 @@ fn main() {
         TxnStateConfig{
           rules:  RuleSet::KgsJapanese.rules(),
           ranks:  [PlayerRank::Dan(9), PlayerRank::Dan(9)],
+          komi:   6.5,
         },
         TxnStateLibFeaturesData::new(),
     );

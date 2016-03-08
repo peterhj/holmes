@@ -48,7 +48,7 @@ use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::rc::{Rc};
 use std::sync::{Arc, Barrier, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
-use std::sync::atomic::{AtomicUsize, Ordering, fence};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering, fence};
 use std::sync::mpsc::{Sender, Receiver, channel};
 use time::{get_time};
 use vec_map::{VecMap};
@@ -1428,10 +1428,21 @@ pub enum SearchWorkerOutput {
 
 #[derive(Clone, Copy, Debug)]
 pub struct SearchWorkerConfig {
-  pub batch_size:       usize,
-  pub num_batches:      usize,
-  pub komi:             f32,
-  pub prev_mean_score:  f32,
+  pub batch_cfg:    SearchWorkerBatchConfig,
+  pub tree_batch_size:      Option<usize>,
+  pub rollout_batch_size:   usize,
+  //pub batch_size:   usize,
+  //pub num_batches:      usize,
+  //pub komi:         f32,
+  //pub prev_mean_score:  f32,
+  //pub _tree_batch_size:     usize,
+  //pub _rollout_batch_size:  usize,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum SearchWorkerBatchConfig {
+  Fixed{num_batches: usize},
+  TimeLimit{budget_ms: usize, tol_ms: usize},
 }
 
 pub struct ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
@@ -1455,6 +1466,7 @@ impl<W> Drop for ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
 
 impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
   pub fn new<B>(
+      state_cfg: TxnStateConfig,
       num_workers: usize,
       worker_tree_batch_capacity: usize,
       worker_batch_capacity: usize,
@@ -1472,11 +1484,13 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
 
     let recon_worker_builder = ParallelSearchReconWorkerBuilder::new(num_workers);
     let omega_memory = Arc::new(RwLock::new(OmegaWorkerMemory::new()));
+    let shared_signal = Arc::new(AtomicBool::new(false));
 
     for tid in 0 .. num_workers {
       let worker_builder = worker_builder.clone();
       let recon_worker_builder = recon_worker_builder.clone();
       let omega_memory = omega_memory.clone();
+      let shared_signal = shared_signal.clone();
 
       let barrier = barrier.clone();
       let out_barrier = out_barrier.clone();
@@ -1497,6 +1511,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
         let recon_worker = Rc::new(RefCell::new(recon_worker_builder.into_worker(tid, omega_worker, ())));
         //let meta_worker = MetaLevelWorker::new(recon_worker.clone());
         let omega_memory = omega_memory;
+        let shared_signal = shared_signal;
 
         let barrier = barrier;
         let in_rx = in_rx;
@@ -1509,13 +1524,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
         };
 
         let mut tree_trajs: Vec<_> = repeat(TreeTraj::new()).take(worker_batch_capacity).collect();
-        let mut leaf_states: Vec<_> = repeat(TxnState::new(
-            TxnStateConfig{
-              rules:  RuleSet::KgsJapanese.rules(),
-              ranks:  [PlayerRank::Dan(9), PlayerRank::Dan(9)],
-            },
-            TxnStateNodeData::new(),
-        )).take(worker_batch_capacity).collect();
+        let mut leaf_states: Vec<_> = repeat(TxnState::new(state_cfg, TxnStateNodeData::new())).take(worker_batch_capacity).collect();
         let mut rollout_trajs: Vec<_> = repeat(RolloutTraj::new()).take(worker_batch_capacity).collect();
 
         // FIXME(20160225): QuickTrace is deprecated.
@@ -1551,14 +1560,25 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
             }
 
             SearchWorkerCommand::ResetSearch{cfg, shared_tree, /*green_stone,*/ init_state, record_search} => {
+              let timer_start = get_time();
+
               // XXX(20160107): If the tree has no root node, this sets it;
               // otherwise use the existing root node.
               let tree = shared_tree;
               tree.try_reset(init_state, worker.borrow_mut().prior_policy());
 
-              let batch_size = cfg.batch_size;
-              let num_batches = cfg.num_batches;
-              assert!(batch_size <= worker_batch_capacity);
+              // FIXME(20160308): handle different tree and rollout batch sizes.
+              // If tree batch size is greater, offload to remote workers.
+              //let batch_size = cfg.batch_size;
+              //let num_batches = cfg.num_batches;
+              let batch_size = cfg.rollout_batch_size / num_workers;
+              /*println!("DEBUG: batch size: {} batch capacity: {}",
+                  batch_size, worker_batch_capacity);
+              assert!(batch_size <= worker_batch_capacity);*/
+              if batch_size > worker_batch_capacity {
+                panic!("WARNING: batch_size ({}) exceeds batch capacity ({})",
+                    batch_size, worker_batch_capacity);
+              }
               let tree_cfg = tree.tree_cfg;
 
               let root_node = {
@@ -1574,6 +1594,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
 
                 inner.root_node.as_ref().unwrap().clone()
               };
+              let komi = root_node.read().unwrap().state.config.komi;
 
               let mut explore_elapsed_ms = 0;
               let mut rollout_elapsed_ms = 0;
@@ -1592,19 +1613,25 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
               // FIXME(20151222): should share stats between workers.
               //let mut stats: SearchStats = Default::default();
 
+              // FIXME(20160308): old QuickTrace is deprecated.
               /*for trace in traces.iter_mut() {
                 trace.reset();
               }*/
-              if traces.len() < num_batches * batch_size {
+              /*if traces.len() < num_batches * batch_size {
                 for _ in traces.len() .. num_batches * batch_size {
                   traces.push(QuickTrace::new());
                 }
-              }
+              }*/
 
+              if tid == 0 {
+                shared_signal.store(false, Ordering::Release);
+              }
               barrier.wait();
               fence(Ordering::AcqRel);
 
-              for batch in 0 .. num_batches {
+              //for batch in 0 .. num_batches {
+              let mut batch = 0;
+              loop {
                 /*println!("DEBUG: worker {} batch {}/{}",
                     tid, batch, num_batches);*/
 
@@ -1685,7 +1712,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
                     None
                   };
                   rollout_traj.update_mc_live_counts(&mut mc_live_counts);
-                  TreeOps::backup(use_rave, cfg.komi, tree_cfg.horizon_cfg, tree_traj, rollout_traj, rollout_trace, &mut rng);
+                  TreeOps::backup(use_rave, komi, tree_cfg.horizon_cfg, tree_traj, rollout_traj, rollout_trace, &mut rng);
 
                   /*//let raw_score = rollout_traj.raw_score.unwrap();
                   let score = rollout_traj.score.unwrap();
@@ -1709,6 +1736,30 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
                       root.values.num_trials[0].load(Ordering::Acquire),
                   );
                 }*/
+
+                batch += 1;
+                match cfg.batch_cfg {
+                  SearchWorkerBatchConfig::Fixed{num_batches} => {
+                    if batch >= num_batches {
+                      break;
+                    }
+                  }
+                  SearchWorkerBatchConfig::TimeLimit{budget_ms, tol_ms} => {
+                    if tid == 0 {
+                      let timer_lap = get_time();
+                      let elapsed_ms = (timer_lap - timer_start).num_milliseconds() as usize;
+                      if elapsed_ms + tol_ms > budget_ms {
+                        shared_signal.store(true, Ordering::Release);
+                      }
+                    }
+                    barrier.wait();
+                    fence(Ordering::AcqRel);
+                    let signal = shared_signal.load(Ordering::Acquire);
+                    if signal {
+                      break;
+                    }
+                  }
+                }
               }
 
               if record_search {
@@ -2094,8 +2145,10 @@ impl ParallelMonteCarloSearch {
   }
 
   pub fn join<W>(&self,
-      total_num_rollouts: usize,
-      total_batch_size:   usize,
+      //total_num_rollouts: usize,
+      //total_batch_size: usize,
+      //batch_cfg:    SearchWorkerBatchConfig,
+      worker_cfg:   SearchWorkerConfig,
       server:       &ParallelMonteCarloSearchServer<W>,
       green_stone:  Stone,
       init_state:   &TxnState<TxnStateNodeData>,
@@ -2106,13 +2159,14 @@ impl ParallelMonteCarloSearch {
       where W: SearchPolicyWorker
   {
     let num_workers = server.num_workers();
-    let num_rollouts = (total_num_rollouts + num_workers - 1) / num_workers * num_workers;
+    /*let num_rollouts = (total_num_rollouts + num_workers - 1) / num_workers * num_workers;
     let worker_num_rollouts = num_rollouts / num_workers;
     //let worker_batch_size = server.worker_batch_size();
     let worker_batch_size = (total_batch_size + num_workers - 1) / num_workers;
     let worker_num_batches = (worker_num_rollouts + worker_batch_size - 1) / worker_batch_size;
     assert!(worker_batch_size >= 1);
-    assert!(worker_num_batches >= 1);
+    assert!(worker_num_batches >= 1);*/
+
     /*println!("DEBUG: server config: num workers:          {}", num_workers);
     println!("DEBUG: server config: worker num rollouts:  {}", worker_num_rollouts);
     println!("DEBUG: server config: worker batch size:    {}", worker_batch_size);
@@ -2131,23 +2185,26 @@ impl ParallelMonteCarloSearch {
         0.0
       }
     };*/
-    let cfg = SearchWorkerConfig{
-      batch_size:       worker_batch_size,
-      num_batches:      worker_num_batches,
+    /*let cfg = SearchWorkerConfig{
+      batch_cfg:    batch_cfg,
+      batch_size:   worker_batch_size,
+      //num_batches:      worker_num_batches,
       // FIXME(20160112): use correct komi value.
-      komi:             7.5,
+      //komi:             7.5,
       // FIXME(20160219): use correct root node score if it has sufficient
       // sample size, otherwise...?
       //prev_mean_score:  prev_result.map_or(0.0, |r| r.expected_score),
       //prev_mean_score:  prev_mean_score,
-      prev_mean_score:  0.0,
-    };
+      //prev_mean_score:  0.0,
+      //_tree_batch_size:     worker_batch_size,
+      //_rollout_batch_size:  worker_batch_size,
+    };*/
     //println!("DEBUG: ParallelMonteCarloSearch: worker config: {:?}", cfg);
 
     let start_time = get_time();
     for tid in 0 .. num_workers {
       server.enqueue(tid, SearchWorkerCommand::ResetSearch{
-        cfg:            cfg,
+        cfg:            worker_cfg,
         shared_tree:    shared_tree.clone(),
         //green_stone:    Stone::White, // FIXME FIXME FIXME(20160208): use correct color.
         init_state:     init_state.clone(),
@@ -2179,9 +2236,11 @@ impl ParallelMonteCarloSearch {
       )
     };
 
+    // FIXME(20160308): count monte carlo dead/alive;
+    // requires number of trajectories.
     let mut b_mc_alive = 0;
     let mut w_mc_alive = 0;
-    let live_thresh = (0.9 * (worker_batch_size * worker_num_batches * num_workers) as f32).ceil() as usize;
+    /*let live_thresh = (0.9 * (worker_batch_size * worker_num_batches * num_workers) as f32).ceil() as usize;
     for p in 0 .. Board::SIZE {
       if shared_mc_live_counts[0][p].load(Ordering::Acquire) >= live_thresh {
         b_mc_alive += 1;
@@ -2189,7 +2248,7 @@ impl ParallelMonteCarloSearch {
       if shared_mc_live_counts[1][p].load(Ordering::Acquire) >= live_thresh {
         w_mc_alive += 1;
       }
-    }
+    }*/
 
     let root_pv = search_principal_variation(root_node.clone(), 3);
 
@@ -2280,7 +2339,7 @@ impl MonteCarloSearchConfig {
   }
 }
 
-pub struct ParallelMonteCarloSearchAndTrace {
+/*pub struct ParallelMonteCarloSearchAndTrace {
   pub search_traces:    VecMap<SearchTrace>,
 }
 
@@ -2313,8 +2372,8 @@ impl ParallelMonteCarloSearchAndTrace {
       batch_size:       worker_batch_size,
       num_batches:      worker_num_batches,
       // FIXME(20160112): use correct komi value.
-      komi:             7.5,
-      prev_mean_score:  0.0,
+      //komi:             7.5,
+      //prev_mean_score:  0.0,
     };
 
     let start_time = get_time();
@@ -2345,7 +2404,7 @@ impl ParallelMonteCarloSearchAndTrace {
     // FIXME(20160225)
     unimplemented!();
   }
-}
+}*/
 
 /*#[derive(Clone, Copy, Debug)]
 pub struct MonteCarloEvalResult {
