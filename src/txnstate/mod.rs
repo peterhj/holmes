@@ -1212,7 +1212,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
     // and they consist of empty or -X stones.
     for root_p in 0 .. Board::SIZE {
       if self.position.stones[root_p] != turn {
-        if !scratch.enclosed_map.contains_key(&root_p) {
+        if !scratch.enclosed_map.contains_key(root_p) {
           let root_idx = scratch.enclosed.len();
           scratch.enclosed_map.insert(root_p, root_idx);
           scratch.enclosed.push(vec![root_p]);
@@ -1224,7 +1224,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
           while head < scratch.queue.len() {
             let p = scratch.queue[head];
             if self.position.stones[p] != turn {
-              if !scratch.enclosed_map.contains_key(&p) {
+              if !scratch.enclosed_map.contains_key(p) {
                 scratch.enclosed_map.insert(p, root_idx);
                 scratch.enclosed[root_idx].push(p);
                 for_each_adjacent(Point::from_idx(p), |adj_pt| {
@@ -1246,7 +1246,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
         let mut interior = true;
         for_each_adjacent(Point::from_idx(p), |adj_pt| {
           let adj_p = adj_pt.idx();
-          if !scratch.enclosed_map.contains_key(&adj_p) {
+          if !scratch.enclosed_map.contains_key(adj_p) {
             interior = false;
           } else {
             assert_eq!(idx, scratch.enclosed_map[adj_p]);
@@ -1280,7 +1280,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
               let chain_head_idx = chain_head.idx();
               if !small_enc_extchs[idx].contains(&chain_head_idx) {
                 small_enc_extchs[idx].push(chain_head_idx);
-                if !chain_small_encs.contains_key(&chain_head_idx) {
+                if !chain_small_encs.contains_key(chain_head_idx) {
                   chain_small_encs.insert(chain_head_idx, vec![idx]);
                 } else {
                   chain_small_encs[chain_head_idx].push(idx);
@@ -1311,7 +1311,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
           }
         }
         //scratch.healthy[idx].push(chain_head_idx, is_healthy);
-        if !scratch.healthy.contains_key(&chain_head_idx) {
+        if !scratch.healthy.contains_key(chain_head_idx) {
           scratch.healthy.insert(chain_head_idx, vec![(idx, is_healthy)]);
         } else {
           scratch.healthy[chain_head_idx].push((idx, is_healthy));
@@ -1325,7 +1325,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
       for chain_head_idx in scratch.vital_chains.keys() {
         let mut healthy_count = 0;
         for &(region_idx, is_healthy) in scratch.healthy[chain_head_idx].iter() {
-          if scratch.vital_regions.contains_key(&region_idx) && is_healthy {
+          if scratch.vital_regions.contains_key(region_idx) && is_healthy {
             healthy_count += 1;
             if healthy_count >= 2 {
               scratch.queue.push(chain_head_idx);
@@ -1343,7 +1343,7 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
       for region_idx in scratch.vital_regions.keys() {
         let mut contained = true;
         for &chain_head_idx in scratch.small_enc_extchs[region_idx].iter() {
-          if !scratch.vital_chains.contains_key(&chain_head_idx) {
+          if !scratch.vital_chains.contains_key(chain_head_idx) {
             contained = false;
             break;
           }

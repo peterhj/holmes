@@ -349,7 +349,7 @@ where TreeWork: TreeBatchWorker,
             (
               node.state.current_turn(),
               node.visit_count.load(Ordering::Acquire),
-              node.child_nodes.contains_key(&j),
+              node.child_nodes.contains_key(j),
             )
           };
           if visit_count < search_trace.tree_cfg.unwrap().visit_thresh {
@@ -369,7 +369,7 @@ where TreeWork: TreeBatchWorker,
             });*/
             let new_node = Arc::new(RwLock::new(ReconNode::new(new_state)));
             let mut node = node.write().unwrap();
-            if node.child_nodes.contains_key(&j) {
+            if node.child_nodes.contains_key(j) {
               node.child_nodes[j].clone()
             } else {
               node.child_nodes.insert(j, new_node.clone());

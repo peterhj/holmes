@@ -938,7 +938,7 @@ impl SharedTree {
                 root_turn, turn);
             return false;
           }
-          let maybe_j = root_node.action_idxs.get(&p).map(|j| *j);
+          let maybe_j = root_node.action_idxs.get(p).map(|j| *j);
           if maybe_j.is_none() {
             println!("WARNING: try_advance: j-th action idx does not exist");
             return false;
@@ -1120,7 +1120,7 @@ impl TreeOps {
       // the first rollout pair belongs to the leaf node turn.
       let (update_turn, update_point) = rollout_traj.sim_pairs[0];
       if leaf_turn == update_turn {
-        if let Some(&update_j) = leaf_node.action_idxs.get(&update_point.idx()) {
+        if let Some(&update_j) = leaf_node.action_idxs.get(update_point.idx()) {
           assert_eq!(update_point, leaf_node.valid_moves[update_j]);
           //leaf_node.update_arm(update_j, adj_score[update_turn.offset()], raw_score);
           leaf_node.update_arm(update_j, score);
@@ -1150,7 +1150,7 @@ impl TreeOps {
         }
         for sim_p in rollout_traj.rave_mask[update_turn.offset()].iter() {
           let sim_point = Point::from_idx(sim_p);
-          if let Some(&sim_j) = leaf_node.action_idxs.get(&sim_point.idx()) {
+          if let Some(&sim_j) = leaf_node.action_idxs.get(sim_point.idx()) {
             assert_eq!(sim_point, leaf_node.valid_moves[sim_j]);
             //leaf_node.rave_update_arm(sim_j, adj_score[update_turn.offset()]);
             leaf_node.rave_update_arm(sim_j, score);
@@ -1186,7 +1186,7 @@ impl TreeOps {
         rollout_traj.rave_mask[update_turn.offset()].insert(update_point.idx());
         for sim_p in rollout_traj.rave_mask[update_turn.offset()].iter() {
           let sim_point = Point::from_idx(sim_p);
-          if let Some(&sim_j) = node.action_idxs.get(&sim_point.idx()) {
+          if let Some(&sim_j) = node.action_idxs.get(sim_point.idx()) {
             assert_eq!(sim_point, node.valid_moves[sim_j]);
             //node.rave_update_arm(sim_j, adj_score[update_turn.offset()]);
             node.rave_update_arm(sim_j, score);
