@@ -47,6 +47,7 @@ struct AgentImpl {
   state_machine:    AgentStateMachine,
   //match_started:    bool,
   our_stone:        Option<Stone>,
+  komi:             f32,
   main_time_s:      i32,
   byoyomi_time_s:   i32,
   //start_time:       Option<Timespec>,
@@ -88,6 +89,7 @@ impl AgentImpl {
       tree_cfg:     tree_cfg,
       state_machine:    AgentStateMachine::Reset,
       our_stone:        None,
+      komi:             6.5,
       main_time_s:      0,
       byoyomi_time_s:   0,
       //start_time:       None,
@@ -102,6 +104,12 @@ impl AgentImpl {
           ConvnetPolicyWorkerBuilder::new(tree_cfg, num_workers, 1, worker_batch_capacity),
       ),
     }
+  }
+
+  pub fn wait_ready(&mut self) {
+    // XXX(20160308): Send a message (any message) to the server, and when
+    // we get back a response, it is probably good to go.
+    self.server.wait_ready();
   }
 
   pub fn ponder(&mut self) {
@@ -202,11 +210,15 @@ impl AsyncAgent for ParallelSearchAsyncAgent {
   fn spawn_runloop(barrier: Arc<Barrier>, agent_in_rx: Receiver<AgentMsg>, agent_out_tx: Sender<AgentMsg>) -> JoinHandle<()> {
     spawn(move || {
       let mut agent = AgentImpl::new();
+      agent.wait_ready();
+      agent_out_tx.send(AgentMsg::Ready).unwrap();
       loop {
         match agent_in_rx.try_recv() {
           Ok(AgentMsg::StartMatch{our_stone, main_time_secs, byoyomi_time_secs, ..}) => {
             println!("DEBUG: agent: start match");
             agent.our_stone = Some(our_stone);
+            // FIXME(20160308): StartMatch should also contain the komi.
+            //agent.komi = komi;
             agent.main_time_s = main_time_secs;
             agent.byoyomi_time_s = byoyomi_time_secs;
             //agent.start_time = Some(get_time());

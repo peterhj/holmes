@@ -20,7 +20,7 @@ pub struct GameConfig {
   pub rules:    Rules,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, RustcDecodable, RustcEncodable)]
 pub struct Rules {
   pub score_captures:   bool,
   pub score_stones:     bool,
@@ -31,20 +31,20 @@ pub struct Rules {
   pub suicide_rule:     SuicideRule,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, RustcDecodable, RustcEncodable)]
 pub enum HandicapKomi {
   Zero,
   One,
   OneExceptFirst,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, RustcDecodable, RustcEncodable)]
 pub enum KoRule {
   Ko,
   Superko,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, RustcDecodable, RustcEncodable)]
 pub enum SuicideRule {
   Illegal,
   Allowed,
@@ -97,14 +97,14 @@ impl RuleSet {
   }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, RustcDecodable, RustcEncodable, Debug)]
 pub enum PlayerRank {
   Kyu(u8),
   Ama(u8),
   Dan(u8),
 }
 
-#[derive(Clone, Copy, Eq, PartialEq, Debug)]
+#[derive(Clone, Copy, Eq, PartialEq, RustcDecodable, RustcEncodable, Debug)]
 pub enum Stone {
   Black = 0,
   White = 1,
@@ -137,7 +137,7 @@ impl Stone {
   }
 }
 
-#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Debug)]
+#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, RustcDecodable, RustcEncodable, Debug)]
 pub struct Point(pub i16);
 
 impl Point {
@@ -172,7 +172,7 @@ impl Point {
   }
 }*/
 
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq, RustcDecodable, RustcEncodable)]
 pub enum Action {
   Place{point: Point},
   Pass,

@@ -8,12 +8,20 @@ pub mod parallel_search;
 
 #[derive(Clone, Copy, Debug)]
 pub enum AgentMsg {
+  Ready,
   StartMatch{
     our_stone: Stone,
     board_size: i32,
     main_time_secs: i32,
     byoyomi_time_secs: i32,
   },
+  _RequestMatch{
+    our_stone: Stone,
+    board_size: i32,
+    main_time_secs: i32,
+    byoyomi_time_secs: i32,
+  },
+  _AcceptMatch,
   CheckTime,
   RecvTime,
   SubmitAction{

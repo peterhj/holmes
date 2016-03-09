@@ -2,8 +2,7 @@ use board::{Board, Rules, RuleSet, Coord, PlayerRank, Stone, Point, Action};
 use gtp_board::{dump_xcoord};
 use pattern::{Pattern3x3};
 
-use bit_set::{BitSet};
-use bit_vec::{BitVec};
+use rustc_serialize::{Decodable, Encodable};
 use std::cmp::{max};
 use std::collections::{BTreeSet};
 use std::iter::{repeat};
@@ -203,7 +202,7 @@ pub enum IllegalReason {
   Ko,
 }
 
-pub trait TxnStateData {
+pub trait TxnStateData: Encodable + Decodable {
   fn reset(&mut self) {
     // Do nothing.
   }
@@ -216,7 +215,7 @@ pub trait TxnStateData {
 impl TxnStateData for () {
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, RustcDecodable, RustcEncodable, Debug)]
 pub struct TxnPosition {
   pub ranks:    [PlayerRank; 2],
 
@@ -244,7 +243,7 @@ pub struct TxnPosition {
   pub last_atari:   Vec<Vec<Point>>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, RustcDecodable, RustcEncodable, Debug)]
 pub struct TxnPositionProposal {
   // Fields to directly overwrite upon commit.
   resigned:     Option<Stone>,
@@ -259,7 +258,7 @@ pub struct TxnPositionProposal {
   prev_place:   (Stone, Point),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, RustcDecodable, RustcEncodable, Debug)]
 pub struct Chain {
   ps_libs:  Vec<Point>,
   size:     u16,
@@ -474,7 +473,7 @@ impl Chain {
   }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, RustcDecodable, RustcEncodable, Debug)]
 enum ChainOp {
   Create{head: Point},
   ExtendPoint{head: Point, point: Point},
@@ -483,7 +482,7 @@ enum ChainOp {
   //Kill{head: Point, cap_ptrs: Vec<(Point, Point)>, cap_chain: Box<Chain>},
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, RustcDecodable, RustcEncodable, Debug)]
 pub struct TxnChainsList {
   num_chains: usize,
   chains:     Vec<Option<Box<Chain>>>,
@@ -839,7 +838,7 @@ impl BensonScratch {
   }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, RustcDecodable, RustcEncodable, Copy)]
 pub struct TxnStateConfig {
   pub rules:    Rules,
   pub ranks:    [PlayerRank; 2],
@@ -867,7 +866,7 @@ impl Default for TxnStateConfig {
 ///   entering a txn and after committing a txn
 /// - the TxnState holds auxiliary extra data (e.g., useful for search nodes vs.
 ///   rollouts)
-#[derive(Clone)]
+#[derive(Clone, RustcDecodable, RustcEncodable)]
 pub struct TxnState<Data=()> where Data: TxnStateData + Clone {
   pub config:   TxnStateConfig,
   rules:        Rules,

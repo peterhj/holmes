@@ -1361,6 +1361,7 @@ pub struct RolloutStats {
 
 #[derive(Clone)]
 pub enum SearchWorkerCommand {
+  Noop,
   Quit,
   ResetSerialSearch{
     cfg:        SearchWorkerConfig,
@@ -1370,6 +1371,11 @@ pub enum SearchWorkerCommand {
     cfg:            SearchWorkerConfig,
     shared_tree:    SharedTree,
     init_state:     TxnState<TxnStateNodeData>,
+    record_search:  bool,
+  },
+  Rollout{
+    worker_cfg:     SearchWorkerConfig,
+    leaf_states:    Vec<TxnState<TxnStateNodeData>>,
     record_search:  bool,
   },
   TrainMetaLevelTD0Gradient{
@@ -1448,10 +1454,23 @@ pub enum SearchWorkerBatchConfig {
 pub struct ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
   num_workers:              usize,
   worker_batch_capacity:    usize,
-  pool:         ThreadPool,
+
+  // XXX(20160308): Search workers perform the tree and rollout policies and
+  // backup the tree after rollouts.
+  search_pool:  ThreadPool,
   in_txs:       Vec<Sender<SearchWorkerCommand>>,
   out_rx:       Receiver<SearchWorkerOutput>,
   out_barrier:  Arc<Barrier>,
+
+  // FIXME(20160308): Prior workers are for async prior evaluations.
+  //prior_pool:   ThreadPool,
+
+  // FIXME(20160308): Master worker (only one) is for distributed rollouts.
+  //master_pool:  ThreadPool,
+
+  // FIXME(20160308): Backup workers are for distributed rollouts.
+  //backup_pool:  ThreadPool,
+
   _marker:      PhantomData<W>,
 }
 
@@ -1471,12 +1490,26 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
       worker_tree_batch_capacity: usize,
       worker_batch_capacity: usize,
       worker_builder: B) -> ParallelMonteCarloSearchServer<W>
-  where B: 'static + SearchPolicyWorkerBuilder<Worker=W> {
+  where B: 'static + SearchPolicyWorkerBuilder<Worker=W>
+  {
+    let search_pool = ThreadPool::new(num_workers);
     let barrier = Arc::new(Barrier::new(num_workers));
-    let pool = ThreadPool::new(num_workers);
-    let out_barrier = Arc::new(Barrier::new(num_workers + 1));
     let mut in_txs = vec![];
     let (out_tx, out_rx) = channel();
+    let out_barrier = Arc::new(Barrier::new(num_workers + 1));
+
+    // FIXME(20160308): for async priors and distributed rollouts.
+    /*let prior_pool = ThreadPool::new(num_workers);
+    let prior_barrier = Arc::new(Barrier::new(num_workers));
+    let prior_ext_barrier = Arc::new(Barrier::new(num_workers + 1));
+    let mut search_to_prior_txs = vec![];
+    let mut search_to_prior_rxs = vec![];
+    let mut prior_to_search_txs = vec![];
+    let mut prior_to_search_rxs = vec![];
+
+    let master_pool = ThreadPool::new(1);
+
+    let backup_pool = ThreadPool::new(num_workers);*/
 
     /*let shared_rollout_rewards = Arc::new(AtomicUsize::new(0));
     let shared_rollout_count = Arc::new(AtomicUsize::new(0));
@@ -1504,7 +1537,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
       let shared_rollout_count = shared_rollout_count.clone();
       let shared_traces_count = shared_traces_count.clone();*/
 
-      pool.execute(move || {
+      search_pool.execute(move || {
         let mut rng = Xorshiftplus128Rng::new(&mut thread_rng());
         let worker = Rc::new(RefCell::new(worker_builder.into_worker(tid, worker_tree_batch_capacity, worker_batch_capacity)));
         let omega_worker = OmegaTreeBatchWorker::new(omega_memory.clone(), worker.clone());
@@ -1550,6 +1583,11 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
           // estimate; should check for termination within inner batch loop.
           let cmd: SearchWorkerCommand = in_rx.recv().unwrap();
           match cmd {
+            SearchWorkerCommand::Noop => {
+              // Do nothing (other than synchronize).
+              out_barrier.wait();
+            }
+
             SearchWorkerCommand::Quit => {
               break;
             }
@@ -1756,6 +1794,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
                     fence(Ordering::AcqRel);
                     let signal = shared_signal.load(Ordering::Acquire);
                     if signal {
+                      println!("DEBUG: server: reached time limit, num batches: {}", batch);
                       break;
                     }
                   }
@@ -1784,6 +1823,11 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
 
               out_barrier.wait();
               fence(Ordering::AcqRel);
+            }
+
+            SearchWorkerCommand::Rollout{worker_cfg, leaf_states, record_search} => {
+              // FIXME(20160308)
+              unimplemented!();
             }
 
             SearchWorkerCommand::TrainMetaLevelTD0Gradient{t} => {
@@ -2055,7 +2099,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
     ParallelMonteCarloSearchServer{
       num_workers:              num_workers,
       worker_batch_capacity:    worker_batch_capacity,
-      pool:         pool,
+      search_pool:  search_pool,
       in_txs:       in_txs,
       out_rx:       out_rx,
       out_barrier:  out_barrier,
@@ -2081,6 +2125,14 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
 
   pub fn recv_output(&self) -> SearchWorkerOutput {
     self.out_rx.recv().unwrap()
+  }
+
+  pub fn wait_ready(&self) {
+    let num_workers = self.num_workers();
+    for tid in 0 .. num_workers {
+      self.enqueue(tid, SearchWorkerCommand::Noop);
+    }
+    self.join();
   }
 }
 

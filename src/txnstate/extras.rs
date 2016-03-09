@@ -43,7 +43,7 @@ where F: FnMut(&TxnPosition, &TxnChainsList, Point) {
   }
 }
 
-#[derive(Clone)]
+#[derive(Clone, RustcDecodable, RustcEncodable)]
 pub struct TxnStateLegalityData {
   strict:       bool,
 
@@ -211,7 +211,7 @@ impl TxnStateData for TxnStateLegalityData {
   }
 }
 
-#[derive(Clone)]
+#[derive(Clone, RustcDecodable, RustcEncodable)]
 //pub struct TxnStateNodeData<Feats=TxnStateLibFeaturesData> where Feats: TxnStateData + Clone {
 pub struct TxnStateNodeData {
   //pub features: TxnStateFeaturesData,
@@ -246,7 +246,7 @@ impl TxnStateData for TxnStateNodeData {
   }
 }
 
-#[derive(Clone)]
+#[derive(Clone, RustcDecodable, RustcEncodable)]
 pub struct TxnStateRolloutData {
   //pub features: TxnStateLibFeaturesData,
   //pub features: TxnStateAlphaFeatsV2Data,

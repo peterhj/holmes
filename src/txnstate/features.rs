@@ -17,7 +17,7 @@ pub trait TxnStateFeatures: TxnStateData {
   fn extract_relative_features(&self, turn: Stone, dst_buf: &mut [u8]);
 }
 
-#[derive(Clone)]
+#[derive(Clone, RustcDecodable, RustcEncodable)]
 pub struct TxnStateFeaturesData {
   //compute_diff:       bool,
   time_step:  usize,
@@ -179,7 +179,7 @@ impl TxnStateData for TxnStateFeaturesData {
   }
 }
 
-#[derive(Clone)]
+#[derive(Clone, RustcDecodable, RustcEncodable)]
 pub struct TxnStateLibFeaturesData {
   time_step:  usize,
   features:   Vec<u8>,
@@ -402,7 +402,7 @@ impl TxnStateData for TxnStateLibFeaturesData {
   }
 }
 
-#[derive(Clone)]
+#[derive(Clone, RustcDecodable, RustcEncodable)]
 pub struct TxnStateExtLibFeatsData {
   features:     Vec<u8>,
   prev_moves:   Vec<Option<(Stone, Point)>>,
@@ -793,7 +793,7 @@ impl TxnStateData for TxnStateExtLibFeatsData {
   }
 }
 
-#[derive(Clone)]
+#[derive(Clone, RustcDecodable, RustcEncodable)]
 pub struct TxnStateAlphaFeatsV1Data {
   features:     Vec<u8>,
   prev_moves:   Vec<Option<(Stone, Point)>>,
@@ -1427,7 +1427,7 @@ impl TxnStateData for TxnStateAlphaFeatsV1Data {
   }
 }
 
-#[derive(Clone)]
+#[derive(Clone, RustcDecodable, RustcEncodable)]
 pub struct TxnStateAlphaFeatsV2Data {
   //pub legality: TxnStateLegalityData,
 
@@ -2385,7 +2385,7 @@ impl TxnStateData for TxnStateAlphaFeatsV2Data {
   }
 }
 
-#[derive(Clone)]
+#[derive(Clone, RustcDecodable, RustcEncodable)]
 pub struct TxnStateAlphaV3FeatsData {
   pub features: Vec<u8>,
   prev_moves:   Vec<Option<(Stone, Point)>>,
@@ -3028,7 +3028,7 @@ impl TxnStateData for TxnStateAlphaV3FeatsData {
   }
 }
 
-#[derive(Clone)]
+#[derive(Clone, RustcDecodable, RustcEncodable)]
 pub struct TxnStateAlphaMiniV3FeatsData {
   pub features: Vec<u8>,
   prev_moves:   Vec<Option<(Stone, Point)>>,

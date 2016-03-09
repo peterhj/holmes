@@ -266,8 +266,8 @@ name = "trace-meta"
 path = "tools/trace-meta.rs"
 
 [dependencies]
-bit-set = "*"
-bit-vec = "*"
+#bit-set = "*"
+#bit-vec = "*"
 bufstream = "*"
 byteorder = "*"
 docopt = "*"
@@ -296,6 +296,8 @@ cuda = { path = "../rembrandt-project/libcuda" }
 rembrandt = { path = "../rembrandt-project/rembrandt_new" }
 
 arraydb = { path = "../rembrandt-project/arraydb" }
+bit-set = { path = "../bit-set" }
+bit-vec = { path = "../bit-vec" }
 episodb = { path = "../episodb" }
 hydra = { path = "../hydra" }
 gsl = { path = "../libgsl" }

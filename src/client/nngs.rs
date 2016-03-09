@@ -3,16 +3,19 @@ use client::agent::{AsyncAgent, AgentMsg};
 use gtp_board::{Coord};
 
 use byteorder::{ReadBytesExt, WriteBytesExt};
+use toml;
 
+use std::fs::{File};
 use std::io::{Read, BufRead, Write, BufReader};
 use std::marker::{PhantomData};
+use std::path::{PathBuf};
 use std::net::{TcpStream};
 use std::str::{from_utf8};
 use std::sync::{Arc, Barrier};
 use std::sync::mpsc::{Sender, Receiver, channel};
 use std::thread::{JoinHandle, sleep_ms, spawn};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, RustcDecodable, Debug)]
 pub struct NngsServerConfig {
   pub host:     String,
   pub port:     u16,
@@ -20,12 +23,47 @@ pub struct NngsServerConfig {
   pub password: Option<String>,
 }
 
-#[derive(Clone, Debug)]
+impl NngsServerConfig {
+  pub fn open() -> Result<NngsServerConfig, ()> {
+    let path = PathBuf::from("nngs_server.config");
+    let mut file = match File::open(&path) {
+      Ok(file) => file,
+      Err(_) => return Err(()),
+    };
+    let mut buf = String::new();
+    file.read_to_string(&mut buf).unwrap();
+    let cfg: NngsServerConfig = match toml::decode_str(&buf) {
+      Some(x) => x,
+      None => return Err(()),
+    };
+    Ok(cfg)
+  }
+}
+
+#[derive(Clone, RustcDecodable, Debug)]
 pub struct NngsMatchConfig {
-  pub color:    Stone,
-  pub opponent: Vec<u8>,
-  pub time:     i32,
-  pub byoyomi:  i32,
+  pub automatch:    bool,
+  pub our_stone:    Stone,
+  pub opponent:     String,
+  pub main_time:    i32,
+  pub byoyomi_time: i32,
+}
+
+impl NngsMatchConfig {
+  pub fn open() -> Result<NngsMatchConfig, ()> {
+    let path = PathBuf::from("nngs_match.config");
+    let mut file = match File::open(&path) {
+      Ok(file) => file,
+      Err(_) => return Err(()),
+    };
+    let mut buf = String::new();
+    file.read_to_string(&mut buf).unwrap();
+    let cfg: NngsMatchConfig = match toml::decode_str(&buf) {
+      Some(x) => x,
+      None => return Err(()),
+    };
+    Ok(cfg)
+  }
 }
 
 pub struct NngsOneShotClient<A> where A: AsyncAgent {
@@ -81,12 +119,21 @@ impl<A> NngsOneShotClient<A> where A: AsyncAgent {
     let agent_thr = A::spawn_runloop(barrier.clone(), agent_in_rx, agent_out_tx);
 
     let bridge_thr = {
+      let match_cfg = match_cfg.clone();
       let barrier = barrier.clone();
       let agent_out_rx = agent_out_rx;
       let writer_tx = writer_tx.clone();
       spawn(move || {
         loop {
           match agent_out_rx.recv() {
+            Ok(AgentMsg::Ready) => {
+              // Now that the agent is ready, if a match is specified, then
+              // initiate it.
+              if let Some(ref match_cfg) = match_cfg {
+                // FIXME(20160308)
+                unimplemented!();
+              }
+            }
             Ok(AgentMsg::CheckTime) => {
               // FIXME(20160308): ignore time command.
               //writer_tx.send(InternalMsg::WriteCmd{cmd: b"time".to_vec()}).unwrap();
@@ -222,6 +269,7 @@ impl<A> NngsOneShotClient<A> where A: AsyncAgent {
               }
 
               if is_match_request {
+                // FIXME(20160308): don't accept match request until the agent is ready.
                 // Send match details to agent channel.
                 agent_in_tx.send(AgentMsg::StartMatch{
                   our_stone:    match_our_stone.unwrap(),
@@ -330,7 +378,6 @@ impl<A> NngsOneShotClient<A> where A: AsyncAgent {
 
     let writer_thr = {
       let server_cfg = server_cfg.clone();
-      let match_cfg = match_cfg.clone();
       let barrier = barrier.clone();
       let writer_rx = writer_rx;
       let mut writer = stream;

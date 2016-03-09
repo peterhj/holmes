@@ -8,8 +8,8 @@ dependencies = [
  "arraydb 0.1.0",
  "async 0.1.0",
  "async_cuda 0.1.0",
- "bit-set 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "bit-vec 0.4.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "bit-set 0.3.0",
+ "bit-vec 0.4.2",
  "bufstream 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "byteorder 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "cuda 0.1.0",
@@ -123,15 +123,17 @@ dependencies = [
 [[package]]
 name = "bit-set"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
- "bit-vec 0.4.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "bit-vec 0.4.2",
+ "rustc-serialize 0.3.18 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
 name = "bit-vec"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
+version = "0.4.2"
+dependencies = [
+ "rustc-serialize 0.3.18 (registry+https://github.com/rust-lang/crates.io-index)",
+]
 
 [[package]]
 name = "bitflags"
