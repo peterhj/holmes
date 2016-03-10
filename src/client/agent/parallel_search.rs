@@ -69,8 +69,9 @@ impl AgentImpl {
       komi:     6.5,
     };
     let search_cfg = MonteCarloSearchConfig{
-      batch_size:   128,
-      num_rollouts: 0, // FIXME(20160308)
+      batch_size:   256,
+      // FIXME(20160310): Number of rollouts should be specified during search.
+      num_rollouts: 0,
     };
     let tree_cfg = TreePolicyConfig{
       horizon_cfg:  HorizonConfig::Fixed{max_horizon: 20},
@@ -214,16 +215,31 @@ impl AsyncAgent for ParallelSearchAsyncAgent {
       agent_out_tx.send(AgentMsg::Ready).unwrap();
       loop {
         match agent_in_rx.try_recv() {
-          Ok(AgentMsg::StartMatch{our_stone, main_time_secs, byoyomi_time_secs, ..}) => {
+          Ok(AgentMsg::RequestMatch{passive, opponent, our_stone, board_size, main_time_secs, byoyomi_time_secs}) => {
+            println!("DEBUG: agent: request match");
+            agent_out_tx.send(AgentMsg::AcceptMatch{
+              passive:      passive,
+              opponent:     opponent.clone(),
+              our_stone:    our_stone,
+              board_size:   board_size,
+              main_time_secs:       main_time_secs,
+              byoyomi_time_secs:    byoyomi_time_secs,
+            }).unwrap();
+          }
+
+          Ok(AgentMsg::StartMatch{our_stone, board_size, main_time_secs, byoyomi_time_secs, ..}) => {
             println!("DEBUG: agent: start match");
+
             agent.our_stone = Some(our_stone);
             // FIXME(20160308): StartMatch should also contain the komi.
             //agent.komi = komi;
             agent.main_time_s = main_time_secs;
             agent.byoyomi_time_s = byoyomi_time_secs;
-            //agent.start_time = Some(get_time());
 
+            agent.history.clear();
             agent.state.reset();
+            agent.ply = 0;
+            agent.tree = None;
 
             if Stone::Black == our_stone {
               agent.state_machine = AgentStateMachine::OurTurn;
@@ -237,17 +253,12 @@ impl AsyncAgent for ParallelSearchAsyncAgent {
               agent.state_machine = AgentStateMachine::OpponentTurn;
             } else {
               agent.state_machine = AgentStateMachine::OpponentTurn;
-              //println!("DEBUG: agent: pondering (1)...");
               agent.ponder();
-              //println!("DEBUG: agent: finished pondering");
             }
           }
 
           Ok(AgentMsg::RecvTime) => {
             println!("DEBUG: agent: recv time");
-            //assert!(agent.match_started);
-            /*let lap_time = get_time();
-            let elapsed_ms = (lap_time - self.start_time.unwrap()).num_milliseconds();*/
           }
 
           Ok(AgentMsg::RecvAction{turn, action, time_left_s, ..}) => {
@@ -282,9 +293,9 @@ impl AsyncAgent for ParallelSearchAsyncAgent {
             break;
           }
 
-          Ok(_) => {
+          Ok(msg) => {
             // FIXME(20160308): other message types are ignored.
-            println!("DEBUG: agent: unhandled message type");
+            println!("DEBUG: agent: unhandled message: {:?}", msg);
           }
 
           Err(TryRecvError::Empty) => {

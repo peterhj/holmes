@@ -6,22 +6,32 @@ use std::thread::{JoinHandle, spawn};
 
 pub mod parallel_search;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub enum AgentMsg {
   Ready,
+  RequestMatch{
+    passive: bool,
+    opponent: String,
+    our_stone: Stone,
+    board_size: i32,
+    main_time_secs: i32,
+    byoyomi_time_secs: i32,
+  },
+  AcceptMatch{
+    passive: bool,
+    opponent: String,
+    our_stone: Stone,
+    board_size: i32,
+    main_time_secs: i32,
+    byoyomi_time_secs: i32,
+  },
   StartMatch{
+    opponent: String,
     our_stone: Stone,
     board_size: i32,
     main_time_secs: i32,
     byoyomi_time_secs: i32,
   },
-  _RequestMatch{
-    our_stone: Stone,
-    board_size: i32,
-    main_time_secs: i32,
-    byoyomi_time_secs: i32,
-  },
-  _AcceptMatch,
   CheckTime,
   RecvTime,
   SubmitAction{
@@ -50,14 +60,10 @@ impl AsyncAgent for HelloAsyncAgent {
       let mut match_our_stone = None;
       loop {
         match agent_in_rx.recv() {
-          Ok(AgentMsg::StartMatch{our_stone, ..}) => {
+          Ok(AgentMsg::AcceptMatch{our_stone, ..}) => {
             println!("DEBUG: agent: start match");
             started_match = true;
             match_our_stone = Some(our_stone);
-          }
-          Ok(AgentMsg::RecvTime) => {
-            println!("DEBUG: agent: recv time");
-            assert!(started_match);
           }
           Ok(AgentMsg::RecvAction{turn, ..}) => {
             println!("DEBUG: agent: recv action");

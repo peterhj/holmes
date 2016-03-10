@@ -34,6 +34,7 @@ use txnstate::features::{
   TxnStateExtLibFeatsData,
 };
 
+use bincode::rustc_serialize as bincode;
 use float::ord::{F32InfNan};
 use rng::xorshift::{Xorshiftplus128Rng};
 use threadpool::{ThreadPool};
@@ -1353,11 +1354,11 @@ impl<W> ParallelMonteCarloEvalServer<W> where W: RolloutPolicy<R=Xorshiftplus128
   }
 }*/
 
-#[derive(Clone, Default)]
+/*#[derive(Clone, Default)]
 pub struct RolloutStats {
   pub rewards:  Arc<AtomicUsize>,
   pub count:    Arc<AtomicUsize>,
-}
+}*/
 
 #[derive(Clone)]
 pub enum SearchWorkerCommand {

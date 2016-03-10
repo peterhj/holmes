@@ -65,13 +65,13 @@ path = "tools/measure-holmes-vs-pachi.rs"
 #name = "train-3layer-19x19x4"
 #path = "tools/train-3layer-19x19x4.rs"
 
-[[bin]]
-name = "train-2layer-19x19x16"
-path = "tools/train-2layer-19x19x16.rs"
+#[[bin]]
+#name = "train-2layer-19x19x16"
+#path = "tools/train-2layer-19x19x16.rs"
 
-[[bin]]
-name = "train-narrow-3layer-19x19x16"
-path = "tools/train-narrow-3layer-19x19x16.rs"
+#[[bin]]
+#name = "train-narrow-3layer-19x19x16"
+#path = "tools/train-narrow-3layer-19x19x16.rs"
 
 #[[bin]]
 #name = "train-3layer-19x19x16"
@@ -81,13 +81,13 @@ path = "tools/train-narrow-3layer-19x19x16.rs"
 #name = "train-6layer-19x19x16"
 #path = "tools/train-6layer-19x19x16.rs"
 
-[[bin]]
-name = "train-12layer-19x19x16"
-path = "tools/train-12layer-19x19x16.rs"
+#[[bin]]
+#name = "train-12layer-19x19x16"
+#path = "tools/train-12layer-19x19x16.rs"
 
-[[bin]]
-name = "train-12layer384-19x19x16"
-path = "tools/train-12layer384-19x19x16.rs"
+#[[bin]]
+#name = "train-12layer384-19x19x16"
+#path = "tools/train-12layer384-19x19x16.rs"
 
 [[bin]]
 name = "new-train-12layer128-19x19x16"
@@ -169,21 +169,21 @@ path = "tools/holmes-convnet-vs-pachi10k_f1-f16.rs"
 name = "holmes-search-vs-pachi10k_f1-f16"
 path = "tools/holmes-search-vs-pachi10k_f1-f16.rs"
 
-[[bin]]
-name = "train-action3-narrow-3layer-19x19x16"
-path = "tools/train-action3-narrow-3layer-19x19x16.rs"
+#[[bin]]
+#name = "train-action3-narrow-3layer-19x19x16"
+#path = "tools/train-action3-narrow-3layer-19x19x16.rs"
 
-[[bin]]
-name = "train-action3-3layer-19x19x16"
-path = "tools/train-action3-3layer-19x19x16.rs"
+#[[bin]]
+#name = "train-action3-3layer-19x19x16"
+#path = "tools/train-action3-3layer-19x19x16.rs"
 
-[[bin]]
-name = "train-action3-12layer-19x19x16"
-path = "tools/train-action3-12layer-19x19x16.rs"
+#[[bin]]
+#name = "train-action3-12layer-19x19x16"
+#path = "tools/train-action3-12layer-19x19x16.rs"
 
-[[bin]]
-name = "train-action3-12layer-19x19x30"
-path = "tools/train-action3-12layer-19x19x30.rs"
+#[[bin]]
+#name = "train-action3-12layer-19x19x30"
+#path = "tools/train-action3-12layer-19x19x30.rs"
 
 [[bin]]
 name = "bench-discrete"
@@ -262,12 +262,13 @@ name = "holmes-nngs"
 path = "tools/holmes-nngs.rs"
 
 [[bin]]
-name = "trace-meta"
-path = "tools/trace-meta.rs"
+name = "trace-omega"
+path = "tools/trace-omega.rs"
 
 [dependencies]
 #bit-set = "*"
 #bit-vec = "*"
+bincode = "*"
 bufstream = "*"
 byteorder = "*"
 docopt = "*"

@@ -762,14 +762,14 @@ impl MetaLevelSearch {
   }
 }
 
-pub struct MetaLevelDriver {
+pub struct OmegaDriver {
   mc_cfg:   MonteCarloSearchConfig,
   tree_cfg: TreePolicyConfig,
   server:   ParallelMonteCarloSearchServer<ConvnetPolicyWorker>,
 }
 
-impl MetaLevelDriver {
-  pub fn new(state_cfg: TxnStateConfig, search_cfg: MonteCarloSearchConfig, tree_cfg: TreePolicyConfig) -> MetaLevelDriver {
+impl OmegaDriver {
+  pub fn new(state_cfg: TxnStateConfig, search_cfg: MonteCarloSearchConfig, tree_cfg: TreePolicyConfig) -> OmegaDriver {
     //setup_ieee_env();
     Gsl::disable_error_handler();
     //Gsl::set_error_handler(panic_error_handler);
@@ -787,7 +787,7 @@ impl MetaLevelDriver {
             worker_rollout_batch_capacity,
         ),
     );
-    MetaLevelDriver{
+    OmegaDriver{
       mc_cfg:   search_cfg,
       tree_cfg: tree_cfg,
       server:   server,

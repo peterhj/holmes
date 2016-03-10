@@ -8,6 +8,7 @@ dependencies = [
  "arraydb 0.1.0",
  "async 0.1.0",
  "async_cuda 0.1.0",
+ "bincode 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "bit-set 0.3.0",
  "bit-vec 0.4.2",
  "bufstream 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -118,6 +119,17 @@ dependencies = [
  "linalg 0.1.0",
  "rand 0.3.14 (registry+https://github.com/rust-lang/crates.io-index)",
  "rembrandt_kernels 0.1.0",
+]
+
+[[package]]
+name = "bincode"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "byteorder 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "num 0.1.31 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rustc-serialize 0.3.18 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -366,6 +378,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "num"
+version = "0.1.31"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "rand 0.3.14 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rustc-serialize 0.3.18 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
 name = "pkg-config"
 version = "0.3.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -402,21 +423,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 name = "rembrandt"
 version = "0.4.0"
 dependencies = [
- "array 0.1.0",
  "array_cuda 0.0.1",
  "array_dist 0.0.1",
  "array_new 0.0.1",
  "arraydb 0.1.0",
- "async 0.1.0",
- "async_cuda 0.1.0",
  "byteorder 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "cuda 0.1.0",
  "cuda_dnn 0.1.0",
- "cuda_sparse 0.1.0",
  "env_logger 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "episodb 0.0.2",
  "libc 0.2.8 (registry+https://github.com/rust-lang/crates.io-index)",
- "linalg 0.1.0",
  "lmdb 0.1.0",
  "log 0.3.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "protobuf 1.0.4",
@@ -479,6 +495,11 @@ dependencies = [
 [[package]]
 name = "semver"
 version = "0.1.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "serde"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]

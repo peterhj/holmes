@@ -1,7 +1,7 @@
 extern crate holmes;
 
 use holmes::data::{GogodbEpisodePreproc, LazyEpisodeLoader};
-use holmes::search::parallel_trace::omega::{MetaLevelDriver};
+use holmes::search::parallel_trace::omega::{OmegaDriver};
 use holmes::search::parallel_tree::{MonteCarloSearchConfig, TreePolicyConfig, HorizonConfig};
 use holmes::txnstate::{TxnStateConfig};
 
@@ -21,7 +21,7 @@ fn main() {
     rave:           false,
     rave_equiv:     0.0,
   };
-  let mut driver = MetaLevelDriver::new(state_cfg, search_cfg, tree_cfg);
-  let mut loader = LazyEpisodeLoader::new(PathBuf::from("gogodb_w2015_train_index_10k"), GogodbEpisodePreproc);
+  let mut driver = OmegaDriver::new(state_cfg, search_cfg, tree_cfg);
+  let mut loader = LazyEpisodeLoader::new(PathBuf::from("gogodb_w2015_train_index"), GogodbEpisodePreproc);
   driver.train(&mut loader);
 }

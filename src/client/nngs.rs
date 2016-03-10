@@ -45,6 +45,7 @@ pub struct NngsMatchConfig {
   pub automatch:    bool,
   pub our_stone:    Stone,
   pub opponent:     String,
+  pub board_size:   i32,
   pub main_time:    i32,
   pub byoyomi_time: i32,
 }
@@ -121,6 +122,7 @@ impl<A> NngsOneShotClient<A> where A: AsyncAgent {
     let bridge_thr = {
       let match_cfg = match_cfg.clone();
       let barrier = barrier.clone();
+      let agent_in_tx = agent_in_tx.clone();
       let agent_out_rx = agent_out_rx;
       let writer_tx = writer_tx.clone();
       spawn(move || {
@@ -130,12 +132,49 @@ impl<A> NngsOneShotClient<A> where A: AsyncAgent {
               // Now that the agent is ready, if a match is specified, then
               // initiate it.
               if let Some(ref match_cfg) = match_cfg {
-                // FIXME(20160308)
-                unimplemented!();
+                let color_code = match match_cfg.our_stone {
+                  Stone::Black => "B",
+                  Stone::White => "W",
+                  _ => unreachable!(),
+                };
+                let match_cmd_str = format!("match {} {} {} {} {}",
+                    match_cfg.opponent,
+                    color_code,
+                    match_cfg.board_size,
+                    match_cfg.main_time,
+                    match_cfg.byoyomi_time,
+                );
+                let match_cmd = match_cmd_str.into_bytes();
+                writer_tx.send(InternalMsg::WriteCmd{cmd: match_cmd}).unwrap();
               }
             }
+            Ok(AgentMsg::AcceptMatch{passive, opponent, our_stone, board_size, main_time_secs, byoyomi_time_secs}) => {
+              if passive {
+                let color_code = match our_stone {
+                  Stone::Black => "B",
+                  Stone::White => "W",
+                  _ => unreachable!(),
+                };
+                let match_cmd_str = format!("match {} {} {} {} {}",
+                    opponent,
+                    color_code,
+                    board_size,
+                    main_time_secs / 60,
+                    byoyomi_time_secs / 60,
+                );
+                let match_cmd = match_cmd_str.into_bytes();
+                writer_tx.send(InternalMsg::WriteCmd{cmd: match_cmd}).unwrap();
+              }
+              agent_in_tx.send(AgentMsg::StartMatch{
+                opponent:     opponent.clone(),
+                our_stone:    our_stone,
+                board_size:   board_size,
+                main_time_secs:       main_time_secs,
+                byoyomi_time_secs:    byoyomi_time_secs,
+              }).unwrap();
+            }
             Ok(AgentMsg::CheckTime) => {
-              // FIXME(20160308): ignore time command.
+              // XXX(20160308): ignore time command.
               //writer_tx.send(InternalMsg::WriteCmd{cmd: b"time".to_vec()}).unwrap();
             }
             Ok(AgentMsg::SubmitAction{turn, action}) => {
@@ -163,6 +202,7 @@ impl<A> NngsOneShotClient<A> where A: AsyncAgent {
 
     let reader_thr = {
       let server_cfg = server_cfg.clone();
+      let match_cfg = match_cfg.clone();
       let barrier = barrier.clone();
       let agent_in_tx = agent_in_tx;
       let writer_tx = writer_tx;
@@ -177,14 +217,15 @@ impl<A> NngsOneShotClient<A> where A: AsyncAgent {
           match reader.read_until(b'\n', &mut buf) {
             Ok(_) => {}
             Err(e) => {
-              // FIXME(20160307): gracefully shutdown.
+              // XXX(20160307): gracefully shutdown.
+              println!("DEBUG: client: shutting down");
               break;
             }
           }
           if buf.is_empty() {
             break;
           }
-          print!("DEBUG: client: {}", String::from_utf8_lossy(&buf));
+          print!("DEBUG: client telnet: {}", String::from_utf8_lossy(&buf));
           /*{
             let s = String::from_utf8_lossy(&buf);
             if !s.is_empty() {
@@ -228,7 +269,9 @@ impl<A> NngsOneShotClient<A> where A: AsyncAgent {
 
             if buf.len() >= 3 && buf[2] == b'5' {
               let mut is_match_request = false;
+              let mut is_match_accept = false;
               let mut match_cmd = None;
+              let mut match_opponent = None;
               let mut match_our_stone = None;
               let mut match_board_size = None;
               let mut match_main_time_mins = None;
@@ -246,6 +289,7 @@ impl<A> NngsOneShotClient<A> where A: AsyncAgent {
                       let tmp_match_cmd = suf_toks[0].clone();
                       let match_toks: Vec<_> = tmp_match_cmd.split_whitespace().collect();
                       assert_eq!(6, match_toks.len());
+                      let opponent = match_toks[1].to_string();
                       let our_stone = match match_toks[2] {
                         "B" | "b" => Stone::Black,
                         "W" | "w" => Stone::White,
@@ -258,10 +302,13 @@ impl<A> NngsOneShotClient<A> where A: AsyncAgent {
 
                       // Set match details.
                       match_cmd = Some(tmp_match_cmd.as_bytes().to_vec());
+                      match_opponent = Some(opponent);
                       match_our_stone = Some(our_stone);
                       match_board_size = Some(board_size);
                       match_main_time_mins = Some(main_time);
                       match_byoyomi_time_mins = Some(byoyomi_time);
+                    } else if line_str.contains("Match") && line_str.contains("accepted") {
+                      is_match_accept = true;
                     }
                   }
                   _ => {}
@@ -269,16 +316,27 @@ impl<A> NngsOneShotClient<A> where A: AsyncAgent {
               }
 
               if is_match_request {
-                // FIXME(20160308): don't accept match request until the agent is ready.
-                // Send match details to agent channel.
-                agent_in_tx.send(AgentMsg::StartMatch{
+                // XXX(20160308): Don't accept match request until the agent is ready.
+                // Instead send match details to agent channel.
+                agent_in_tx.send(AgentMsg::RequestMatch{
+                  passive:      true,
+                  opponent:     match_opponent.unwrap(),
                   our_stone:    match_our_stone.unwrap(),
                   board_size:   match_board_size.unwrap(),
                   main_time_secs:       60 * match_main_time_mins.unwrap(),
                   byoyomi_time_secs:    60 * match_byoyomi_time_mins.unwrap(),
                 }).unwrap();
-                // Auto-accept match request.
-                writer_tx.send(InternalMsg::WriteCmd{cmd: match_cmd.unwrap()}).unwrap();
+              } else if is_match_accept {
+                if let Some(ref match_cfg) = match_cfg {
+                  agent_in_tx.send(AgentMsg::RequestMatch{
+                    passive:      false,
+                    opponent:     match_cfg.opponent.clone(),
+                    our_stone:    match_cfg.our_stone,
+                    board_size:   match_cfg.board_size,
+                    main_time_secs:       60 * match_cfg.main_time,
+                    byoyomi_time_secs:    60 * match_cfg.byoyomi_time,
+                  }).unwrap();
+                }
               }
             }
 
@@ -336,13 +394,13 @@ impl<A> NngsOneShotClient<A> where A: AsyncAgent {
 
               if is_move {
                 // Send move details to agent channel.
+                // FIXME(20160308): byoyomi time left?
                 println!("DEBUG: client reader: send move to agent: {:?} {:?}", move_turn, move_action);
                 agent_in_tx.send(AgentMsg::RecvAction{
                   turn:         move_turn.unwrap(),
                   action:       move_action.unwrap(),
                   move_number:  move_number,
                   time_left_s:  move_main_time_left_s,
-                  // FIXME(20160308): byoyomi time left?
                 }).unwrap();
               }
             }

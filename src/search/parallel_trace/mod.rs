@@ -18,6 +18,7 @@ use std::sync::atomic::{AtomicUsize, Ordering, fence};
 use vec_map::{VecMap};
 
 pub mod omega;
+pub mod theta;
 
 pub struct SearchTrace {
   pub tree_cfg:     Option<TreePolicyConfig>,
