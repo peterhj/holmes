@@ -2291,9 +2291,10 @@ impl ParallelMonteCarloSearch {
 
     // FIXME(20160308): count monte carlo dead/alive;
     // requires number of trajectories.
+    // FIXME(20160315): track live/dead stones (required for Category A).
     let mut b_mc_alive = 0;
     let mut w_mc_alive = 0;
-    /*let live_thresh = (0.9 * (worker_batch_size * worker_num_batches * num_workers) as f32).ceil() as usize;
+    let live_thresh = (0.9 * (worker_batch_size * worker_num_batches * num_workers) as f32).ceil() as usize;
     for p in 0 .. Board::SIZE {
       if shared_mc_live_counts[0][p].load(Ordering::Acquire) >= live_thresh {
         b_mc_alive += 1;
@@ -2301,7 +2302,7 @@ impl ParallelMonteCarloSearch {
       if shared_mc_live_counts[1][p].load(Ordering::Acquire) >= live_thresh {
         w_mc_alive += 1;
       }
-    }*/
+    }
 
     let root_pv = search_principal_variation(root_node.clone(), 3);
 

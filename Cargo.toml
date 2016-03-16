@@ -130,6 +130,10 @@ name = "new-train-2layer16-19x19x16"
 path = "tools/new-train-2layer16-19x19x16.rs"
 
 [[bin]]
+name = "new-train-3layer32-19x19x16"
+path = "tools/new-train-3layer32-19x19x16.rs"
+
+[[bin]]
 name = "new-train-3layer64value-19x19x32"
 path = "tools/new-train-3layer64value-19x19x32.rs"
 
@@ -140,6 +144,14 @@ path = "tools/new-train-13layer384-19x19x32.rs"
 [[bin]]
 name = "new-train-13layer384multi3-19x19x32"
 path = "tools/new-train-13layer384multi3-19x19x32.rs"
+
+[[bin]]
+name = "validate-13layer384-19x19x32"
+path = "tools/validate-13layer384-19x19x32.rs"
+
+[[bin]]
+name = "reshape-13layer384-19x19x32"
+path = "tools/reshape-13layer384-19x19x32.rs"
 
 [[bin]]
 name = "new-train-value-13layer384multi3-19x19x32"
@@ -264,6 +276,10 @@ path = "tools/holmes-nngs.rs"
 [[bin]]
 name = "trace-omega"
 path = "tools/trace-omega.rs"
+
+[[bin]]
+name = "train-policygrad"
+path = "tools/train-policygrad.rs"
 
 [dependencies]
 #bit-set = "*"

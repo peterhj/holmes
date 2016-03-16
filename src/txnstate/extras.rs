@@ -286,6 +286,33 @@ impl TxnStateData for TxnStateRolloutData {
   }
 }
 
+#[derive(Clone, RustcDecodable, RustcEncodable)]
+pub struct TxnStateRolloutLegalityData {
+  pub features: TxnStateAlphaMiniV3FeatsData,
+  pub legality: TxnStateLegalityData,
+}
+
+impl TxnStateRolloutLegalityData {
+  pub fn new() -> TxnStateRolloutLegalityData {
+    TxnStateRolloutLegalityData{
+      features: TxnStateAlphaMiniV3FeatsData::new(),
+      legality: TxnStateLegalityData::new(false),
+    }
+  }
+}
+
+impl TxnStateData for TxnStateRolloutLegalityData {
+  fn reset(&mut self) {
+    self.features.reset();
+    self.legality.reset();
+  }
+
+  fn update(&mut self, position: &TxnPosition, chains: &TxnChainsList, update_turn: Stone, update_action: Action) {
+    self.features.update(position, chains, update_turn, update_action);
+    self.legality.update(position, chains, update_turn, update_action);
+  }
+}
+
 /*#[derive(Clone)]
 pub struct TxnStateAllData {
   pub features: TxnStateFeaturesData,
