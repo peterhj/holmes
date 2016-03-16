@@ -2152,6 +2152,10 @@ pub struct MonteCarloSearchResult {
   pub w_alive_ter:      usize,*/
   pub top_prior_values: Vec<(Action, f32)>,
   pub pv:               Vec<(Stone, Action, usize, usize, f32, f32)>,
+  pub dead_stones:      Vec<Vec<Point>>,
+  pub live_stones:      Vec<Vec<Point>>,
+  pub territory:        Vec<Vec<Point>>,
+  pub outcome:          Option<Stone>,
 }
 
 #[derive(Clone, Copy, Default, Debug)]
@@ -2294,13 +2298,48 @@ impl ParallelMonteCarloSearch {
     // FIXME(20160315): track live/dead stones (required for Category A).
     let mut b_mc_alive = 0;
     let mut w_mc_alive = 0;
-    let live_thresh = (0.9 * (worker_batch_size * worker_num_batches * num_workers) as f32).ceil() as usize;
-    for p in 0 .. Board::SIZE {
-      if shared_mc_live_counts[0][p].load(Ordering::Acquire) >= live_thresh {
-        b_mc_alive += 1;
+    let mut dead_stones = vec![vec![], vec![]];
+    let mut live_stones = vec![vec![], vec![]];
+    let mut territory = vec![vec![], vec![]];
+    let mut outcome = None;
+    //let live_thresh = (0.9 * (worker_batch_size * worker_num_batches * num_workers) as f32).ceil() as usize;
+    {
+      let root_node = root_node.read().unwrap();
+      let rollout_count = root_node.values.total_num_visits.load(Ordering::Acquire);
+      let live_thresh = (0.9 * rollout_count as f32).ceil() as usize;
+      for p in 0 .. Board::SIZE {
+        let pt = Point::from_idx(p);
+        if shared_mc_live_counts[0][p].load(Ordering::Acquire) >= live_thresh {
+          b_mc_alive += 1;
+          match root_node.state.current_stone(pt) {
+            Stone::Black => live_stones[0].push(pt),
+            Stone::Empty => territory[0].push(pt),
+            _ => {}
+          }
+        } else {
+          match root_node.state.current_stone(pt) {
+            Stone::Black => dead_stones[0].push(pt),
+            _ => {}
+          }
+        }
+        if shared_mc_live_counts[1][p].load(Ordering::Acquire) >= live_thresh {
+          w_mc_alive += 1;
+          match root_node.state.current_stone(pt) {
+            Stone::White => live_stones[1].push(pt),
+            Stone::Empty => territory[1].push(pt),
+            _ => {}
+          }
+        } else {
+          match root_node.state.current_stone(pt) {
+            Stone::White => dead_stones[1].push(pt),
+            _ => {}
+          }
+        }
       }
-      if shared_mc_live_counts[1][p].load(Ordering::Acquire) >= live_thresh {
-        w_mc_alive += 1;
+      if b_mc_alive > w_mc_alive {
+        outcome = Some(Stone::Black);
+      } else if b_mc_alive < w_mc_alive {
+        outcome = Some(Stone::White);
       }
     }
 
@@ -2373,6 +2412,10 @@ impl ParallelMonteCarloSearch {
       w_alive_ter:      w_alive_ter,*/
       top_prior_values: top_prior_values,
       pv:               root_pv,
+      dead_stones:      dead_stones,
+      live_stones:      live_stones,
+      territory:        territory,
+      outcome:          outcome,
     }, stats)
   }
 }

@@ -86,6 +86,8 @@ fn submit(writer: &mut Write, msg: &[u8]) {
 enum InternalMsg {
   Quit,
   WriteCmd{cmd: Vec<u8>},
+  SetDeadStones{game_outcome: GameOutcome},
+  CleanupDeadStones,
 }
 
 enum LoProtocol {
@@ -100,6 +102,13 @@ enum LoProtocol {
   ScoreInfo{line: Vec<u8>},     // 20
   ShoutInfo{line: Vec<u8>},     // 21
   GameInfo{line: Vec<u8>},      // 22
+}
+
+struct GameOutcome {
+  dead_stones:  Vec<Vec<Point>>,
+  live_stones:  Vec<Vec<Point>>,
+  territory:    Vec<Vec<Point>>,
+  outcome:      Option<Stone>,
 }
 
 impl<A> NngsOneShotClient<A> where A: AsyncAgent {
@@ -177,8 +186,17 @@ impl<A> NngsOneShotClient<A> where A: AsyncAgent {
               // XXX(20160308): ignore time command.
               //writer_tx.send(InternalMsg::WriteCmd{cmd: b"time".to_vec()}).unwrap();
             }
-            Ok(AgentMsg::SubmitAction{turn, action}) => {
+            Ok(AgentMsg::SubmitAction{
+              turn, action,
+              dead_stones, live_stones, territory, outcome,
+            }) => {
               println!("DEBUG: client bridge: received agent action: {:?} {:?}", turn, action);
+              writer_tx.send(InternalMsg::SetDeadStones{game_outcome: GameOutcome{
+                dead_stones:    dead_stones,
+                live_stones:    live_stones,
+                territory:      territory,
+                outcome:        outcome,
+              }});
               let cmd = match action {
                 Action::Resign => b"resign".to_vec(),
                 Action::Pass => b"pass".to_vec(),
@@ -408,7 +426,8 @@ impl<A> NngsOneShotClient<A> where A: AsyncAgent {
             if buf.len() >= 3 && buf[2] == b'7' {
               if !recently_finished_match {
                 recently_finished_match = true;
-                writer_tx.send(InternalMsg::WriteCmd{cmd: b"done".to_vec()}).unwrap();
+                // XXX(20160316): Cleanup dead stones before signaling we are done..
+                writer_tx.send(InternalMsg::CleanupDeadStones).unwrap();
               }
             }
 
@@ -440,6 +459,8 @@ impl<A> NngsOneShotClient<A> where A: AsyncAgent {
       let writer_rx = writer_rx;
       let mut writer = stream;
       spawn(move || {
+        let mut saved_game_outcome = None;
+
         // Enter login details.
         submit(&mut writer, server_cfg.login.as_bytes());
         if let Some(ref password) = server_cfg.password {
@@ -459,6 +480,21 @@ impl<A> NngsOneShotClient<A> where A: AsyncAgent {
             }
             Ok(InternalMsg::WriteCmd{ref cmd}) => {
               submit(&mut writer, cmd);
+            }
+            Ok(InternalMsg::SetDeadStones{game_outcome}) => {
+              saved_game_outcome = Some(game_outcome);
+            }
+            Ok(InternalMsg::CleanupDeadStones) => {
+              if let Some(ref game_outcome) = saved_game_outcome {
+                // FIXME(20160316): enter both players dead stones or just our own?
+                for &point in game_outcome.dead_stones[0].iter().chain(game_outcome.dead_stones[1].iter()) {
+                  let coord = point.to_coord();
+                  submit(&mut writer, &coord.to_bytestring());
+                }
+                println!("DEBUG: client writer: cleanup phase:");
+                println!("DEBUG: client writer: final outcome: {:?}", game_outcome.outcome);
+              }
+              submit(&mut writer, b"done");
             }
             Err(e) => {
               //println!("WARNING: writer failed to recv internal msg: {:?}", e);

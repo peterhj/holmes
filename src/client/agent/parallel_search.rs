@@ -10,7 +10,7 @@ use search::parallel_tree::{
   SharedTree,
   SearchWorkerConfig,
   SearchWorkerBatchConfig,
-  //MonteCarloSearchResult,
+  MonteCarloSearchResult,
   ParallelMonteCarloSearchServer,
   ParallelMonteCarloSearch,
 };
@@ -139,7 +139,7 @@ impl AgentImpl {
     );
   }
 
-  pub fn search(&mut self, remaining_time_ms: usize) -> Action {
+  pub fn search(&mut self, remaining_time_ms: usize) -> (Action, MonteCarloSearchResult) {
     let shared_tree = if self.tree.is_none() {
       let shared_tree = SharedTree::new(self.tree_cfg);
       self.tree = Some(shared_tree.clone());
@@ -151,7 +151,7 @@ impl AgentImpl {
     // XXX(20160308): Use the time management strategy of [Huang, Coulom, Lin 2010].
     let allocated_time_ms =
         remaining_time_ms as f32
-        / (60.0 + 0.0f32.max(300.0 - 2.0 * self.ply as f32));
+        / (60.0 + 0.0f32.max(60.0 - self.ply as f32));
     assert!(allocated_time_ms >= 0.0);
     println!("DEBUG: agent: search: time budget: {} ms", allocated_time_ms);
 
@@ -175,7 +175,7 @@ impl AgentImpl {
         &mut self.rng,
     );
 
-    res.action
+    (res.action, res)
   }
 
   pub fn step(&mut self, turn: Stone, action: Action) -> Result<(), ()> {
@@ -245,10 +245,16 @@ impl AsyncAgent for ParallelSearchAsyncAgent {
               agent.state_machine = AgentStateMachine::OurTurn;
               let remaining_time_ms = 1000 * agent.main_time_s as usize;
               println!("DEBUG: agent: remaining_time: {} ms", remaining_time_ms);
-              let action = agent.search(remaining_time_ms);
+              let (action, res) = agent.search(remaining_time_ms);
               agent_out_tx.send(AgentMsg::SubmitAction{
                 turn:     agent.our_stone.unwrap(),
                 action:   action,
+                // FIXME(20160316): just send current game result with every action
+                // (including dead stones, live stones, territory, and est. outcome).
+                dead_stones:  res.dead_stones,
+                live_stones:  res.live_stones,
+                territory:    res.territory,
+                outcome:      res.outcome,
               }).unwrap();
               agent.state_machine = AgentStateMachine::OpponentTurn;
             } else {

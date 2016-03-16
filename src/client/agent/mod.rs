@@ -37,6 +37,12 @@ pub enum AgentMsg {
   SubmitAction{
     turn:   Stone,
     action: Action,
+    // FIXME(20160316): just send current game result with every action
+    // (including dead stones, live stones, territory, and est. outcome).
+    dead_stones:  Vec<Vec<Point>>,
+    live_stones:  Vec<Vec<Point>>,
+    territory:    Vec<Vec<Point>>,
+    outcome:      Option<Stone>,
   },
   RecvAction{
     turn:         Stone,
