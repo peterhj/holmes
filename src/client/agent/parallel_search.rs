@@ -21,6 +21,8 @@ use cuda::runtime::{CudaDevice};
 use rng::xorshift::{Xorshiftplus128Rng};
 
 use rand::{thread_rng};
+use std::fs::{File};
+use std::io::{Read, BufRead, Write, BufReader}:
 use std::sync::{Arc, Barrier};
 use std::sync::mpsc::{Sender, Receiver, TryRecvError};
 use std::thread::{JoinHandle, sleep_ms, spawn};
@@ -52,6 +54,8 @@ struct AgentImpl {
   byoyomi_time_s:   i32,
   //start_time:       Option<Timespec>,
 
+  save_path:    PathBuf,
+  save_file:    File,
   history:  Vec<(TxnState<TxnStateNodeData>, Stone, Action)>,
   ply:      usize,
   state:    TxnState<TxnStateNodeData>,
@@ -81,9 +85,17 @@ impl AgentImpl {
       rave:         false,
       rave_equiv:   0.0,
     };
+
+    // FIXME(20160316): give the save filename a unique part, e.g. timestamp.
+    let save_path = PathBuf::from("save.tmp.txt");
+    println!("DEBUG: agent: saving game history to: {:?}", save_path);
+    // FIXME(20160316): open save file with RW permissions.
+    let save_file = File::create(&save_path).unwrap();
+
     let num_workers = CudaDevice::count().unwrap();
     let rounded_batch_size = (search_cfg.batch_size + num_workers - 1) / num_workers * num_workers;
     let worker_batch_capacity = rounded_batch_size / num_workers;
+
     AgentImpl{
       state_cfg:    state_cfg,
       search_cfg:   search_cfg,
@@ -94,6 +106,8 @@ impl AgentImpl {
       main_time_s:      0,
       byoyomi_time_s:   0,
       //start_time:       None,
+      save_path:    save_path,
+      save_file:    save_file,
       history:  vec![],
       ply:      0,
       state:    TxnState::new(state_cfg, TxnStateNodeData::new()),
@@ -104,6 +118,34 @@ impl AgentImpl {
           num_workers, 1, worker_batch_capacity,
           ConvnetPolicyWorkerBuilder::new(tree_cfg, num_workers, 1, worker_batch_capacity),
       ),
+    }
+  }
+
+  pub fn load_save(&mut self, load_save_path: PathBuf) {
+    let load_save_file = match File::open(&load_save_path) {
+      Ok(file) => file,
+      Err(e) => panic!("failed to open save path for loading: {:?} {:?}", e, load_save_path),
+    };
+    let mut reader = BufReader::new(load_save_file);
+    for line in reader.lines() {
+      let line = line.unwrap();
+      let toks: Vec<_> = line.splitn(3, ",").collect();
+      let ply: usize = toks[0].parse().unwrap();
+      let turn = match &toks[1] as &str {
+        "B" => Stone::Black,
+        "W" => Stone::White,
+        _ => unreachable!(),
+      };
+      let action = match &toks[2] as &str {
+        "resign" => Action::Resign,
+        "pass" => Action::Pass,
+        code => {
+          let coord = Coord::parse_code_str(&code).unwrap();
+          Action::Place{point: Point::from_coord(coord)}
+        }
+      };
+      assert_eq!(self.ply, ply);
+      self.step(turn, action);
     }
   }
 
@@ -187,6 +229,22 @@ impl AgentImpl {
       self.state.commit();
     }
 
+    // Update the game save file.
+    let turn_str = match turn {
+      Stone::Black => "B".to_string(),
+      Stone::White => "W".to_string(),
+      _ => unreachable!(),
+    };
+    let action_str = match action {
+      Action::Resign => "resign".to_string(),
+      Action::Pass => "pass".to_string(),
+      Action::Place{point} => {
+        let coord = point.to_coord();
+        coord.to_string()
+      }
+    };
+    writeln!(self.save_file, "{},{},{}", self.ply, turn_str, action_str);
+
     self.history.push((prev_state, turn, action));
     self.ply += 1;
 
@@ -208,9 +266,17 @@ impl AgentImpl {
 pub struct ParallelSearchAsyncAgent;
 
 impl AsyncAgent for ParallelSearchAsyncAgent {
-  fn spawn_runloop(barrier: Arc<Barrier>, agent_in_rx: Receiver<AgentMsg>, agent_out_tx: Sender<AgentMsg>) -> JoinHandle<()> {
+  fn spawn_runloop(
+      barrier: Arc<Barrier>,
+      agent_in_rx: Receiver<AgentMsg>,
+      agent_out_tx: Sender<AgentMsg>,
+      load_save_path: Option<PathBuf>,
+  ) -> JoinHandle<()> {
     spawn(move || {
       let mut agent = AgentImpl::new();
+      if let Some(load_save_path) = load_save_path {
+        agent.load_save(load_save_path);
+      }
       agent.wait_ready();
       agent_out_tx.send(AgentMsg::Ready).unwrap();
       loop {
@@ -276,7 +342,7 @@ impl AsyncAgent for ParallelSearchAsyncAgent {
 
             if turn != agent.our_stone.unwrap() {
               agent.state_machine = AgentStateMachine::OurTurn;
-              let our_action = if Action::Pass == action {
+              let (our_action, search_res) = if Action::Pass == action {
                 Action::Pass
               } else {
                 let remaining_time_ms = 1000 * time_left_s.unwrap() as usize;
@@ -286,6 +352,10 @@ impl AsyncAgent for ParallelSearchAsyncAgent {
               agent_out_tx.send(AgentMsg::SubmitAction{
                 turn:     agent.our_stone.unwrap(),
                 action:   our_action,
+                dead_stones:  search_res.dead_stones,
+                live_stones:  search_res.live_stones,
+                territory:    search_res.territory,
+                outcome:      search_res.outcome,
               }).unwrap();
               agent.state_machine = AgentStateMachine::OpponentTurn;
             } else {

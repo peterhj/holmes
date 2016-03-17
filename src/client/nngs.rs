@@ -42,6 +42,7 @@ impl NngsServerConfig {
 
 #[derive(Clone, RustcDecodable, Debug)]
 pub struct NngsMatchConfig {
+  pub load_save_path:   Option<String>
   pub automatch:    bool,
   pub our_stone:    Stone,
   pub opponent:     String,
@@ -126,7 +127,12 @@ impl<A> NngsOneShotClient<A> where A: AsyncAgent {
     let (agent_out_tx, agent_out_rx) = channel();
     let (writer_tx, writer_rx) = channel();
 
-    let agent_thr = A::spawn_runloop(barrier.clone(), agent_in_rx, agent_out_tx);
+    let agent_thr = A::spawn_runloop(
+        barrier.clone(),
+        agent_in_rx,
+        agent_out_tx,
+        match_cfg.load_save_path.clone(),
+    );
 
     let bridge_thr = {
       let match_cfg = match_cfg.clone();
