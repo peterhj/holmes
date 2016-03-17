@@ -1,5 +1,6 @@
-use board::{RuleSet, PlayerRank, Stone, Action};
+use board::{RuleSet, PlayerRank, Stone, Point, Action};
 use client::agent::{AgentMsg, AsyncAgent};
+use gtp_board::{Coord};
 use search::parallel_policies::convnet::{
   ConvnetPolicyWorkerBuilder, ConvnetPolicyWorker,
 };
@@ -22,7 +23,8 @@ use rng::xorshift::{Xorshiftplus128Rng};
 
 use rand::{thread_rng};
 use std::fs::{File};
-use std::io::{Read, BufRead, Write, BufReader}:
+use std::io::{Read, BufRead, Write, BufReader};
+use std::path::{PathBuf};
 use std::sync::{Arc, Barrier};
 use std::sync::mpsc::{Sender, Receiver, TryRecvError};
 use std::thread::{JoinHandle, sleep_ms, spawn};
@@ -317,6 +319,7 @@ impl AsyncAgent for ParallelSearchAsyncAgent {
                 action:   action,
                 // FIXME(20160316): just send current game result with every action
                 // (including dead stones, live stones, territory, and est. outcome).
+                set_dead_stones:  true,
                 dead_stones:  res.dead_stones,
                 live_stones:  res.live_stones,
                 territory:    res.territory,
@@ -342,21 +345,37 @@ impl AsyncAgent for ParallelSearchAsyncAgent {
 
             if turn != agent.our_stone.unwrap() {
               agent.state_machine = AgentStateMachine::OurTurn;
-              let (our_action, search_res) = if Action::Pass == action {
+              let mut search_res = None;
+              let our_action  = if Action::Pass == action {
                 Action::Pass
               } else {
                 let remaining_time_ms = 1000 * time_left_s.unwrap() as usize;
                 println!("DEBUG: agent: remaining_time: {} ms", remaining_time_ms);
-                agent.search(remaining_time_ms)
+                let (action, res) = agent.search(remaining_time_ms);
+                search_res = Some(res);
+                action
               };
-              agent_out_tx.send(AgentMsg::SubmitAction{
-                turn:     agent.our_stone.unwrap(),
-                action:   our_action,
-                dead_stones:  search_res.dead_stones,
-                live_stones:  search_res.live_stones,
-                territory:    search_res.territory,
-                outcome:      search_res.outcome,
-              }).unwrap();
+              if let Some(search_res) = search_res {
+                agent_out_tx.send(AgentMsg::SubmitAction{
+                  turn:     agent.our_stone.unwrap(),
+                  action:   our_action,
+                  set_dead_stones:  true,
+                  dead_stones:  search_res.dead_stones,
+                  live_stones:  search_res.live_stones,
+                  territory:    search_res.territory,
+                  outcome:      search_res.outcome,
+                }).unwrap();
+              } else {
+                agent_out_tx.send(AgentMsg::SubmitAction{
+                  turn:     agent.our_stone.unwrap(),
+                  action:   our_action,
+                  set_dead_stones:  false,
+                  dead_stones:  vec![],
+                  live_stones:  vec![],
+                  territory:    vec![],
+                  outcome:      None,
+                }).unwrap();
+              }
               agent.state_machine = AgentStateMachine::OpponentTurn;
             } else {
               agent.state_machine = AgentStateMachine::OpponentTurn;

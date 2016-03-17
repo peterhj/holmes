@@ -2305,7 +2305,7 @@ impl ParallelMonteCarloSearch {
     //let live_thresh = (0.9 * (worker_batch_size * worker_num_batches * num_workers) as f32).ceil() as usize;
     {
       let root_node = root_node.read().unwrap();
-      let rollout_count = root_node.values.total_num_visits.load(Ordering::Acquire);
+      let rollout_count = root_node.values.total_trials.load(Ordering::Acquire);
       let live_thresh = (0.9 * rollout_count as f32).ceil() as usize;
       for p in 0 .. Board::SIZE {
         let pt = Point::from_idx(p);

@@ -42,7 +42,7 @@ impl NngsServerConfig {
 
 #[derive(Clone, RustcDecodable, Debug)]
 pub struct NngsMatchConfig {
-  pub load_save_path:   Option<String>
+  pub load_save_path:   Option<String>,
   pub automatch:    bool,
   pub our_stone:    Stone,
   pub opponent:     String,
@@ -131,7 +131,11 @@ impl<A> NngsOneShotClient<A> where A: AsyncAgent {
         barrier.clone(),
         agent_in_rx,
         agent_out_tx,
-        match_cfg.load_save_path.clone(),
+        //match_cfg.map(|cfg| cfg.load_save_path.map(|p| PathBuf::from(p))),
+        match match_cfg {
+          None => None,
+          Some(ref cfg) => cfg.load_save_path.as_ref().map(|p| PathBuf::from(p)),
+        },
     );
 
     let bridge_thr = {
@@ -194,15 +198,18 @@ impl<A> NngsOneShotClient<A> where A: AsyncAgent {
             }
             Ok(AgentMsg::SubmitAction{
               turn, action,
+              set_dead_stones,
               dead_stones, live_stones, territory, outcome,
             }) => {
               println!("DEBUG: client bridge: received agent action: {:?} {:?}", turn, action);
-              writer_tx.send(InternalMsg::SetDeadStones{game_outcome: GameOutcome{
-                dead_stones:    dead_stones,
-                live_stones:    live_stones,
-                territory:      territory,
-                outcome:        outcome,
-              }});
+              if set_dead_stones {
+                writer_tx.send(InternalMsg::SetDeadStones{game_outcome: GameOutcome{
+                  dead_stones:    dead_stones,
+                  live_stones:    live_stones,
+                  territory:      territory,
+                  outcome:        outcome,
+                }});
+              }
               let cmd = match action {
                 Action::Resign => b"resign".to_vec(),
                 Action::Pass => b"pass".to_vec(),
