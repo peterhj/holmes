@@ -349,7 +349,7 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
       rollout_trajs:    &mut [RolloutTraj],
       pass_only:        Option<Stone>,
       mut trace_batch:  Option<&mut SearchTraceBatch>,
-      record_trace: bool, traces: &mut [QuickTrace],
+      //record_trace: bool, traces: &mut [QuickTrace],
       rng:              &mut Xorshiftplus128Rng)
   {
     let ctx = (*self.context).as_ref();
@@ -392,14 +392,14 @@ impl RolloutPolicy for ConvnetRolloutPolicy {
     }
     //let leaf_turn = leaf_turn.unwrap();
 
-    if record_trace {
+    /*if record_trace {
       for batch_idx in 0 .. batch_size {
         if rollout_trajs[batch_idx].rollout {
           traces[batch_idx].reset();
           traces[batch_idx].init_state = Some(rollout_trajs[batch_idx].init_state.clone());
         }
       }
-    }
+    }*/
 
     //let mut turn_t = leaf_turn;
     let max_iters = 361 + 361 / 2 + rng.gen_range(0, 2);
@@ -841,7 +841,7 @@ impl RolloutPolicy for BiConvnetRolloutPolicy {
       rollout_trajs: &mut [RolloutTraj],
       pass_only: Option<Stone>,
       mut trace_batch: Option<&mut SearchTraceBatch>,
-      record_trace: bool, traces: &mut [QuickTrace],
+      //record_trace: bool, traces: &mut [QuickTrace],
       rng: &mut Xorshiftplus128Rng)
   {
     let ctx = (*self.context).as_ref();
@@ -884,14 +884,14 @@ impl RolloutPolicy for BiConvnetRolloutPolicy {
       filters.push(BFilter::with_capacity(Board::SIZE));
     }
 
-    if record_trace {
+    /*if record_trace {
       for batch_idx in 0 .. batch_size {
         if rollout_trajs[batch_idx].rollout {
           traces[batch_idx].reset();
           traces[batch_idx].init_state = Some(rollout_trajs[batch_idx].init_state.clone());
         }
       }
-    }
+    }*/
 
     let max_iters = 361 + 361 / 2 + rng.gen_range(0, 2);
     let mut t_turn = init_turn.unwrap();
@@ -981,9 +981,9 @@ impl RolloutPolicy for BiConvnetRolloutPolicy {
             assert!(rollout_trajs[batch_idx].sim_state.try_action(sim_turn, Action::Pass).is_ok());
             rollout_trajs[batch_idx].sim_state.commit();
           }
-          if record_trace {
+          /*if record_trace {
             traces[batch_idx].actions.push((sim_turn, sim_action));
-          }
+          }*/
         }
       }
 
@@ -1021,9 +1021,9 @@ impl RolloutPolicy for BiConvnetRolloutPolicy {
             continue;
           }
 
-          if record_trace {
+          /*if record_trace {
             traces[batch_idx].actions.push((sim_turn, Action::Pass));
-          }
+          }*/
 
           let mut made_move = false;
           let mut spin_count = 0;
@@ -1050,10 +1050,10 @@ impl RolloutPolicy for BiConvnetRolloutPolicy {
                   spin_count += 1;
                   continue;
                 } else {
-                  if record_trace {
+                  /*if record_trace {
                     let trace_len = traces[batch_idx].actions.len();
                     traces[batch_idx].actions[trace_len - 1].1 = Action::Place{point: sim_point};
-                  }
+                  }*/
                   rollout_trajs[batch_idx].sim_state.commit();
                   for_each_touched_empty(
                       &rollout_trajs[batch_idx].sim_state.position,

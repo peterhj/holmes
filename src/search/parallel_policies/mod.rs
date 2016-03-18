@@ -107,7 +107,7 @@ pub trait RolloutPolicy {
       rollout_trajs:    &mut [RolloutTraj],
       pass_only:        Option<Stone>,
       mut trace_batch:  Option<&mut SearchTraceBatch>,
-      record_trace: bool, traces: &mut [QuickTrace], // FIXME(20160226): deprecated.
+      //record_trace: bool, traces: &mut [QuickTrace], // FIXME(20160226): deprecated.
       rng:              &mut Self::R,
   );
 

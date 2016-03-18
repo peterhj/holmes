@@ -1562,7 +1562,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
         let mut rollout_trajs: Vec<_> = repeat(RolloutTraj::new()).take(worker_batch_capacity).collect();
 
         // FIXME(20160225): QuickTrace is deprecated.
-        let mut traces: Vec<_> = repeat(QuickTrace::new()).take(worker_batch_capacity * 40).collect();
+        //let mut traces: Vec<_> = repeat(QuickTrace::new()).take(worker_batch_capacity * 40).collect();
 
         /*let tree_cfg = TreePolicyConfig{
           horizon_cfg:  HorizonConfig::Fixed{max_horizon: 20},
@@ -1736,7 +1736,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
                       &mut rollout_trajs,
                       None,
                       traj_trace_batch,
-                      false, &mut traces[batch * batch_size .. (batch + 1) * batch_size],
+                      //false, &mut traces[batch * batch_size .. (batch + 1) * batch_size],
                       &mut rng);
                 }
                 barrier.wait();
