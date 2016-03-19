@@ -860,6 +860,7 @@ struct InnerTree {
   root_node:        Option<Arc<RwLock<Node>>>,
 
   mean_raw_score:   f32,
+  rollout_count:    Arc<AtomicUsize>,
   mc_live_counts:   Vec<Arc<Vec<AtomicUsize>>>,
 
   explore_elapsed_ms:   AtomicUsize,
@@ -886,6 +887,8 @@ impl SharedTree {
         root_node:      None,
 
         mean_raw_score: 0.0,
+
+        rollout_count:  Arc::new(AtomicUsize::new(0)),
         mc_live_counts: vec![
           //Arc::new(repeat(AtomicUsize::new(0)).take(Board::SIZE).collect()),
           //Arc::new(repeat(AtomicUsize::new(0)).take(Board::SIZE).collect()),
@@ -912,6 +915,11 @@ impl SharedTree {
     if inner.root_node.is_none() {
       inner.root_node = Some(Arc::new(RwLock::new(Node::new(init_state, prior_policy, self.tree_cfg.horizon_cfg))));
       inner.mean_raw_score = 0.0;
+      inner.rollout_count.store(0, Ordering::Release);
+      for p in 0 .. Board::SIZE {
+        inner.mc_live_counts[0][p].store(0, Ordering::Release);
+        inner.mc_live_counts[1][p].store(0, Ordering::Release);
+      }
       // FIXME(20160223): should reset other stats here too.
     }
   }
@@ -1574,6 +1582,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
         };*/
         let mut search_trace = SearchTrace::new();
 
+        let mut rollout_count = 0;
         let mut mc_live_counts: Vec<Vec<usize>> = vec![
           repeat(0).take(Board::SIZE).collect(),
           repeat(0).take(Board::SIZE).collect(),
@@ -1623,13 +1632,13 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
               let root_node = {
                 let inner = tree.inner.lock().unwrap();
 
-                if tid == 0 {
+                /*if tid == 0 {
                   let shared_mc_live_counts = inner.mc_live_counts.clone();
                   for p in 0 .. Board::SIZE {
                     shared_mc_live_counts[0][p].store(0, Ordering::Release);
                     shared_mc_live_counts[1][p].store(0, Ordering::Release);
                   }
-                }
+                }*/
 
                 inner.root_node.as_ref().unwrap().clone()
               };
@@ -1639,6 +1648,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
               let mut rollout_elapsed_ms = 0;
               /*let mut worker_mean_score: f32 = 0.0;
               let mut worker_backup_count: f32 = 0.0;*/
+              rollout_count = 0;
               for p in 0 .. Board::SIZE {
                 mc_live_counts[0][p] = 0;
                 mc_live_counts[1][p] = 0;
@@ -1742,6 +1752,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
                 barrier.wait();
                 fence(Ordering::AcqRel);
 
+                rollout_count += batch_size;
                 for batch_idx in 0 .. batch_size {
                   let tree_traj = &tree_trajs[batch_idx];
                   let rollout_traj = &mut rollout_trajs[batch_idx];
@@ -1807,16 +1818,18 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
                 search_trace.update_instance(&*root_node);
               }
 
-              let shared_mc_live_counts = {
+              let (shared_rollout_count, shared_mc_live_counts) = {
                 let mut inner = tree.inner.lock().unwrap();
 
                 //inner.mean_raw_score += worker_mean_score / (num_workers as f32);
                 inner.explore_elapsed_ms.fetch_add(explore_elapsed_ms, Ordering::AcqRel);
                 inner.rollout_elapsed_ms.fetch_add(rollout_elapsed_ms, Ordering::AcqRel);
 
+                let shared_rollout_count = inner.rollout_count.clone();
                 let shared_mc_live_counts = inner.mc_live_counts.clone();
-                shared_mc_live_counts
+                (shared_rollout_count, shared_mc_live_counts)
               };
+              shared_rollout_count.fetch_add(rollout_count, Ordering::AcqRel);
               for p in 0 .. Board::SIZE {
                 shared_mc_live_counts[0][p].fetch_add(mc_live_counts[0][p], Ordering::AcqRel);
                 shared_mc_live_counts[1][p].fetch_add(mc_live_counts[1][p], Ordering::AcqRel);
@@ -2277,7 +2290,7 @@ impl ParallelMonteCarloSearch {
 
     /*let root_node_opt = tree.root_node.read().unwrap();
     let root_node = root_node_opt.as_ref().unwrap().read().unwrap();*/
-    let (root_node, /*mean_raw_score,*/ shared_mc_live_counts) = {
+    let (root_node, /*mean_raw_score,*/ shared_rollout_count, shared_mc_live_counts) = {
       let inner_tree = shared_tree.inner.lock().unwrap();
 
       stats.avg_explore_elapsed_ms = inner_tree.explore_elapsed_ms.load(Ordering::Acquire) / num_workers;
@@ -2289,6 +2302,7 @@ impl ParallelMonteCarloSearch {
 
       ( inner_tree.root_node.as_ref().unwrap().clone(),
         //inner_tree.mean_raw_score,
+        inner_tree.rollout_count.clone(),
         inner_tree.mc_live_counts.clone(),
       )
     };
@@ -2305,16 +2319,22 @@ impl ParallelMonteCarloSearch {
     //let live_thresh = (0.9 * (worker_batch_size * worker_num_batches * num_workers) as f32).ceil() as usize;
     {
       let root_node = root_node.read().unwrap();
-      let rollout_count = root_node.values.total_trials.load(Ordering::Acquire);
+      //let rollout_count = root_node.values.total_trials.load(Ordering::Acquire);
+      let rollout_count = shared_rollout_count.load(Ordering::Acquire);
       let live_thresh = (0.9 * rollout_count as f32).ceil() as usize;
+      println!("DEBUG: liveness counting: rollout count: {}, thresh: {}, mc count[B][0]: {}",
+          rollout_count,
+          live_thresh,
+          shared_mc_live_counts[0][0].load(Ordering::Acquire),
+      );
       for p in 0 .. Board::SIZE {
         let pt = Point::from_idx(p);
         if shared_mc_live_counts[0][p].load(Ordering::Acquire) >= live_thresh {
           b_mc_alive += 1;
           match root_node.state.current_stone(pt) {
             Stone::Black => live_stones[0].push(pt),
+            Stone::White => territory[0].push(pt),
             Stone::Empty => territory[0].push(pt),
-            _ => {}
           }
         } else {
           match root_node.state.current_stone(pt) {
@@ -2325,9 +2345,9 @@ impl ParallelMonteCarloSearch {
         if shared_mc_live_counts[1][p].load(Ordering::Acquire) >= live_thresh {
           w_mc_alive += 1;
           match root_node.state.current_stone(pt) {
+            Stone::Black => territory[1].push(pt),
             Stone::White => live_stones[1].push(pt),
             Stone::Empty => territory[1].push(pt),
-            _ => {}
           }
         } else {
           match root_node.state.current_stone(pt) {
@@ -2336,9 +2356,9 @@ impl ParallelMonteCarloSearch {
           }
         }
       }
-      if b_mc_alive > w_mc_alive {
+      if w_mc_alive as f32 - b_mc_alive as f32 + 6.5 < 0.0 {
         outcome = Some(Stone::Black);
-      } else if b_mc_alive < w_mc_alive {
+      } else if w_mc_alive as f32 - b_mc_alive as f32 + 6.5 < 0.0 {
         outcome = Some(Stone::White);
       }
     }
@@ -2396,6 +2416,46 @@ impl ParallelMonteCarloSearch {
       stats.argmax_rank = None;
       (Action::Pass, 0.0, 0.5)
     };
+
+    // FIXME(20160318): update the dead/alive stones stats for the just placed
+    // point.
+    if let Action::Place{point} = action {
+      //let rollout_count = root_node.values.total_trials.load(Ordering::Acquire);
+      let rollout_count = shared_rollout_count.load(Ordering::Acquire);
+      let live_thresh = (0.9 * rollout_count as f32).ceil() as usize;
+      let p = point.idx();
+      if shared_mc_live_counts[0][p].load(Ordering::Acquire) >= live_thresh {
+        b_mc_alive += 1;
+        match root_turn {
+          Stone::Black => live_stones[0].push(point),
+          Stone::White => territory[0].push(point),
+          _ => {}
+        }
+      } else {
+        match root_turn {
+          Stone::Black => dead_stones[0].push(point),
+          _ => {}
+        }
+      }
+      if shared_mc_live_counts[1][p].load(Ordering::Acquire) >= live_thresh {
+        w_mc_alive += 1;
+        match root_turn {
+          Stone::Black => territory[1].push(point),
+          Stone::White => live_stones[1].push(point),
+          _ => {}
+        }
+      } else {
+        match root_turn {
+          Stone::White => dead_stones[1].push(point),
+          _ => {}
+        }
+      }
+    }
+    if w_mc_alive as f32 - b_mc_alive as f32 + 6.5 < 0.0 {
+      outcome = Some(Stone::Black);
+    } else if w_mc_alive as f32 - b_mc_alive as f32 + 6.5 > 0.0 {
+      outcome = Some(Stone::White);
+    }
 
     (MonteCarloSearchResult{
       turn:   root_node.state.current_turn(),

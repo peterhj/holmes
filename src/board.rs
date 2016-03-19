@@ -137,7 +137,7 @@ impl Stone {
   }
 }
 
-#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, RustcDecodable, RustcEncodable, Debug)]
+#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, RustcDecodable, RustcEncodable)]
 pub struct Point(pub i16);
 
 impl Point {
@@ -166,11 +166,11 @@ impl Point {
   }
 }
 
-/*impl fmt::Debug for Point {
+impl fmt::Debug for Point {
   fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-    formatter.write_str(&format!("Point({})", point.to_coord().to_string()))
+    formatter.write_str(&format!("Point({})", self.to_coord().to_string()))
   }
-}*/
+}
 
 #[derive(Clone, Copy, Eq, PartialEq, RustcDecodable, RustcEncodable)]
 pub enum Action {

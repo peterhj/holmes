@@ -183,7 +183,13 @@ impl AgentImpl {
     );
   }
 
-  pub fn search(&mut self, remaining_time_ms: usize) -> (Action, MonteCarloSearchResult) {
+  pub fn search(&mut self, remaining_time_ms: usize) -> (Action, Option<MonteCarloSearchResult>) {
+    // XXX(20160318): Always pass if there is little remaining time left;
+    // don't risk running out of time (assuming zero byoyomi).
+    if remaining_time_ms <= 15000 {
+      return (Action::Pass, None);
+    }
+
     let shared_tree = if self.tree.is_none() {
       let shared_tree = SharedTree::new(self.tree_cfg);
       self.tree = Some(shared_tree.clone());
@@ -195,7 +201,7 @@ impl AgentImpl {
     // XXX(20160308): Use the time management strategy of [Huang, Coulom, Lin 2010].
     let allocated_time_ms =
         remaining_time_ms as f32
-        / (60.0 + 0.0f32.max(60.0 - self.ply as f32));
+        / (80.0 + 0.0f32.max(160.0 - self.ply as f32));
     assert!(allocated_time_ms >= 0.0);
     println!("DEBUG: agent: search: time budget: {} ms", allocated_time_ms);
 
@@ -218,8 +224,10 @@ impl AgentImpl {
         shared_tree,
         &mut self.rng,
     );
+    println!("DEBUG: agent: search result:  {:?}", res);
+    println!("DEBUG: agent: search stats:   {:?}", stats);
 
-    (res.action, res)
+    (res.action, Some(res))
   }
 
   pub fn step(&mut self, turn: Stone, action: Action) -> Result<(), ()> {
@@ -314,17 +322,31 @@ impl AsyncAgent for ParallelSearchAsyncAgent {
               let remaining_time_ms = 1000 * agent.main_time_s as usize;
               println!("DEBUG: agent: remaining_time: {} ms", remaining_time_ms);
               let (action, res) = agent.search(remaining_time_ms);
-              agent_out_tx.send(AgentMsg::SubmitAction{
-                turn:     agent.our_stone.unwrap(),
-                action:   action,
-                // FIXME(20160316): just send current game result with every action
-                // (including dead stones, live stones, territory, and est. outcome).
-                set_dead_stones:  true,
-                dead_stones:  res.dead_stones,
-                live_stones:  res.live_stones,
-                territory:    res.territory,
-                outcome:      res.outcome,
-              }).unwrap();
+              if let Some(res) = res {
+                agent_out_tx.send(AgentMsg::SubmitAction{
+                  turn:     agent.our_stone.unwrap(),
+                  action:   action,
+                  // FIXME(20160316): just send current game result with every action
+                  // (including dead stones, live stones, territory, and est. outcome).
+                  set_dead_stones:  true,
+                  dead_stones:  res.dead_stones,
+                  live_stones:  res.live_stones,
+                  territory:    res.territory,
+                  outcome:      res.outcome,
+                }).unwrap();
+              } else {
+                agent_out_tx.send(AgentMsg::SubmitAction{
+                  turn:     agent.our_stone.unwrap(),
+                  action:   action,
+                  // FIXME(20160316): just send current game result with every action
+                  // (including dead stones, live stones, territory, and est. outcome).
+                  set_dead_stones:  false,
+                  dead_stones:  vec![],
+                  live_stones:  vec![],
+                  territory:    vec![],
+                  outcome:      None,
+                }).unwrap();
+              }
               agent.state_machine = AgentStateMachine::OpponentTurn;
             } else {
               agent.state_machine = AgentStateMachine::OpponentTurn;
@@ -352,7 +374,9 @@ impl AsyncAgent for ParallelSearchAsyncAgent {
                 let remaining_time_ms = 1000 * time_left_s.unwrap() as usize;
                 println!("DEBUG: agent: remaining_time: {} ms", remaining_time_ms);
                 let (action, res) = agent.search(remaining_time_ms);
-                search_res = Some(res);
+                if let Some(res) = res {
+                  search_res = Some(res);
+                }
                 action
               };
               if let Some(search_res) = search_res {

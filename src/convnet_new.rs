@@ -5,8 +5,10 @@ use rembrandt::arch_new::{
 use rembrandt::layer_new::{
   ActivationFunction,
   ParamsInitialization,
+  ConvBackend,
   Data3dLayerConfig,
   Conv2dLayerConfig,
+  Conv2dLayerConfigV2,
   CategoricalLossLayerConfig,
   MultiCategoricalLossLayerConfig,
 };
@@ -375,7 +377,7 @@ pub fn build_2layer16_5x5_19x19x16_arch_nodir(batch_size: usize) -> PipelineArch
     dims:           (19, 19, input_channels),
     normalize:      true,
   };
-  let conv1_layer_cfg = Conv2dLayerConfig{
+  let conv1_layer_cfg = Conv2dLayerConfigV2{
     in_dims:        (19, 19, input_channels),
     conv_size:      5,
     conv_stride:    1,
@@ -383,6 +385,7 @@ pub fn build_2layer16_5x5_19x19x16_arch_nodir(batch_size: usize) -> PipelineArch
     out_channels:   hidden_channels,
     act_func:       ActivationFunction::Rect,
     init_weights:   ParamsInitialization::Uniform{half_range: 0.05},
+    backend:        ConvBackend::CudnnFftTiling,
   };
   /*let inner_conv_layer_cfg = Conv2dLayerConfig{
     in_dims:        (19, 19, hidden_channels),
@@ -393,7 +396,7 @@ pub fn build_2layer16_5x5_19x19x16_arch_nodir(batch_size: usize) -> PipelineArch
     act_func:       ActivationFunction::Rect,
     init_weights:   ParamsInitialization::Uniform{half_range: 0.05},
   };*/
-  let final_conv_layer_cfg = Conv2dLayerConfig{
+  let final_conv_layer_cfg = Conv2dLayerConfigV2{
     in_dims:        (19, 19, hidden_channels),
     conv_size:      3,
     conv_stride:    1,
@@ -401,6 +404,7 @@ pub fn build_2layer16_5x5_19x19x16_arch_nodir(batch_size: usize) -> PipelineArch
     out_channels:   1,
     act_func:       ActivationFunction::Identity,
     init_weights:   ParamsInitialization::Uniform{half_range: 0.05},
+    backend:        ConvBackend::CudnnImplicitPrecompGemm,
   };
   let loss_layer_cfg = CategoricalLossLayerConfig{
     num_categories:     361,
@@ -409,9 +413,9 @@ pub fn build_2layer16_5x5_19x19x16_arch_nodir(batch_size: usize) -> PipelineArch
   let mut arch_cfg = PipelineArchConfig::new();
   arch_cfg
     .data3d(data_layer_cfg)
-    .conv2d(conv1_layer_cfg)
+    .conv2d_v2(conv1_layer_cfg)
     //.conv2d(inner_conv_layer_cfg)
-    .conv2d(final_conv_layer_cfg)
+    .conv2d_v2(final_conv_layer_cfg)
     .softmax_kl_loss(loss_layer_cfg);
 
   arch_cfg
@@ -596,7 +600,7 @@ pub fn build_13layer384multi3_19x19x32_arch_nodir(batch_size: usize) -> Pipeline
     dims:           (19, 19, input_channels),
     normalize:      true,
   };
-  let conv1_layer_cfg = Conv2dLayerConfig{
+  let conv1_layer_cfg = Conv2dLayerConfigV2{
     in_dims:        (19, 19, input_channels),
     conv_size:      5,
     conv_stride:    1,
@@ -604,8 +608,9 @@ pub fn build_13layer384multi3_19x19x32_arch_nodir(batch_size: usize) -> Pipeline
     out_channels:   conv1_channels,
     act_func:       ActivationFunction::Rect,
     init_weights:   ParamsInitialization::Uniform{half_range: 0.05},
+    backend:        ConvBackend::CudnnImplicitPrecompGemm,
   };
-  let conv2_layer_cfg = Conv2dLayerConfig{
+  let conv2_layer_cfg = Conv2dLayerConfigV2{
     in_dims:        (19, 19, conv1_channels),
     conv_size:      3,
     conv_stride:    1,
@@ -613,8 +618,9 @@ pub fn build_13layer384multi3_19x19x32_arch_nodir(batch_size: usize) -> Pipeline
     out_channels:   hidden_channels,
     act_func:       ActivationFunction::Rect,
     init_weights:   ParamsInitialization::Uniform{half_range: 0.05},
+    backend:        ConvBackend::CudnnImplicitPrecompGemm,
   };
-  let inner_conv_layer_cfg = Conv2dLayerConfig{
+  let inner_conv_layer_cfg = Conv2dLayerConfigV2{
     in_dims:        (19, 19, hidden_channels),
     conv_size:      3,
     conv_stride:    1,
@@ -622,8 +628,9 @@ pub fn build_13layer384multi3_19x19x32_arch_nodir(batch_size: usize) -> Pipeline
     out_channels:   hidden_channels,
     act_func:       ActivationFunction::Rect,
     init_weights:   ParamsInitialization::Uniform{half_range: 0.05},
+    backend:        ConvBackend::CudnnImplicitPrecompGemm,
   };
-  let final_conv_layer_cfg = Conv2dLayerConfig{
+  let final_conv_layer_cfg = Conv2dLayerConfigV2{
     in_dims:        (19, 19, hidden_channels),
     conv_size:      3,
     conv_stride:    1,
@@ -631,6 +638,7 @@ pub fn build_13layer384multi3_19x19x32_arch_nodir(batch_size: usize) -> Pipeline
     out_channels:   3,
     act_func:       ActivationFunction::Identity,
     init_weights:   ParamsInitialization::Uniform{half_range: 0.05},
+    backend:        ConvBackend::CudnnImplicitPrecompGemm,
   };
   let loss_layer_cfg = MultiCategoricalLossLayerConfig{
     num_categories:     361,
@@ -641,19 +649,19 @@ pub fn build_13layer384multi3_19x19x32_arch_nodir(batch_size: usize) -> Pipeline
   let mut arch_cfg = PipelineArchConfig::new();
   arch_cfg
     .data3d(data_layer_cfg)
-    .conv2d(conv1_layer_cfg)
-    .conv2d(conv2_layer_cfg)
-    .conv2d(inner_conv_layer_cfg)
-    .conv2d(inner_conv_layer_cfg)
-    .conv2d(inner_conv_layer_cfg)
-    .conv2d(inner_conv_layer_cfg)
-    .conv2d(inner_conv_layer_cfg)
-    .conv2d(inner_conv_layer_cfg)
-    .conv2d(inner_conv_layer_cfg)
-    .conv2d(inner_conv_layer_cfg)
-    .conv2d(inner_conv_layer_cfg)
-    .conv2d(inner_conv_layer_cfg)
-    .conv2d(final_conv_layer_cfg)
+    .conv2d_v2(conv1_layer_cfg)
+    .conv2d_v2(conv2_layer_cfg)
+    .conv2d_v2(inner_conv_layer_cfg)
+    .conv2d_v2(inner_conv_layer_cfg)
+    .conv2d_v2(inner_conv_layer_cfg)
+    .conv2d_v2(inner_conv_layer_cfg)
+    .conv2d_v2(inner_conv_layer_cfg)
+    .conv2d_v2(inner_conv_layer_cfg)
+    .conv2d_v2(inner_conv_layer_cfg)
+    .conv2d_v2(inner_conv_layer_cfg)
+    .conv2d_v2(inner_conv_layer_cfg)
+    .conv2d_v2(inner_conv_layer_cfg)
+    .conv2d_v2(final_conv_layer_cfg)
     .multi_softmax_kl_loss(loss_layer_cfg);
 
   arch_cfg

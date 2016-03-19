@@ -500,12 +500,18 @@ impl<A> NngsOneShotClient<A> where A: AsyncAgent {
             Ok(InternalMsg::CleanupDeadStones) => {
               if let Some(ref game_outcome) = saved_game_outcome {
                 // FIXME(20160316): enter both players dead stones or just our own?
-                for &point in game_outcome.dead_stones[0].iter().chain(game_outcome.dead_stones[1].iter()) {
+                /*for &point in game_outcome.dead_stones[0].iter().chain(game_outcome.dead_stones[1].iter()) {
                   let coord = point.to_coord();
                   submit(&mut writer, &coord.to_bytestring());
-                }
-                println!("DEBUG: client writer: cleanup phase:");
-                println!("DEBUG: client writer: final outcome: {:?}", game_outcome.outcome);
+                }*/
+                println!("DEBUG: client writer: CLEANUP PHASE:");
+                println!("DEBUG: client writer: final outcome:  {:?}", game_outcome.outcome);
+                println!("DEBUG: client writer: dead stones[B]: {:?}", game_outcome.dead_stones[0]);
+                println!("DEBUG: client writer: dead stones[W]: {:?}", game_outcome.dead_stones[1]);
+                println!("DEBUG: client writer: live stones[B]: {:?}", game_outcome.live_stones[0]);
+                println!("DEBUG: client writer: live stones[W]: {:?}", game_outcome.live_stones[1]);
+                println!("DEBUG: client writer: territory[B]:   {:?}", game_outcome.territory[0]);
+                println!("DEBUG: client writer: territory[W]:   {:?}", game_outcome.territory[1]);
               }
               submit(&mut writer, b"done");
             }
