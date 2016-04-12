@@ -1007,6 +1007,9 @@ impl TreeOps {
       // At the cursor node, decide to walk or rollout depending on the total
       // number of trials.
       ply += 1;
+      if ply >= 20 {
+        break;
+      }
       let cursor_trials = cursor_node.read().unwrap().values.total_trials.load(Ordering::Acquire);
       if cursor_trials < tree_cfg.visit_thresh {
         // Not enough trials, stop the walk and do a rollout.
@@ -1639,6 +1642,13 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
                     shared_mc_live_counts[1][p].store(0, Ordering::Release);
                   }
                 }*/
+                if tid == 0 {
+                  inner.rollout_count.store(0, Ordering::Release);
+                  for p in 0 .. Board::SIZE {
+                    inner.mc_live_counts[0][p].store(0, Ordering::Release);
+                    inner.mc_live_counts[1][p].store(0, Ordering::Release);
+                  }
+                }
 
                 inner.root_node.as_ref().unwrap().clone()
               };
@@ -1806,7 +1816,9 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
                     fence(Ordering::AcqRel);
                     let signal = shared_signal.load(Ordering::Acquire);
                     if signal {
-                      println!("DEBUG: server: reached time limit, num batches: {}", batch);
+                      if tid == 0 {
+                        println!("DEBUG: server: reached time limit, num batches: {}", batch);
+                      }
                       break;
                     }
                   }
@@ -2322,11 +2334,11 @@ impl ParallelMonteCarloSearch {
       //let rollout_count = root_node.values.total_trials.load(Ordering::Acquire);
       let rollout_count = shared_rollout_count.load(Ordering::Acquire);
       let live_thresh = (0.9 * rollout_count as f32).ceil() as usize;
-      println!("DEBUG: liveness counting: rollout count: {}, thresh: {}, mc count[B][0]: {}",
+      /*println!("DEBUG: liveness counting: rollout count: {}, thresh: {}, mc count[B][0]: {}",
           rollout_count,
           live_thresh,
           shared_mc_live_counts[0][0].load(Ordering::Acquire),
-      );
+      );*/
       for p in 0 .. Board::SIZE {
         let pt = Point::from_idx(p);
         if shared_mc_live_counts[0][p].load(Ordering::Acquire) >= live_thresh {

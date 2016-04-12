@@ -80,9 +80,9 @@ impl AgentImpl {
       num_rollouts: 0,
     };
     let tree_cfg = TreePolicyConfig{
-      horizon_cfg:  HorizonConfig::Fixed{max_horizon: 20},
-      visit_thresh: 1,
-      mc_scale:     1.0,
+      horizon_cfg:  HorizonConfig::Fixed{max_horizon: 30},
+      visit_thresh: 24,
+      mc_scale:     0.0625,
       prior_equiv:  16.0,
       rave:         false,
       rave_equiv:   0.0,
@@ -94,7 +94,7 @@ impl AgentImpl {
     // FIXME(20160316): open save file with RW permissions.
     let save_file = File::create(&save_path).unwrap();
 
-    let num_workers = CudaDevice::count().unwrap();
+    let num_workers = 2 * CudaDevice::count().unwrap();
     let rounded_batch_size = (search_cfg.batch_size + num_workers - 1) / num_workers * num_workers;
     let worker_batch_capacity = rounded_batch_size / num_workers;
 
@@ -303,7 +303,7 @@ impl AsyncAgent for ParallelSearchAsyncAgent {
             }).unwrap();
           }
 
-          Ok(AgentMsg::StartMatch{our_stone, board_size, main_time_secs, byoyomi_time_secs, ..}) => {
+          Ok(AgentMsg::StartMatch{skip_as_black, our_stone, board_size, main_time_secs, byoyomi_time_secs, ..}) => {
             println!("DEBUG: agent: start match");
 
             agent.our_stone = Some(our_stone);
@@ -317,7 +317,7 @@ impl AsyncAgent for ParallelSearchAsyncAgent {
             agent.ply = 0;
             agent.tree = None;
 
-            if Stone::Black == our_stone {
+            if Stone::Black == our_stone && !skip_as_black {
               agent.state_machine = AgentStateMachine::OurTurn;
               let remaining_time_ms = 1000 * agent.main_time_s as usize;
               println!("DEBUG: agent: remaining_time: {} ms", remaining_time_ms);

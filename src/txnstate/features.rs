@@ -3409,3 +3409,583 @@ impl TxnStateData for TxnStateAlphaMiniV3FeatsData {
     }
   }
 }
+
+#[derive(Clone, RustcDecodable, RustcEncodable)]
+pub struct TxnStateAlphaPatternV3FeatsData {
+  pub features: Vec<u8>,
+  prev_moves:   Vec<Option<(Stone, Point)>>,
+  tmp_mark:     BitSet,
+}
+
+impl TxnStateAlphaPatternV3FeatsData {
+  pub const SET: u8 = 255;
+
+  pub const NUM_PLANES:         usize = 8;
+  pub const NUM_EXTRACT_PLANES: usize = 8;
+
+  pub const EMPTY_PLANE:        usize = 0 * Board::SIZE;
+  pub const BLACK_PLANE:        usize = 1 * Board::SIZE;
+  pub const WHITE_PLANE:        usize = 2 * Board::SIZE;
+  pub const TURNS_1_PLANE:      usize = 3 * Board::SIZE;
+  pub const LIBS_1_PLANE:       usize = 4 * Board::SIZE;
+  pub const LIBS_2_PLANE:       usize = 5 * Board::SIZE;
+  pub const LIBS_3_PLANE:       usize = 6 * Board::SIZE;
+  pub const KO_PLANE:           usize = 7 * Board::SIZE;
+
+  pub const EMPTY_EXT_PLANE:    usize = 0 * Board::SIZE;
+  pub const FRIEND_EXT_PLANE:   usize = 1 * Board::SIZE;
+  pub const ENEMY_EXT_PLANE:    usize = 2 * Board::SIZE;
+  pub const TURNS_1_EXT_PLANE:  usize = 3 * Board::SIZE;
+  pub const LIBS_1_EXT_PLANE:   usize = 4 * Board::SIZE;
+  pub const LIBS_2_EXT_PLANE:   usize = 5 * Board::SIZE;
+  pub const LIBS_3_EXT_PLANE:   usize = 6 * Board::SIZE;
+  pub const KO_EXT_PLANE:       usize = 7 * Board::SIZE;
+
+  pub fn new() -> TxnStateAlphaPatternV3FeatsData {
+    let feats = TxnStateAlphaPatternV3FeatsData{
+      features:     repeat(0).take(Self::NUM_PLANES * Board::SIZE).collect(),
+      prev_moves:   vec![None],
+      tmp_mark:     BitSet::with_capacity(Board::SIZE),
+    };
+    assert_eq!(feats.features.len(), Self::NUM_PLANES * Board::SIZE);
+    feats
+  }
+
+  pub fn from_src_feats(src: &TxnStateAlphaV3FeatsData) -> TxnStateAlphaPatternV3FeatsData {
+    type SrcFeats = TxnStateAlphaV3FeatsData;
+    let plane = Board::SIZE;
+    let pairs = [
+        (SrcFeats::EMPTY_PLANE,     Self::EMPTY_PLANE),
+        (SrcFeats::BLACK_PLANE,     Self::BLACK_PLANE),
+        (SrcFeats::WHITE_PLANE,     Self::WHITE_PLANE),
+        (SrcFeats::TURNS_1_PLANE,   Self::TURNS_1_PLANE),
+        (SrcFeats::LIBS_1_PLANE,    Self::LIBS_1_PLANE),
+        (SrcFeats::LIBS_2_PLANE,    Self::LIBS_2_PLANE),
+        (SrcFeats::LIBS_3_PLANE,    Self::LIBS_3_PLANE),
+        (SrcFeats::KO_PLANE,        Self::KO_PLANE),
+    ];
+    let mut dst = TxnStateAlphaPatternV3FeatsData::new();
+    for &(src_offset, dst_offset) in pairs.iter() {
+      copy_memory(
+              &src.features[src_offset .. src_offset + plane],
+          &mut dst.features[dst_offset .. dst_offset + plane],
+      );
+    }
+    dst.prev_moves[0] = src.prev_moves[0];
+    dst
+  }
+
+  pub fn serial_size() -> usize {
+    BitArray3d::serial_size((19, 19, 8))
+  }
+
+  pub fn extract_relative_serial_blob(&self, turn: Stone) -> Vec<u8> {
+    let mut serial_frame: Vec<u8> = Vec::with_capacity(Self::serial_size());
+    let bit_arr = self.extract_relative_serial_array(turn);
+    bit_arr.serialize(&mut serial_frame).unwrap();
+    serial_frame
+  }
+
+  pub fn extract_relative_serial_array(&self, turn: Stone) -> BitArray3d {
+    let mut buf: Vec<u8> = Vec::with_capacity(Self::NUM_EXTRACT_PLANES * Board::SIZE);
+    unsafe { buf.set_len(Self::NUM_EXTRACT_PLANES * Board::SIZE) };
+    self.extract_relative_features(turn, &mut buf);
+
+    let mut bit_buf: Vec<u8> = Vec::with_capacity(Self::NUM_EXTRACT_PLANES * Board::SIZE);
+    unsafe { bit_buf.set_len(Self::NUM_EXTRACT_PLANES * Board::SIZE) };
+    copy_memory(
+        &buf[ .. Self::NUM_EXTRACT_PLANES * Board::SIZE],
+        &mut bit_buf,
+    );
+
+    let bit_arr = BitArray3d::from_byte_array(&Array3d::with_data(bit_buf, (Board::DIM, Board::DIM, Self::NUM_EXTRACT_PLANES)));
+
+    bit_arr
+  }
+
+  pub fn extract_relative_features(&self, turn: Stone, dst_buf: &mut [u8]) {
+    assert_eq!(dst_buf.len(), Self::NUM_EXTRACT_PLANES * Board::SIZE);
+    match turn {
+      Stone::Black => {
+        /*copy_memory(
+            &self.features[ .. Self::BLACK_PLANE],
+            &mut dst_buf[ .. Self::FRIEND_EXT_PLANE],
+        );
+        copy_memory(
+            &self.features[Self::BLACK_PLANE .. Self::TURNS_1_PLANE],
+            &mut dst_buf[Self::FRIEND_EXT_PLANE .. Self::TURNS_1_EXT_PLANE],
+        );
+        copy_memory(
+            &self.features[Self::TURNS_1_PLANE .. ],
+            &mut dst_buf[Self::TURNS_1_EXT_PLANE .. ],
+        );*/
+        copy_memory(
+            &self.features,
+            dst_buf,
+        );
+      }
+      Stone::White => {
+        copy_memory(
+            &self.features[ .. Self::BLACK_PLANE],
+            &mut dst_buf[ .. Self::FRIEND_EXT_PLANE],
+        );
+        copy_memory(
+            &self.features[Self::WHITE_PLANE .. Self::TURNS_1_PLANE],
+            &mut dst_buf[Self::FRIEND_EXT_PLANE .. Self::ENEMY_EXT_PLANE],
+        );
+        copy_memory(
+            &self.features[Self::BLACK_PLANE .. Self::WHITE_PLANE],
+            &mut dst_buf[Self::ENEMY_EXT_PLANE .. Self::TURNS_1_EXT_PLANE],
+        );
+        copy_memory(
+            &self.features[Self::TURNS_1_PLANE .. ],
+            &mut dst_buf[Self::TURNS_1_EXT_PLANE .. ],
+        );
+      }
+      _ => unreachable!(),
+    }
+  }
+
+  fn update_point_turns(features: &mut [u8], point: Point, turns: usize) {
+    let p = point.idx();
+    match turns {
+      1 => {
+        features[Self::TURNS_1_PLANE + p] = Self::SET;
+      }
+      2 => {
+        features[Self::TURNS_1_PLANE + p] = 0;
+      }
+      _ => unreachable!(),
+    }
+  }
+
+  fn update_point_libs(tmp_mark: &mut BitSet, features: &mut [u8], position: &TxnPosition, chains: &TxnChainsList, point: Point, turn: Stone) {
+    let p = point.idx();
+    if tmp_mark.contains(p) {
+      return;
+    }
+
+    let stone = position.stones[p];
+    if stone != Stone::Empty {
+      let head = chains.find_chain(point);
+      //assert!(head != TOMBSTONE);
+      let chain = chains.get_chain(head).unwrap();
+
+      // Liberty features.
+      match chain.count_libs_up_to_3() {
+        0 => { unreachable!(); }
+        1 => {
+          features[Self::LIBS_1_PLANE + p] = Self::SET;
+          features[Self::LIBS_2_PLANE + p] = 0;
+          features[Self::LIBS_3_PLANE + p] = 0;
+        }
+        2 => {
+          features[Self::LIBS_1_PLANE + p] = Self::SET;
+          features[Self::LIBS_2_PLANE + p] = Self::SET;
+          features[Self::LIBS_3_PLANE + p] = 0;
+        }
+        3 => {
+          features[Self::LIBS_1_PLANE + p] = Self::SET;
+          features[Self::LIBS_2_PLANE + p] = Self::SET;
+          features[Self::LIBS_3_PLANE + p] = Self::SET;
+        }
+        _ => { unreachable!(); }
+      }
+
+    } else {
+      features[Self::LIBS_1_PLANE + p] = 0;
+      features[Self::LIBS_2_PLANE + p] = 0;
+      features[Self::LIBS_3_PLANE + p] = 0;
+    }
+
+    tmp_mark.insert(p);
+  }
+
+  fn update_point_ko(features: &mut [u8], position: &TxnPosition, ko_turn: Stone, ko_point: Point, is_ko: bool) {
+    let p = ko_point.idx();
+    if is_ko {
+      features[Self::KO_PLANE + p] = Self::SET;
+    } else {
+      features[Self::KO_PLANE + p] = 0;
+    }
+  }
+}
+
+impl TxnStateData for TxnStateAlphaPatternV3FeatsData {
+  fn reset(&mut self) {
+    for p in 0 .. Self::BLACK_PLANE {
+      self.features[p] = Self::SET;
+    }
+    for p in Self::BLACK_PLANE .. Self::NUM_PLANES * Board::SIZE {
+      self.features[p] = 0;
+    }
+    self.prev_moves[0] = None;
+  }
+
+  fn update(&mut self, position: &TxnPosition, chains: &TxnChainsList, update_turn: Stone, update_action: Action) {
+    {
+      // XXX(20151107): Iterate over placed and killed chains to update stone
+      // repr.
+      let &mut TxnStateAlphaPatternV3FeatsData{
+        ref mut features,
+        ref mut tmp_mark, .. } = self;
+
+      // Update stone features.
+      if let Some((stone, point)) = position.last_placed {
+        let p = point.idx();
+        match stone {
+          Stone::Black => {
+            features[Self::EMPTY_PLANE + p] = 0;
+            features[Self::BLACK_PLANE + p] = Self::SET;
+            features[Self::WHITE_PLANE + p] = 0;
+          }
+          Stone::White => {
+            features[Self::EMPTY_PLANE + p] = 0;
+            features[Self::BLACK_PLANE + p] = 0;
+            features[Self::WHITE_PLANE + p] = Self::SET;
+          }
+          Stone::Empty => { unreachable!(); }
+        }
+      }
+      for &kill_point in position.last_killed[0].iter().chain(position.last_killed[1].iter()) {
+        let p = kill_point.idx();
+        features[Self::EMPTY_PLANE + p] = Self::SET;
+        features[Self::BLACK_PLANE + p] = 0;
+        features[Self::WHITE_PLANE + p] = 0;
+      }
+
+      // XXX(20160102): Update previous moves.
+      for t in (0 .. 1).rev() {
+        match self.prev_moves[t] {
+          Some((_, prev_point)) => {
+            Self::update_point_turns(features, prev_point, t + 2);
+          }
+          None => {}
+        }
+      }
+      match update_action {
+        Action::Place{point} => {
+          Self::update_point_turns(features, point, 1);
+        }
+        _ => {}
+      }
+      self.prev_moves[0] = match update_action {
+        Action::Place{point} => Some((update_turn, point)),
+        _ => None,
+      };
+
+      // XXX(20160127): Update liberty, capture, and suicide features by
+      // iterating over placed, adjacent, ko, captured stones, and pseudolibs;
+      // see TxnStateLegalityData.
+      tmp_mark.clear();
+      if let Some((_, place_point)) = position.last_placed {
+        Self::update_point_libs(tmp_mark, features, position, chains, place_point, update_turn);
+        for_each_adjacent(place_point, |adj_point| {
+          Self::update_point_libs(tmp_mark, features, position, chains, adj_point, update_turn);
+        });
+      }
+      if let Some((_, prev_ko_point)) = position.prev_ko {
+        Self::update_point_libs(tmp_mark, features, position, chains, prev_ko_point, update_turn);
+      }
+      if let Some((_, ko_point)) = position.ko {
+        Self::update_point_libs(tmp_mark, features, position, chains, ko_point, update_turn);
+      }
+      for &kill_point in position.last_killed[0].iter().chain(position.last_killed[1].iter()) {
+        Self::update_point_libs(tmp_mark, features, position, chains, kill_point, update_turn);
+      }
+      for &head in chains.last_mut_heads.iter() {
+        let mut is_valid_head = false;
+        if let Some(chain) = chains.get_chain(head) {
+          is_valid_head = true;
+        }
+        if is_valid_head {
+          chains.iter_chain(head, |ch_pt| {
+            Self::update_point_libs(tmp_mark, features, position, chains, ch_pt, update_turn);
+          });
+        }
+      }
+
+      // Update the ko features.
+      if let Some((prev_ko_turn, prev_ko_point)) = position.prev_ko {
+        Self::update_point_ko(features, position, prev_ko_turn, prev_ko_point, false);
+      }
+      if let Some((ko_turn, ko_point)) = position.ko {
+        Self::update_point_ko(features, position, ko_turn, ko_point, true);
+      }
+    }
+  }
+}
+
+#[derive(Clone, RustcDecodable, RustcEncodable)]
+pub struct TxnStateAlphaPatternNoKoV3FeatsData {
+  pub features: Vec<u8>,
+  prev_moves:   Vec<Option<(Stone, Point)>>,
+  tmp_mark:     BitSet,
+}
+
+impl TxnStateAlphaPatternNoKoV3FeatsData {
+  pub const SET: u8 = 255;
+
+  pub const NUM_PLANES:         usize = 7;
+  pub const NUM_EXTRACT_PLANES: usize = 7;
+
+  pub const EMPTY_PLANE:        usize = 0 * Board::SIZE;
+  pub const BLACK_PLANE:        usize = 1 * Board::SIZE;
+  pub const WHITE_PLANE:        usize = 2 * Board::SIZE;
+  pub const LIBS_1_PLANE:       usize = 3 * Board::SIZE;
+  pub const LIBS_2_PLANE:       usize = 4 * Board::SIZE;
+  pub const LIBS_3_PLANE:       usize = 5 * Board::SIZE;
+  pub const TURNS_1_PLANE:      usize = 6 * Board::SIZE;
+
+  pub const EMPTY_EXT_PLANE:    usize = 0 * Board::SIZE;
+  pub const FRIEND_EXT_PLANE:   usize = 1 * Board::SIZE;
+  pub const ENEMY_EXT_PLANE:    usize = 2 * Board::SIZE;
+  pub const LIBS_1_EXT_PLANE:   usize = 3 * Board::SIZE;
+  pub const LIBS_2_EXT_PLANE:   usize = 4 * Board::SIZE;
+  pub const LIBS_3_EXT_PLANE:   usize = 5 * Board::SIZE;
+  pub const TURNS_1_EXT_PLANE:  usize = 6 * Board::SIZE;
+
+  pub fn new() -> TxnStateAlphaPatternNoKoV3FeatsData {
+    let feats = TxnStateAlphaPatternNoKoV3FeatsData{
+      features:     repeat(0).take(Self::NUM_PLANES * Board::SIZE).collect(),
+      prev_moves:   vec![None],
+      tmp_mark:     BitSet::with_capacity(Board::SIZE),
+    };
+    assert_eq!(feats.features.len(), Self::NUM_PLANES * Board::SIZE);
+    feats
+  }
+
+  pub fn from_src_feats(src: &TxnStateAlphaV3FeatsData) -> TxnStateAlphaPatternNoKoV3FeatsData {
+    type SrcFeats = TxnStateAlphaV3FeatsData;
+    let plane = Board::SIZE;
+    let pairs = [
+        (SrcFeats::EMPTY_PLANE,     Self::EMPTY_PLANE),
+        (SrcFeats::BLACK_PLANE,     Self::BLACK_PLANE),
+        (SrcFeats::WHITE_PLANE,     Self::WHITE_PLANE),
+        (SrcFeats::LIBS_1_PLANE,    Self::LIBS_1_PLANE),
+        (SrcFeats::LIBS_2_PLANE,    Self::LIBS_2_PLANE),
+        (SrcFeats::LIBS_3_PLANE,    Self::LIBS_3_PLANE),
+        (SrcFeats::TURNS_1_PLANE,   Self::TURNS_1_PLANE),
+    ];
+    let mut dst = TxnStateAlphaPatternNoKoV3FeatsData::new();
+    for &(src_offset, dst_offset) in pairs.iter() {
+      copy_memory(
+              &src.features[src_offset .. src_offset + plane],
+          &mut dst.features[dst_offset .. dst_offset + plane],
+      );
+    }
+    dst.prev_moves[0] = src.prev_moves[0];
+    dst
+  }
+
+  pub fn serial_size() -> usize {
+    BitArray3d::serial_size((19, 19, 7))
+  }
+
+  pub fn extract_relative_serial_blob(&self, turn: Stone) -> Vec<u8> {
+    let mut serial_frame: Vec<u8> = Vec::with_capacity(Self::serial_size());
+    let bit_arr = self.extract_relative_serial_array(turn);
+    bit_arr.serialize(&mut serial_frame).unwrap();
+    serial_frame
+  }
+
+  pub fn extract_relative_serial_array(&self, turn: Stone) -> BitArray3d {
+    let mut buf: Vec<u8> = Vec::with_capacity(Self::NUM_EXTRACT_PLANES * Board::SIZE);
+    unsafe { buf.set_len(Self::NUM_EXTRACT_PLANES * Board::SIZE) };
+    self.extract_relative_features(turn, &mut buf);
+
+    let mut bit_buf: Vec<u8> = Vec::with_capacity(Self::NUM_EXTRACT_PLANES * Board::SIZE);
+    unsafe { bit_buf.set_len(Self::NUM_EXTRACT_PLANES * Board::SIZE) };
+    copy_memory(
+        &buf[ .. Self::NUM_EXTRACT_PLANES * Board::SIZE],
+        &mut bit_buf,
+    );
+
+    let bit_arr = BitArray3d::from_byte_array(&Array3d::with_data(bit_buf, (Board::DIM, Board::DIM, Self::NUM_EXTRACT_PLANES)));
+
+    bit_arr
+  }
+
+  pub fn extract_relative_features(&self, turn: Stone, dst_buf: &mut [u8]) {
+    assert_eq!(dst_buf.len(), Self::NUM_EXTRACT_PLANES * Board::SIZE);
+    match turn {
+      Stone::Black => {
+        copy_memory(
+            &self.features,
+            dst_buf,
+        );
+      }
+      Stone::White => {
+        copy_memory(
+            &self.features[ .. Self::BLACK_PLANE],
+            &mut dst_buf[ .. Self::FRIEND_EXT_PLANE],
+        );
+        copy_memory(
+            &self.features[Self::WHITE_PLANE .. Self::LIBS_1_PLANE],
+            &mut dst_buf[Self::FRIEND_EXT_PLANE .. Self::ENEMY_EXT_PLANE],
+        );
+        copy_memory(
+            &self.features[Self::BLACK_PLANE .. Self::WHITE_PLANE],
+            &mut dst_buf[Self::ENEMY_EXT_PLANE .. Self::LIBS_1_EXT_PLANE],
+        );
+        copy_memory(
+            &self.features[Self::LIBS_1_PLANE .. ],
+            &mut dst_buf[Self::LIBS_1_EXT_PLANE .. ],
+        );
+      }
+      _ => unreachable!(),
+    }
+  }
+
+  fn update_point_turns(features: &mut [u8], point: Point, turns: usize) {
+    let p = point.idx();
+    match turns {
+      1 => {
+        features[Self::TURNS_1_PLANE + p] = Self::SET;
+      }
+      2 => {
+        features[Self::TURNS_1_PLANE + p] = 0;
+      }
+      _ => unreachable!(),
+    }
+  }
+
+  fn update_point_libs(tmp_mark: &mut BitSet, features: &mut [u8], position: &TxnPosition, chains: &TxnChainsList, point: Point, turn: Stone) {
+    let p = point.idx();
+    if tmp_mark.contains(p) {
+      return;
+    }
+
+    let stone = position.stones[p];
+    if stone != Stone::Empty {
+      let head = chains.find_chain(point);
+      //assert!(head != TOMBSTONE);
+      let chain = chains.get_chain(head).unwrap();
+
+      // Liberty features.
+      match chain.count_libs_up_to_3() {
+        0 => { unreachable!(); }
+        1 => {
+          features[Self::LIBS_1_PLANE + p] = Self::SET;
+          features[Self::LIBS_2_PLANE + p] = 0;
+          features[Self::LIBS_3_PLANE + p] = 0;
+        }
+        2 => {
+          features[Self::LIBS_1_PLANE + p] = Self::SET;
+          features[Self::LIBS_2_PLANE + p] = Self::SET;
+          features[Self::LIBS_3_PLANE + p] = 0;
+        }
+        3 => {
+          features[Self::LIBS_1_PLANE + p] = Self::SET;
+          features[Self::LIBS_2_PLANE + p] = Self::SET;
+          features[Self::LIBS_3_PLANE + p] = Self::SET;
+        }
+        _ => { unreachable!(); }
+      }
+
+    } else {
+      features[Self::LIBS_1_PLANE + p] = 0;
+      features[Self::LIBS_2_PLANE + p] = 0;
+      features[Self::LIBS_3_PLANE + p] = 0;
+    }
+
+    tmp_mark.insert(p);
+  }
+}
+
+impl TxnStateData for TxnStateAlphaPatternNoKoV3FeatsData {
+  fn reset(&mut self) {
+    for p in 0 .. Self::BLACK_PLANE {
+      self.features[p] = Self::SET;
+    }
+    for p in Self::BLACK_PLANE .. Self::NUM_PLANES * Board::SIZE {
+      self.features[p] = 0;
+    }
+    self.prev_moves[0] = None;
+  }
+
+  fn update(&mut self, position: &TxnPosition, chains: &TxnChainsList, update_turn: Stone, update_action: Action) {
+    {
+      // XXX(20151107): Iterate over placed and killed chains to update stone
+      // repr.
+      let &mut TxnStateAlphaPatternNoKoV3FeatsData{
+        ref mut features,
+        ref mut tmp_mark, .. } = self;
+
+      // Update stone features.
+      if let Some((stone, point)) = position.last_placed {
+        let p = point.idx();
+        match stone {
+          Stone::Black => {
+            features[Self::EMPTY_PLANE + p] = 0;
+            features[Self::BLACK_PLANE + p] = Self::SET;
+            features[Self::WHITE_PLANE + p] = 0;
+          }
+          Stone::White => {
+            features[Self::EMPTY_PLANE + p] = 0;
+            features[Self::BLACK_PLANE + p] = 0;
+            features[Self::WHITE_PLANE + p] = Self::SET;
+          }
+          Stone::Empty => { unreachable!(); }
+        }
+      }
+      for &kill_point in position.last_killed[0].iter().chain(position.last_killed[1].iter()) {
+        let p = kill_point.idx();
+        features[Self::EMPTY_PLANE + p] = Self::SET;
+        features[Self::BLACK_PLANE + p] = 0;
+        features[Self::WHITE_PLANE + p] = 0;
+      }
+
+      // XXX(20160102): Update previous moves.
+      for t in (0 .. 1).rev() {
+        match self.prev_moves[t] {
+          Some((_, prev_point)) => {
+            Self::update_point_turns(features, prev_point, t + 2);
+          }
+          None => {}
+        }
+      }
+      match update_action {
+        Action::Place{point} => {
+          Self::update_point_turns(features, point, 1);
+        }
+        _ => {}
+      }
+      self.prev_moves[0] = match update_action {
+        Action::Place{point} => Some((update_turn, point)),
+        _ => None,
+      };
+
+      // XXX(20160127): Update liberty, capture, and suicide features by
+      // iterating over placed, adjacent, ko, captured stones, and pseudolibs;
+      // see TxnStateLegalityData.
+      tmp_mark.clear();
+      if let Some((_, place_point)) = position.last_placed {
+        Self::update_point_libs(tmp_mark, features, position, chains, place_point, update_turn);
+        for_each_adjacent(place_point, |adj_point| {
+          Self::update_point_libs(tmp_mark, features, position, chains, adj_point, update_turn);
+        });
+      }
+      if let Some((_, prev_ko_point)) = position.prev_ko {
+        Self::update_point_libs(tmp_mark, features, position, chains, prev_ko_point, update_turn);
+      }
+      if let Some((_, ko_point)) = position.ko {
+        Self::update_point_libs(tmp_mark, features, position, chains, ko_point, update_turn);
+      }
+      for &kill_point in position.last_killed[0].iter().chain(position.last_killed[1].iter()) {
+        Self::update_point_libs(tmp_mark, features, position, chains, kill_point, update_turn);
+      }
+      for &head in chains.last_mut_heads.iter() {
+        let mut is_valid_head = false;
+        if let Some(chain) = chains.get_chain(head) {
+          is_valid_head = true;
+        }
+        if is_valid_head {
+          chains.iter_chain(head, |ch_pt| {
+            Self::update_point_libs(tmp_mark, features, position, chains, ch_pt, update_turn);
+          });
+        }
+      }
+    }
+  }
+}

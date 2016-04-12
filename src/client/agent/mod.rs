@@ -27,6 +27,7 @@ pub enum AgentMsg {
     byoyomi_time_secs: i32,
   },
   StartMatch{
+    skip_as_black: bool,
     opponent: String,
     our_stone: Stone,
     board_size: i32,

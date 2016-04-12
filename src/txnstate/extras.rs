@@ -217,7 +217,8 @@ pub struct TxnStateNodeData {
   //pub features: TxnStateFeaturesData,
   //pub features: TxnStateLibFeaturesData,
   //pub features: TxnStateAlphaFeatsV2Data,
-  pub features: TxnStateAlphaV3FeatsData,
+  //pub features: TxnStateAlphaV3FeatsData,
+  pub features: TxnStateAlphaMiniV3FeatsData,
   pub legality: TxnStateLegalityData,
 }
 
@@ -227,7 +228,8 @@ impl TxnStateNodeData {
       //features: TxnStateFeaturesData::new(),
       //features: TxnStateLibFeaturesData::new(),
       //features: TxnStateAlphaFeatsV2Data::new(),
-      features: TxnStateAlphaV3FeatsData::new(),
+      //features: TxnStateAlphaV3FeatsData::new(),
+      features: TxnStateAlphaMiniV3FeatsData::new(),
       legality: TxnStateLegalityData::new(false),
     }
   }
@@ -270,8 +272,8 @@ impl TxnStateRolloutData {
 
   pub fn from_node_data(node_data: &TxnStateNodeData) -> TxnStateRolloutData {
     TxnStateRolloutData{
-      //features: node_data.features.clone(),
-      features: TxnStateAlphaMiniV3FeatsData::from_src_feats(&node_data.features),
+      features: node_data.features.clone(),
+      //features: TxnStateAlphaMiniV3FeatsData::from_src_feats(&node_data.features),
     }
   }
 }

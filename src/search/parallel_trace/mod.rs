@@ -340,9 +340,7 @@ where TreeWork: TreeBatchWorker,
       for batch_idx in 0 .. trace_batch.batch_size {
         let traj_trace = &trace_batch.traj_traces[batch_idx];
         let mut node = root_node.clone();
-        let mut terminated = false;
         for decision in traj_trace.tree_trace.decisions.iter() {
-          assert!(!terminated);
           //let action_idx = decision.action.idx();
           let j = decision.action_rank;
           let (turn, visit_count, has_child) = {
@@ -353,9 +351,7 @@ where TreeWork: TreeBatchWorker,
               node.child_nodes.contains_key(j),
             )
           };
-          if visit_count < search_trace.tree_cfg.unwrap().visit_thresh {
-            terminated = true;
-          }
+          assert!(visit_count >= search_trace.tree_cfg.unwrap().visit_thresh);
           let next_node = if has_child {
             node.read().unwrap().child_nodes[j].clone()
           } else {

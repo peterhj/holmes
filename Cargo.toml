@@ -157,6 +157,22 @@ path = "tools/reshape-13layer384-19x19x32.rs"
 name = "new-train-value-13layer384multi3-19x19x32"
 path = "tools/new-train-value-13layer384multi3-19x19x32.rs"
 
+[[bin]]
+name = "new-train-1layer-19x19x8"
+path = "tools/new-train-1layer-19x19x8.rs"
+
+[[bin]]
+name = "new-train-1layer5x5-19x19x8"
+path = "tools/new-train-1layer5x5-19x19x8.rs"
+
+[[bin]]
+name = "new-train-2layer3x3-19x19x8"
+path = "tools/new-train-2layer3x3-19x19x8.rs"
+
+[[bin]]
+name = "new-train-2layer3x3-19x19x7"
+path = "tools/new-train-2layer3x3-19x19x7.rs"
+
 #[[bin]]
 #name = "policygrad-balance"
 #path = "tools/policygrad-balance.rs"
@@ -280,6 +296,10 @@ path = "tools/trace-omega.rs"
 [[bin]]
 name = "train-policygrad"
 path = "tools/train-policygrad.rs"
+
+[[bin]]
+name = "train-patterns"
+path = "tools/train-patterns.rs"
 
 [dependencies]
 #bit-set = "*"

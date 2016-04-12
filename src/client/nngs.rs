@@ -43,6 +43,7 @@ impl NngsServerConfig {
 #[derive(Clone, RustcDecodable, Debug)]
 pub struct NngsMatchConfig {
   pub load_save_path:   Option<String>,
+  pub skip_as_black:    Option<bool>,
   pub automatch:    bool,
   pub our_stone:    Stone,
   pub opponent:     String,
@@ -185,6 +186,7 @@ impl<A> NngsOneShotClient<A> where A: AsyncAgent {
                 writer_tx.send(InternalMsg::WriteCmd{cmd: match_cmd}).unwrap();
               }
               agent_in_tx.send(AgentMsg::StartMatch{
+                skip_as_black:    match_cfg.as_ref().map_or(false, |cfg| cfg.skip_as_black.unwrap_or(false)),
                 opponent:     opponent.clone(),
                 our_stone:    our_stone,
                 board_size:   board_size,

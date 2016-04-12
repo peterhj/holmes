@@ -14,6 +14,7 @@ fn main() {
     batch_size:     64,
   };
   let tree_cfg = TreePolicyConfig{
+    //horizon_cfg:    HorizonConfig::All,
     horizon_cfg:    HorizonConfig::Fixed{max_horizon: 20},
     visit_thresh:   1,
     mc_scale:       1.0,
@@ -21,7 +22,7 @@ fn main() {
     rave:           false,
     rave_equiv:     0.0,
   };
-  let mut driver = OmegaDriver::new(state_cfg, search_cfg, tree_cfg);
+  let mut driver = OmegaDriver::new(state_cfg, search_cfg, tree_cfg, /*save_interval*/);
   let mut loader = LazyEpisodeLoader::new(PathBuf::from("gogodb_w2015_train_index"), GogodbEpisodePreproc);
   driver.train(&mut loader);
 }

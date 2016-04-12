@@ -1,6 +1,6 @@
 use board::{Board, Rules, RuleSet, Coord, PlayerRank, Stone, Point, Action};
 use gtp_board::{dump_xcoord};
-use pattern::{Pattern3x3};
+use pattern::{Pattern3x3, LibPattern3x3};
 
 use rustc_serialize::{Decodable, Encodable};
 use std::cmp::{max};
@@ -1059,6 +1059,30 @@ impl<Data> TxnState<Data> where Data: TxnStateData + Clone {
       }
     });
     Pattern3x3(mask8)
+  }
+
+  pub fn current_relative_libpat3x3(&self, turn: Stone, point: Point) -> LibPattern3x3 {
+    let mut mask: u32 = 0;
+    for_each_x8(point, |i, adj_pt| {
+      let adj_st = self.position.stones[adj_pt.idx()];
+      match (turn, adj_st) {
+        (_, Stone::Empty) => mask |= !(0x1 << (2*i)),
+        (Stone::Black, Stone::Black) |
+        (Stone::White, Stone::White) => mask |= !(0x2 << (2*i)),
+        (Stone::Black, Stone::White) |
+        (Stone::White, Stone::Black) => mask |= !(0x3 << (2*i)),
+        _ => unreachable!(),
+      }
+      if Stone::Empty != adj_st {
+        match self.current_libs_up_to_3(adj_pt) {
+          1 => mask |= !(0x1 << (2*i + 16)),
+          2 => mask |= !(0x2 << (2*i + 16)),
+          3 => mask |= !(0x3 << (2*i + 16)),
+          _ => unreachable!(),
+        }
+      }
+    });
+    LibPattern3x3{mask: mask}
   }
 
   pub fn current_libs_up_to_3(&self, point: Point) -> usize {

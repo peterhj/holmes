@@ -16,6 +16,8 @@ use holmes::txnstate::features::{
   TxnStateAlphaFeatsV2Data,*/
   TxnStateAlphaV3FeatsData,
   TxnStateAlphaMiniV3FeatsData,
+  TxnStateAlphaPatternV3FeatsData,
+  TxnStateAlphaPatternNoKoV3FeatsData,
 };
 
 //use array::{NdArrayFormat, ArrayDeserialize, ArraySerialize, Array3d};
@@ -69,7 +71,9 @@ fn main() {
   //let expected_frame_sz = BitArray3d::serial_size(expected_dims);
 
   //type FeatsData = TxnStateAlphaV3FeatsData;
-  type FeatsData = TxnStateAlphaMiniV3FeatsData;
+  //type FeatsData = TxnStateAlphaMiniV3FeatsData;
+  //type FeatsData = TxnStateAlphaPatternV3FeatsData;
+  type FeatsData = TxnStateAlphaPatternNoKoV3FeatsData;
 
   let expected_frame_sz = FeatsData::serial_size();
 
@@ -289,8 +293,8 @@ fn main() {
       }
     }
 
-    /*// FIXME(20160129): disabling rank parsing for now.
-    let b_rank = PlayerRank::Dan(9);
+    // FIXME(20160129): disabling rank parsing for now.
+    /*let b_rank = PlayerRank::Dan(9);
     let w_rank = PlayerRank::Dan(9);*/
 
     let b_ranks = parse_rank(&sgf.black_rank, i, sgf_path);

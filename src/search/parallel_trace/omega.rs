@@ -810,6 +810,9 @@ impl OmegaDriver {
           MetaLevelInput::PairStates{state1: frame1.0.clone(), state2: frame2.0.clone()},
       );
       iter += 1;
+      if iter % 25 == 0 {
+        // FIXME: save parameters.
+      }
     });
   }
 }
