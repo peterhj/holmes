@@ -66,12 +66,11 @@ impl ConvnetPolicyWorkerBuilder {
     //let prior_arch_cfg = build_12layer384_19x19x44_arch_nodir(1);
     //let prior_save_path = PathBuf::from("models/gogodb_w2015_alphav2_new_action_12layer384_19x19x44.saved");
 
-    //let prior_arch_cfg = build_13layer384multi3_19x19x32_arch_nodir(worker_tree_batch_size);
-    //let prior_save_path = PathBuf::from("models/gogodb_w2015-preproc-alphav3m_19x19x32_13layer384multi3.saved");
+    let prior_arch_cfg = build_13layer384multi3_19x19x32_arch_nodir(worker_tree_batch_size);
+    let prior_save_path = PathBuf::from("models/gogodb_w2015-preproc-alphav3m_19x19x32_13layer384multi3.saved");
 
-    //let prior_arch_cfg = build_3layer32_19x19x16_arch_nodir(worker_tree_batch_size);
-    let prior_arch_cfg = build_3layer32_19x19x16_ind_arch_nodir(worker_tree_batch_size);
-    let prior_save_path = PathBuf::from("models/tmp_meta_gogodb_w2015-preproc-alphaminiv3m_19x19x16_3layer32");
+    //let prior_arch_cfg = build_3layer32_19x19x16_ind_arch_nodir(worker_tree_batch_size);
+    //let prior_save_path = PathBuf::from("models/tmp_meta_gogodb_w2015-preproc-alphaminiv3m_19x19x16_3layer32");
 
     //let prior_arch_cfg = build_value_3layer64_19x19x32_arch_nodir(worker_tree_batch_size);
     //let prior_save_path = PathBuf::from("models/gogodb_w2015-preproc-alphav3m_19x19x32_value_3layer64.saved");

@@ -111,15 +111,15 @@ pub trait RolloutPolicy {
       rng:              &mut Self::R,
   );
 
-  fn init_traces(&mut self);
-  //fn rollout_trace(&mut self, trace: &Trace, baseline: f32) -> bool;
-  fn rollout_trace(&mut self, trace: &QuickTrace, baseline: f32) -> bool;
-  fn backup_traces(&mut self, learning_rate: f32, target_value: f32, eval_value: f32, num_traces: usize);
+  fn init_traces(&mut self) { unimplemented!(); }
+  //fn rollout_trace(&mut self, trace: &Trace, baseline: f32) -> bool { unimplemented!(); }
+  fn rollout_trace(&mut self, trace: &QuickTrace, baseline: f32) -> bool { unimplemented!(); }
+  fn backup_traces(&mut self, learning_rate: f32, target_value: f32, eval_value: f32, num_traces: usize) { unimplemented!(); }
 
-  fn save_params(&mut self, save_dir: &Path, t: usize);
+  fn save_params(&mut self, save_dir: &Path, t: usize) { unimplemented!(); }
 
-  fn rollout_green_trace(&mut self, baseline: f32, green_stone: Stone, trace: &QuickTrace) -> bool;
-  fn backup_green_traces(&mut self, step_size: f32, traces_count: usize, green_stone: Stone);
+  fn rollout_green_trace(&mut self, baseline: f32, green_stone: Stone, trace: &QuickTrace) -> bool { unimplemented!(); }
+  fn backup_green_traces(&mut self, step_size: f32, traces_count: usize, green_stone: Stone) { unimplemented!(); }
   fn load_green_params(&mut self, blob: &[u8]) { unimplemented!(); }
   fn load_red_params(&mut self, blob: &[u8]) { unimplemented!(); }
   fn save_green_params(&mut self) -> Vec<u8> { unimplemented!(); }
