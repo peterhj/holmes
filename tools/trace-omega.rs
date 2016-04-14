@@ -21,6 +21,7 @@ fn main() {
     prior_equiv:    16.0,
     rave:           false,
     rave_equiv:     0.0,
+    virtual_loss:   false,
   };
   let mut driver = OmegaDriver::new(state_cfg, search_cfg, tree_cfg, /*save_interval*/);
   let mut loader = LazyEpisodeLoader::new(PathBuf::from("gogodb_w2015_train_index"), GogodbEpisodePreproc);

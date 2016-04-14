@@ -1,5 +1,5 @@
-use board::{Board, Point};
-use txnstate::{for_each_x8};
+use board::{Board, Stone, Point};
+use txnstate::{TxnPosition, TxnChainsList, for_each_x8};
 
 use byteorder::{ReadBytesExt, LittleEndian};
 
@@ -26,7 +26,7 @@ static MASK_8_TRANS_MAPS: [[u8; 8]; 8] = [
   [7, 4, 2, 6, 1, 5, 3, 0],
 ];
 
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq, RustcDecodable, RustcEncodable)]
 pub struct Pattern3x3(pub u16);
 
 impl Pattern3x3 {
@@ -45,7 +45,7 @@ impl Pattern3x3 {
   }
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq, RustcDecodable, RustcEncodable)]
 pub struct InvariantPattern3x3(u16);
 
 impl InvariantPattern3x3 {
@@ -54,7 +54,7 @@ impl InvariantPattern3x3 {
   }
 }
 
-#[derive(Clone, Copy, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Eq, PartialEq, Hash, RustcDecodable, RustcEncodable)]
 pub struct LibPattern3x3 {
   pub mask: u32,
 }
@@ -87,6 +87,11 @@ impl LibPattern3x3 {
     LibPattern3x3{mask: mask}
   }
 
+  pub fn from_state(position: &TxnPosition, chains: &TxnChainsList, turn: Stone, point: Point) -> LibPattern3x3 {
+    // FIXME(20160413)
+    unimplemented!();
+  }
+
   pub fn to_invariant(self) -> InvariantLibPattern3x3 {
     let mut min_mask: u32 = 0xffffffff;
     for t in 0 .. 8 {
@@ -107,7 +112,7 @@ impl LibPattern3x3 {
   }
 }
 
-#[derive(Clone, Copy, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Eq, PartialEq, Hash, RustcDecodable, RustcEncodable)]
 pub struct InvariantLibPattern3x3 {
   pub index: u32,
 }

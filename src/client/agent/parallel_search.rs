@@ -86,6 +86,7 @@ impl AgentImpl {
       prior_equiv:  16.0,
       rave:         false,
       rave_equiv:   0.0,
+      virtual_loss: false,
     };
 
     // FIXME(20160316): give the save filename a unique part, e.g. timestamp.

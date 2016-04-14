@@ -198,8 +198,8 @@ impl SearchPolicyWorker for ConvnetPolicyWorker {
 }
 
 pub struct ConvnetPriorPolicy {
-  context:  Rc<DeviceContext>,
-  arch:     PipelineArchWorker<()>,
+  pub context:  Rc<DeviceContext>,
+  pub arch:     PipelineArchWorker<()>,
 }
 
 impl PriorPolicy for ConvnetPriorPolicy {

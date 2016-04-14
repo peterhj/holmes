@@ -96,6 +96,7 @@ pub struct TreePolicyConfig {
   pub prior_equiv:  f32,
   pub rave:         bool,
   pub rave_equiv:   f32,
+  pub virtual_loss: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -648,8 +649,16 @@ impl Node {
     }
   }
 
-  pub fn update_visits(&self, horizon_cfg: HorizonConfig, score: f32) {
+  pub fn update_virtual_loss(&self) {
+    // XXX(20160413): Optionally, apply virtual loss.
     self.values.total_trials.fetch_add(1, Ordering::AcqRel);
+  }
+
+  pub fn update_visits(&self, horizon_cfg: HorizonConfig, virtual_loss: bool, score: f32) {
+    // XXX(20160413): Optionally, apply virtual loss.
+    if !virtual_loss {
+      self.values.total_trials.fetch_add(1, Ordering::AcqRel);
+    }
 
     let uint_score = (2.0 * score).round() as isize as usize;
     self.values.total_score.fetch_add(uint_score, Ordering::AcqRel);
@@ -1019,7 +1028,14 @@ impl TreeOps {
       } else {
         // Try to walk through the current node using the exploration policy.
         //stats.edge_count += 1;
-        let (res, horizon) = tree_policy.execute_search(&*cursor_node.read().unwrap(), rng);
+        let (res, horizon) = {
+          let cursor_node = cursor_node.read().unwrap();
+          let (res, horizon) = tree_policy.execute_search(&*cursor_node, rng);
+          if tree_cfg.virtual_loss {
+            cursor_node.update_virtual_loss();
+          }
+          (res, horizon)
+        };
         match res {
           Some((place_point, j)) => {
             tree_traj.backup_triples.push((cursor_node.clone(), place_point, j));
@@ -1092,6 +1108,7 @@ impl TreeOps {
       use_rave:         bool,
       komi:             f32,
       horizon_cfg:      HorizonConfig,
+      virtual_loss:     bool,
       tree_traj:        &TreeTraj,
       rollout_traj:     &mut RolloutTraj,
       //mut traj_trace:   Option<&mut SearchTrajTrace>,
@@ -1173,7 +1190,7 @@ impl TreeOps {
 
     {
       let leaf_node = tree_traj.leaf_node.as_ref().unwrap().read().unwrap();
-      leaf_node.update_visits(horizon_cfg, score);
+      leaf_node.update_visits(horizon_cfg, virtual_loss, score);
     }
 
     for (i, &(ref node, update_point, update_j)) in tree_traj.backup_triples.iter().enumerate().rev() {
@@ -1206,7 +1223,7 @@ impl TreeOps {
         }
       }
 
-      node.update_visits(horizon_cfg, score);
+      node.update_visits(horizon_cfg, virtual_loss, score);
     }
   }
 }
@@ -1772,7 +1789,7 @@ impl<W> ParallelMonteCarloSearchServer<W> where W: SearchPolicyWorker {
                     None
                   };
                   rollout_traj.update_mc_live_counts(&mut mc_live_counts);
-                  TreeOps::backup(use_rave, komi, tree_cfg.horizon_cfg, tree_traj, rollout_traj, rollout_trace, &mut rng);
+                  TreeOps::backup(use_rave, komi, tree_cfg.horizon_cfg, tree_cfg.virtual_loss, tree_traj, rollout_traj, rollout_trace, &mut rng);
 
                   /*//let raw_score = rollout_traj.raw_score.unwrap();
                   let score = rollout_traj.score.unwrap();

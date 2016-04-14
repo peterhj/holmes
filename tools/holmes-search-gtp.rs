@@ -37,6 +37,7 @@ fn main() {
     prior_equiv:    16.0,
     rave:           false,
     rave_equiv:     0.0,
+    virtual_loss:   false,
   };
   let agent = ParallelMonteCarloSearchAgent::new(mc_cfg, tree_cfg, None);
   let client = Client::new(agent, host, port, None);

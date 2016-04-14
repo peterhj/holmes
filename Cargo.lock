@@ -381,6 +381,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "openmpi"
+version = "0.0.1"
+dependencies = [
+ "libc 0.2.8 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
 name = "pkg-config"
 version = "0.3.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -393,6 +400,14 @@ dependencies = [
  "libc 0.2.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "nanomsg 0.4.2",
  "rand 0.3.14 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "procgroup_mpi"
+version = "0.0.1"
+dependencies = [
+ "openmpi 0.0.1",
+ "procgroup 0.0.1",
 ]
 
 [[package]]
@@ -440,7 +455,9 @@ dependencies = [
  "lmdb 0.1.0",
  "log 0.3.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "memmap 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "openmpi 0.0.1",
  "procgroup 0.0.1",
+ "procgroup_mpi 0.0.1",
  "protobuf 1.0.4",
  "rand 0.3.14 (registry+https://github.com/rust-lang/crates.io-index)",
  "rembrandt_kernels 0.1.0",

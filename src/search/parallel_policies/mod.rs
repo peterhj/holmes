@@ -11,6 +11,7 @@ use rand::{Rng};
 use std::path::{Path};
 
 pub mod convnet;
+pub mod pattern;
 //pub mod shaped_thompson;
 pub mod thompson;
 pub mod ucb;
