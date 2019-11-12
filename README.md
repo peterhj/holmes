@@ -2,7 +2,7 @@
 
 This is the source for `holmes`, a computer Go program that participated in the
 [9th UEC Cup](http://www.computer-go.jp/uec/public_html/past/2015/eng/index.shtml)
-(March 19-20, 2016), and won the award for Most Original Program.  `holmes` made
+(March 19-20, 2016) and won the award for Most Original Program.  `holmes` made
 it to the second day of competition but
 [lost to `darkforest`](http://www.computer-go.jp/uec/public_html/past/2015/results_2ndday/holmes-vs-darkforest.sgf.html).
 
