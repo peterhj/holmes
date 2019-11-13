@@ -8,7 +8,7 @@ it to the second day of competition but
 
 `holmes` is written in Rust, using CUDA (via Rust bindings) to run convolutional
 neural network policies.  Unlike most computer Go programs that base their MCTS
-rollouts around some variant of UCB, `holmes` uses batched Thompson sampling
+rollouts around some variant of UCB1, `holmes` uses batched Thompson sampling
 along with a batch rollout policy that is essentially a small convolutional
 neural net.
 
